@@ -58,8 +58,9 @@ class MLXEngine: TranscriptionEngine {
             throw CancellationError()
         }
 
+        Memory.cacheLimit = 512 * 1024 * 1024
+
         let language = mapLanguageCode(settings.selectedLanguage)
-        // Scale maxTokens to audio duration: ~50 tokens/sec of audio, minimum 200
         let maxTokens = max(200, Int(audioDurationSec * 50))
         logger.info("Generating with language: \(language), maxTokens: \(maxTokens)")
         let startTime = Date()
