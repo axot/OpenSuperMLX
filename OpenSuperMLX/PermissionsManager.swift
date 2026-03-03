@@ -95,7 +95,11 @@ class PermissionsManager: ObservableObject {
     }
 
     func checkAccessibilityPermission() {
+        #if DEBUG
+        let granted = true
+        #else
         let granted = AXIsProcessTrusted()
+        #endif
         DispatchQueue.main.async { [weak self] in
             self?.isAccessibilityPermissionGranted = granted
         }
