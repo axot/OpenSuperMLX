@@ -30,8 +30,8 @@ install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign - ./build/libomp.dylib
 
 # Build the app
-echo "Building OpenSuperWhisper..."
-BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperWhisper -configuration Debug -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements" build 2>&1)
+echo "Building OpenSuperMLX..."
+BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperMLX/OpenSuperMLX.entitlements" build 2>&1)
 
 # sudo gem install xcpretty
 if command -v xcpretty &> /dev/null
@@ -49,9 +49,9 @@ if [[ $? -eq 0 ]] && [[ ! "$BUILD_OUTPUT" =~ "BUILD FAILED" ]]; then
     fi
     echo "Starting the app..."
     # Remove quarantine attribute if exists
-    xattr -d com.apple.quarantine ./Build/Build/Products/Debug/OpenSuperWhisper.app 2>/dev/null || true
+    xattr -d com.apple.quarantine ./Build/Build/Products/Debug/OpenSuperMLX.app 2>/dev/null || true
     # Run the app and show logs
-    ./Build/Build/Products/Debug/OpenSuperWhisper.app/Contents/MacOS/OpenSuperWhisper
+    ./Build/Build/Products/Debug/OpenSuperMLX.app/Contents/MacOS/OpenSuperMLX
 else
     echo "Build failed!"
     exit 1

@@ -1,6 +1,6 @@
-# OpenSuperWhisper
+# OpenSuperMLX
 
-OpenSuperWhisper is a macOS application that provides real-time audio transcription using the Whisper model. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
+OpenSuperMLX is a macOS application that provides real-time audio transcription using the Whisper model. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
 
 <p align="center">
 <img src="docs/image.png" width="400" /> <img src="docs/image_indicator.png" width="400" />
@@ -21,10 +21,10 @@ OpenSuperWhisper is a macOS application that provides real-time audio transcript
 
 ```shell
 brew update # Optional
-brew install opensuperwhisper
+brew install opensupermlx
 ```
 
-Or from [GitHub releases page](https://github.com/Starmel/OpenSuperWhisper/releases).
+Or from [GitHub releases page](https://github.com/axot/OpenSuperMLX/releases).
 
 ## Requirements
 
@@ -41,8 +41,8 @@ If you encounter any issues or have questions, please:
 
 To build locally, you'll need:
 
-    git clone git@github.com:Starmel/OpenSuperWhisper.git
-    cd OpenSuperWhisper
+    git clone git@github.com:axot/OpenSuperMLX.git
+    cd OpenSuperMLX
     git submodule update --init --recursive
     brew install cmake libomp rust ruby
     gem install xcpretty
@@ -57,16 +57,20 @@ Contributions are welcome! Please feel free to submit pull requests or create is
 
 ### Contribution TODO list
 
-- [ ] Streaming transcription ([#22](https://github.com/Starmel/OpenSuperWhisper/issues/22))
-- [ ] Custom dictionary ([#20](https://github.com/Starmel/OpenSuperWhisper/issues/35))
-- [ ] Intel macOS compatibility ([#16](https://github.com/Starmel/OpenSuperWhisper/issues/16))
-- [ ] Agent mode ([#14](https://github.com/Starmel/OpenSuperWhisper/issues/14))
-- [x] Background app ([#9](https://github.com/Starmel/OpenSuperWhisper/issues/9))
-- [x] Support long-press single key audio recording ([#19](https://github.com/Starmel/OpenSuperWhisper/issues/19))
+- [ ] Streaming transcription ([#22](https://github.com/axot/OpenSuperMLX/issues/22))
+- [ ] Custom dictionary ([#20](https://github.com/axot/OpenSuperMLX/issues/35))
+- [ ] Intel macOS compatibility ([#16](https://github.com/axot/OpenSuperMLX/issues/16))
+- [ ] Agent mode ([#14](https://github.com/axot/OpenSuperMLX/issues/14))
+- [x] Background app ([#9](https://github.com/axot/OpenSuperMLX/issues/9))
+- [x] Support long-press single key audio recording ([#19](https://github.com/axot/OpenSuperMLX/issues/19))
 
 ## License
 
-OpenSuperWhisper is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+OpenSuperMLX is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+OpenSuperMLX is forked from [OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) by [@Starmel](https://github.com/Starmel). Thanks to the original project for providing the foundation for this work.
 
 ## Whisper Models
 

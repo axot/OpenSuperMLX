@@ -2,10 +2,10 @@
 set -e
 
 # === Configuration Variables ===
-APP_NAME="OpenSuperWhisper"                                   
-APP_PATH="./build/Build/Products/Release/OpenSuperWhisper.app"                        
-ZIP_PATH="./build/OpenSuperWhisper.zip"                        
-BUNDLE_ID="ru.starmel.OpenSuperWhisper"                       
+APP_NAME="OpenSuperMLX"                                   
+APP_PATH="./build/Build/Products/Release/OpenSuperMLX.app"                        
+ZIP_PATH="./build/OpenSuperMLX.zip"                        
+BUNDLE_ID="org.axot.OpenSuperMLX"                       
 KEYCHAIN_PROFILE="Slava"
 CODE_SIGN_IDENTITY="${1}"
 DEVELOPMENT_TEAM="8LLDD7HWZK"
@@ -28,7 +28,7 @@ install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign "${CODE_SIGN_IDENTITY}" --timestamp ./build/libomp.dylib
 
 xcodebuild \
-  -scheme "OpenSuperWhisper" \
+  -scheme "OpenSuperMLX" \
   -configuration Release \
   -destination "platform=macOS,arch=arm64" \
   CODE_SIGN_STYLE=Manual \

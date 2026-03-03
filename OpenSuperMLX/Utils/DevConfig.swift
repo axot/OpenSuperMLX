@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 
+// OpenSuperMLX development configuration
 struct DevConfig {
     static let shared = DevConfig()
     
@@ -10,7 +11,7 @@ struct DevConfig {
         let filePath = (
             URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent() // Utils
-                .deletingLastPathComponent() // OpenSuperWhisper
+                .deletingLastPathComponent() // OpenSuperMLX
                 .deletingLastPathComponent() // project root
                 .appendingPathComponent("dev_config.json")
         ).path

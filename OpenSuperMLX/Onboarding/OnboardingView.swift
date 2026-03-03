@@ -1,6 +1,6 @@
 //
 //  OnboardingView.swift
-//  OpenSuperWhisper
+//  OpenSuperMLX
 //
 //  Created by user on 08.02.2025.
 //
@@ -327,7 +327,7 @@ struct OnboardingView: View {
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
                     
-                    Text("OpenSuperWhisper")
+                    Text("OpenSuperMLX")
                         .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(
                             .white

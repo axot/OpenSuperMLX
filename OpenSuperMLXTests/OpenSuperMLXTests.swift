@@ -1,6 +1,6 @@
 //
-//  OpenSuperWhisperTests.swift
-//  OpenSuperWhisperTests
+//  OpenSuperMLXTests.swift
+//  OpenSuperMLXTests
 //
 //  Created by user on 05.02.2025.
 //
@@ -9,9 +9,9 @@ import XCTest
 import Carbon
 import ApplicationServices
 import AVFoundation
-@testable import OpenSuperWhisper
+@testable import OpenSuperMLX
 
-final class OpenSuperWhisperTests: XCTestCase {
+final class OpenSuperMLXTests: XCTestCase {
 
     override func setUpWithError() throws {
     }

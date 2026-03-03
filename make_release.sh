@@ -39,7 +39,7 @@ else
 fi
 
 echo ""
-echo "🚀 Making release for OpenSuperWhisper v${NEW_VERSION}"
+echo "🚀 Making release for OpenSuperMLX v${NEW_VERSION}"
 echo "   Code signing identity: ${CODE_SIGN_IDENTITY}"
 if [[ -n "$GITHUB_TOKEN" ]]; then
     echo "   GitHub release: ✅ Enabled"
@@ -52,21 +52,21 @@ echo ""
 echo "📝 Updating version to ${NEW_VERSION} in Xcode project..."
 
 # Update MARKETING_VERSION in project.pbxproj
-sed -i '' "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = ${NEW_VERSION}/g" OpenSuperWhisper.xcodeproj/project.pbxproj
+sed -i '' "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = ${NEW_VERSION}/g" OpenSuperMLX.xcodeproj/project.pbxproj
 
 # Get current PROJECT_VERSION and increment by 1
-CURRENT_PROJECT_VERSION=$(grep -o 'CURRENT_PROJECT_VERSION = [0-9]*' OpenSuperWhisper.xcodeproj/project.pbxproj | head -1 | grep -o '[0-9]*')
+CURRENT_PROJECT_VERSION=$(grep -o 'CURRENT_PROJECT_VERSION = [0-9]*' OpenSuperMLX.xcodeproj/project.pbxproj | head -1 | grep -o '[0-9]*')
 NEW_PROJECT_VERSION=$((CURRENT_PROJECT_VERSION + 1))
-sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*/CURRENT_PROJECT_VERSION = ${NEW_PROJECT_VERSION}/g" OpenSuperWhisper.xcodeproj/project.pbxproj
+sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*/CURRENT_PROJECT_VERSION = ${NEW_PROJECT_VERSION}/g" OpenSuperMLX.xcodeproj/project.pbxproj
 
 echo "✅ Updated MARKETING_VERSION to ${NEW_VERSION} and CURRENT_PROJECT_VERSION to ${NEW_PROJECT_VERSION} (was ${CURRENT_PROJECT_VERSION})"
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
 rm -rf build
-rm -f OpenSuperWhisper.dmg
-rm -f OpenSuperWhisper.dmg.sha256
-rm -f OpenSuperWhisper.app.dSYM.zip
+rm -f OpenSuperMLX.dmg
+rm -f OpenSuperMLX.dmg.sha256
+rm -f OpenSuperMLX.app.dSYM.zip
 
 # Use the existing notarize_app.sh script to build, sign, and notarize
 echo "🔨 Building, signing and notarizing with notarize_app.sh..."
@@ -85,7 +85,7 @@ fi
 
 echo "✅ Build and notarization successful!"
 
-DMG_PATH="./OpenSuperWhisper.dmg"
+DMG_PATH="./OpenSuperMLX.dmg"
 
 # Verify DMG exists
 if [[ ! -f "$DMG_PATH" ]]; then
@@ -94,8 +94,8 @@ if [[ ! -f "$DMG_PATH" ]]; then
 fi
 
 # Find and prepare dSYM
-DSYM_PATH="./build/Build/Products/Release/OpenSuperWhisper.app.dSYM"
-DSYM_ZIP_PATH="./OpenSuperWhisper.app.dSYM.zip"
+DSYM_PATH="./build/Build/Products/Release/OpenSuperMLX.app.dSYM"
+DSYM_ZIP_PATH="./OpenSuperMLX.app.dSYM.zip"
 
 if [[ -d "$DSYM_PATH" ]]; then
     echo "📦 Creating dSYM zip..."
@@ -117,7 +117,7 @@ echo "SHA256: $SHA256"
 
 # # Commit version changes
 echo "📝 Committing version changes..."
-git add OpenSuperWhisper.xcodeproj/project.pbxproj
+git add OpenSuperMLX.xcodeproj/project.pbxproj
 git commit -m "Bump version to ${NEW_VERSION}" || echo "No changes to commit"
 
 # Create git tag
@@ -142,12 +142,12 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
         -H "Accept: application/vnd.github+json" \
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
-        https://api.github.com/repos/Starmel/OpenSuperWhisper/releases \
+        https://api.github.com/repos/axot/OpenSuperMLX/releases \
         -d '{
             "tag_name": "'${NEW_VERSION}'",
             "target_commitish": "master",
             "name": "Release '${NEW_VERSION}'",
-            "body": "## OpenSuperWhisper '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using Whisper.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensuperwhisper\n```\n\n### Manual Installation\n1. Download the `OpenSuperWhisper.dmg` file below\n2. Open the DMG and drag OpenSuperWhisper to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
+            "body": "## OpenSuperMLX '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using Whisper.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensupermlx\n```\n\n### Manual Installation\n1. Download the `OpenSuperMLX.dmg` file below\n2. Open the DMG and drag OpenSuperMLX to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
             "draft": false,
             "prerelease": false,
             "generate_release_notes": false
@@ -171,7 +171,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         -H "Content-Type: application/octet-stream" \
-        "https://uploads.github.com/repos/Starmel/OpenSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.dmg" \
+        "https://uploads.github.com/repos/axot/OpenSuperMLX/releases/${RELEASE_ID}/assets?name=OpenSuperMLX.dmg" \
         --data-binary @"${DMG_PATH}")
     
     # Check if upload was successful
@@ -198,7 +198,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -H "Content-Type: application/zip" \
-            "https://uploads.github.com/repos/Starmel/OpenSuperWhisper/releases/${RELEASE_ID}/assets?name=OpenSuperWhisper.app.dSYM.zip" \
+            "https://uploads.github.com/repos/axot/OpenSuperMLX/releases/${RELEASE_ID}/assets?name=OpenSuperMLX.app.dSYM.zip" \
             --data-binary @"${DSYM_ZIP_PATH}")
         
         # Check dSYM upload
@@ -217,45 +217,45 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
     
     echo "✅ DMG uploaded successfully!"
     echo "🎉 GitHub release is complete!"
-    echo "🔗 Release URL: https://github.com/Starmel/OpenSuperWhisper/releases/tag/${NEW_VERSION}"
+    echo "🔗 Release URL: https://github.com/axot/OpenSuperMLX/releases/tag/${NEW_VERSION}"
 else
     echo "⚠️ Skipping GitHub release creation (no token provided)"
     echo "📋 Manual steps needed:"
     echo "1. Create GitHub release at:"
-    echo "   https://github.com/Starmel/OpenSuperWhisper/releases/new?tag=${NEW_VERSION}"
-    echo "2. Upload the DMG file: OpenSuperWhisper.dmg"
+    echo "   https://github.com/axot/OpenSuperMLX/releases/new?tag=${NEW_VERSION}"
+    echo "2. Upload the DMG file: OpenSuperMLX.dmg"
 fi
 
 echo ""
 echo "🎉 Release ${NEW_VERSION} is ready!"
 echo ""
 echo "📁 Files created:"
-echo "   - OpenSuperWhisper.dmg"
-echo "   - OpenSuperWhisper.dmg.sha256"
+echo "   - OpenSuperMLX.dmg"
+echo "   - OpenSuperMLX.dmg.sha256"
 if [[ -f "$DSYM_ZIP_PATH" ]]; then
-    echo "   - OpenSuperWhisper.app.dSYM.zip"
+    echo "   - OpenSuperMLX.app.dSYM.zip"
 fi
 echo ""
 echo "🍺 Homebrew cask update:"
 echo "-----"
 cat << EOF
-cask "opensuperwhisper" do
+cask "opensupermlx" do
   version "${NEW_VERSION}"
   sha256 "${SHA256}"
 
-  url "https://github.com/starmel/OpenSuperWhisper/releases/download/#{version}/OpenSuperWhisper.dmg"
-  name "OpenSuperWhisper"
+  url "https://github.com/axot/OpenSuperMLX/releases/download/#{version}/OpenSuperMLX.dmg"
+  name "OpenSuperMLX"
   desc "Whisper dictation/transcription app"
-  homepage "https://github.com/starmel/OpenSuperWhisper"
+  homepage "https://github.com/axot/OpenSuperMLX"
 
   depends_on macos: ">= :sonoma"
   depends_on arch: :arm64
 
-  app "OpenSuperWhisper.app"
+  app "OpenSuperMLX.app"
 
   zap trash: [
-    "~/Library/Application Scripts/ru.starmel.OpenSuperWhisper",
-    "~/Library/Application Support/ru.starmel.OpenSuperWhisper",
+    "~/Library/Application Scripts/org.axot.OpenSuperMLX",
+    "~/Library/Application Support/org.axot.OpenSuperMLX",
   ]
 end
 EOF

@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-               BuildableName = "OpenSuperWhisper.app"
-               BlueprintName = "OpenSuperWhisper"
-               ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+               BuildableName = "OpenSuperMLX.app"
+               BlueprintName = "OpenSuperMLX"
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -36,9 +36,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CE57B0382D52C7BC00929AF3"
-               BuildableName = "OpenSuperWhisperTests.xctest"
-               BlueprintName = "OpenSuperWhisperTests"
-               ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+               BuildableName = "OpenSuperMLXTests.xctest"
+               BlueprintName = "OpenSuperMLXTests"
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -47,9 +47,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CE57B0422D52C7BC00929AF3"
-               BuildableName = "OpenSuperWhisperUITests.xctest"
-               BlueprintName = "OpenSuperWhisperUITests"
-               ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+               BuildableName = "OpenSuperMLXUITests.xctest"
+               BlueprintName = "OpenSuperMLXUITests"
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -60,7 +60,7 @@
                BlueprintIdentifier = "CE37B5F22D54F09A009D6564"
                BuildableName = "WhisperCppBindingTests.xctest"
                BlueprintName = "WhisperCppBindingTests"
-               ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -80,9 +80,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-            BuildableName = "OpenSuperWhisper.app"
-            BlueprintName = "OpenSuperWhisper"
-            ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+            BuildableName = "OpenSuperMLX.app"
+            BlueprintName = "OpenSuperMLX"
+            ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -97,9 +97,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-            BuildableName = "OpenSuperWhisper.app"
-            BlueprintName = "OpenSuperWhisper"
-            ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
+            BuildableName = "OpenSuperMLX.app"
+            BlueprintName = "OpenSuperMLX"
+            ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

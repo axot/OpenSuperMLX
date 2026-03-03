@@ -1,6 +1,6 @@
 //
-//  OpenSuperWhisperApp.swift
-//  OpenSuperWhisper
+//  OpenSuperMLXApp.swift
+//  OpenSuperMLX
 //
 //  Created by user on 05.02.2025.
 //
@@ -12,7 +12,7 @@ import Combine
 import UniformTypeIdentifiers
 
 @main
-struct OpenSuperWhisperApp: App {
+struct OpenSuperMLXApp: App {
     @StateObject private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
@@ -45,7 +45,7 @@ struct OpenSuperWhisperApp: App {
     }
 }
 
-extension OpenSuperWhisperApp {
+extension OpenSuperMLXApp {
     static func startTranscriptionQueue() {
         Task { @MainActor in
             TranscriptionQueue.shared.startProcessingQueue()
@@ -90,7 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             window.maxSize = NSSize(width: 450, height: 900)
         }
         
-        OpenSuperWhisperApp.startTranscriptionQueue()
+        OpenSuperMLXApp.startTranscriptionQueue()
         observeMicrophoneChanges()
     }
 
@@ -153,7 +153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 iconImage.isTemplate = true
                 button.image = iconImage
             } else {
-                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenSuperWhisper")
+                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenSuperMLX")
             }
             
             button.action = #selector(statusBarButtonClicked(_:))
@@ -166,7 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateStatusBarMenu() {
         let menu = NSMenu()
         
-        menu.addItem(NSMenuItem(title: "OpenSuperWhisper", action: #selector(openApp), keyEquivalent: "o"))
+         menu.addItem(NSMenuItem(title: "OpenSuperMLX", action: #selector(openApp), keyEquivalent: "o"))
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()
@@ -313,7 +313,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             window.orderFrontRegardless()
             NSApplication.shared.activate(ignoringOtherApps: true)
         } else {
-            let url = URL(string: "openSuperWhisper://openMainWindow")!
+            let url = URL(string: "openSuperMLX://openMainWindow")!
             NSWorkspace.shared.open(url)
         }
     }

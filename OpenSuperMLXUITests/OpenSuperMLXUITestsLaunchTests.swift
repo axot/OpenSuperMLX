@@ -1,13 +1,13 @@
 //
-//  OpenSuperWhisperUITestsLaunchTests.swift
-//  OpenSuperWhisperUITests
+//  OpenSuperMLXUITestsLaunchTests.swift
+//  OpenSuperMLXUITests
 //
 //  Created by user on 05.02.2025.
 //
 
 import XCTest
 
-final class OpenSuperWhisperUITestsLaunchTests: XCTestCase {
+final class OpenSuperMLXUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
