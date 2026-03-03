@@ -7,17 +7,34 @@
 
 import Foundation
 import SwiftUI
-import FluidAudio
+import MLXAudioSTT
 
 enum OnboardingShortcutOption: String, CaseIterable {
     case keyCombination
     case rightOption
 }
 
+struct OnboardingMLXModel: Identifiable {
+    let id: String
+    let name: String
+    let repoID: String
+    let size: String
+    let description: String
+    var isDownloaded: Bool = false
+
+    init(from model: MLXModel) {
+        self.id = model.id
+        self.name = model.name
+        self.repoID = model.repoID
+        self.size = model.size
+        self.description = model.description
+    }
+}
+
 class OnboardingViewModel: ObservableObject {
     @Published var selectedLanguage: String {
         didSet {
-            AppPreferences.shared.whisperLanguage = selectedLanguage
+            AppPreferences.shared.mlxLanguage = selectedLanguage
         }
     }
     
@@ -39,18 +56,16 @@ class OnboardingViewModel: ObservableObject {
         }
     }
 
-    @Published var unifiedModels: [OnboardingUnifiedModel] = []
-    @Published var selectedModelId: UUID?
+    @Published var models: [OnboardingMLXModel] = []
+    @Published var selectedModelId: String?
     @Published var isDownloading: Bool = false
-    @Published var downloadProgress: Double = 0.0
     @Published var downloadingModelName: String?
 
-    private let modelManager = WhisperModelManager.shared
     private var downloadTask: Task<Void, Error>?
 
     init() {
         let systemLanguage = LanguageUtil.getSystemLanguage()
-        AppPreferences.shared.whisperLanguage = systemLanguage
+        AppPreferences.shared.mlxLanguage = systemLanguage
         self.selectedLanguage = systemLanguage
         self.useAsianAutocorrect = AppPreferences.shared.useAsianAutocorrect
         
@@ -63,249 +78,57 @@ class OnboardingViewModel: ObservableObject {
             self.selectedShortcut = currentHotkey == .rightOption ? .rightOption : .keyCombination
         }
         
-        initializeUnifiedModels()
+        initializeModels()
     }
 
-    func initializeUnifiedModels() {
-        unifiedModels = OnboardingUnifiedModels.availableModels.map { model in
-            var updatedModel = model
-            switch model.type {
-            case .whisper(let url, _):
-                let filename = url.lastPathComponent
-                updatedModel.isDownloaded = modelManager.isModelDownloaded(name: filename)
-            case .parakeet(let version):
-                updatedModel.isDownloaded = isFluidAudioModelDownloaded(version: version)
-            }
-            return updatedModel
-        }
-        
-        if selectedModelId == nil, let firstDownloaded = unifiedModels.first(where: { $0.isDownloaded }) {
-            selectedModelId = firstDownloaded.id
-        }
-    }
-    
-    func isFluidAudioModelDownloaded(version: String) -> Bool {
-        let asrVersion: AsrModelVersion = version == "v2" ? .v2 : .v3
-        let cacheDirectory = AsrModels.defaultCacheDirectory(for: asrVersion)
-        return AsrModels.modelsExist(at: cacheDirectory, version: asrVersion)
+    func initializeModels() {
+        models = MLXModelManager.builtInModels.map { OnboardingMLXModel(from: $0) }
     }
     
     var canContinue: Bool {
         guard let selectedId = selectedModelId else { return false }
-        return unifiedModels.contains { $0.id == selectedId && $0.isDownloaded }
+        return models.contains { $0.id == selectedId && $0.isDownloaded }
     }
     
-    func selectModel(_ model: OnboardingUnifiedModel) {
+    func selectModel(_ model: OnboardingMLXModel) {
         selectedModelId = model.id
-        
-        switch model.type {
-        case .whisper(let url, _):
-            AppPreferences.shared.selectedEngine = "whisper"
-            let modelPath = modelManager.modelsDirectory.appendingPathComponent(url.lastPathComponent).path
-            AppPreferences.shared.selectedWhisperModelPath = modelPath
-        case .parakeet(let version):
-            AppPreferences.shared.selectedEngine = "fluidaudio"
-            AppPreferences.shared.fluidAudioModelVersion = version
-        }
+        AppPreferences.shared.selectedMLXModel = model.repoID
     }
 
     @MainActor
-    func downloadModel(_ model: OnboardingUnifiedModel) async throws {
+    func downloadModel(_ model: OnboardingMLXModel) async throws {
         guard !isDownloading else { return }
         
         isDownloading = true
         downloadingModelName = model.name
-        downloadProgress = 0.0
         
-        if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-            unifiedModels[index].downloadProgress = 0.0
+        defer {
+            isDownloading = false
+            downloadingModelName = nil
         }
-        
-        switch model.type {
-        case .whisper(let url, _):
-            try await downloadWhisperModel(model: model, url: url)
-        case .parakeet(let version):
-            try await downloadParakeetModel(model: model, version: version)
-        }
-    }
-    
-    @MainActor
-    private func downloadWhisperModel(model: OnboardingUnifiedModel, url: URL) async throws {
-        downloadTask = Task {
-            do {
-                let filename = url.lastPathComponent
-                
-                try await modelManager.downloadModel(url: url, name: filename) { [weak self] progress in
-                    Task { @MainActor [weak self] in
-                        guard let self = self, !Task.isCancelled else { return }
-                        guard let task = self.downloadTask, !task.isCancelled else { return }
-                        
-                        self.downloadProgress = progress
-                        if let index = self.unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            self.unifiedModels[index].downloadProgress = progress
-                            if progress >= 1.0 {
-                                self.unifiedModels[index].isDownloaded = true
-                            }
-                        }
-                    }
-                }
-                
-                guard !Task.isCancelled else {
-                    await MainActor.run {
-                        self.isDownloading = false
-                        self.downloadingModelName = nil
-                        self.downloadProgress = 0.0
-                        if let index = self.unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            self.unifiedModels[index].downloadProgress = 0.0
-                        }
-                    }
-                    throw CancellationError()
-                }
-                
-                await MainActor.run {
-                    if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                        unifiedModels[index].isDownloaded = true
-                        unifiedModels[index].downloadProgress = 0.0
-                    }
-                    selectModel(model)
-                    isDownloading = false
-                    downloadingModelName = nil
-                    downloadProgress = 0.0
-                }
-            } catch is CancellationError {
-                await MainActor.run {
-                    isDownloading = false
-                    downloadingModelName = nil
-                    downloadProgress = 0.0
-                    if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                        unifiedModels[index].downloadProgress = 0.0
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isDownloading = false
-                    downloadingModelName = nil
-                    downloadProgress = 0.0
-                    if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                        unifiedModels[index].downloadProgress = 0.0
-                    }
-                }
-                throw error
-            }
-        }
-        
-        try await downloadTask?.value
-    }
-    
-    @MainActor
-    private func downloadParakeetModel(model: OnboardingUnifiedModel, version: String) async throws {
-        var wasCancelled = false
         
         downloadTask = Task {
-            do {
-                let asrVersion: AsrModelVersion = version == "v2" ? .v2 : .v3
-                
-                guard !Task.isCancelled else {
-                    await MainActor.run {
-                        self.isDownloading = false
-                        self.downloadingModelName = nil
-                        self.downloadProgress = 0.0
-                        if let index = self.unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            self.unifiedModels[index].downloadProgress = 0.0
-                        }
-                    }
-                    throw CancellationError()
-                }
-                
-                let models = try await AsrModels.downloadAndLoad(version: asrVersion)
-                
-                guard !Task.isCancelled else {
-                    await MainActor.run {
-                        self.isDownloading = false
-                        self.downloadingModelName = nil
-                        self.downloadProgress = 0.0
-                        if let index = self.unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            self.unifiedModels[index].downloadProgress = 0.0
-                        }
-                    }
-                    throw CancellationError()
-                }
-                
-                let manager = AsrManager(config: .default)
-                try await manager.initialize(models: models)
-                
-                await MainActor.run {
-                    if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                        unifiedModels[index].isDownloaded = true
-                        unifiedModels[index].downloadProgress = 1.0
-                    }
-                    selectModel(model)
-                    isDownloading = false
-                    downloadingModelName = nil
-                    downloadProgress = 1.0
-                }
-            } catch is CancellationError {
-                wasCancelled = true
-                await MainActor.run {
-                    isDownloading = false
-                    downloadingModelName = nil
-                    downloadProgress = 0.0
-                    if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                        unifiedModels[index].downloadProgress = 0.0
-                    }
-                }
-            } catch {
-                if Task.isCancelled {
-                    wasCancelled = true
-                    await MainActor.run {
-                        isDownloading = false
-                        downloadingModelName = nil
-                        downloadProgress = 0.0
-                        if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            unifiedModels[index].downloadProgress = 0.0
-                        }
-                    }
-                } else {
-                    await MainActor.run {
-                        isDownloading = false
-                        downloadingModelName = nil
-                        downloadProgress = 0.0
-                        if let index = unifiedModels.firstIndex(where: { $0.id == model.id }) {
-                            unifiedModels[index].downloadProgress = 0.0
-                        }
-                    }
-                    throw error
-                }
-            }
+            let _ = try await Qwen3ASRModel.fromPretrained(model.repoID)
         }
         
         do {
             try await downloadTask?.value
         } catch is CancellationError {
-            wasCancelled = true
-        } catch {
-            if !wasCancelled {
-                throw error
-            }
+            return
         }
+        
+        guard !Task.isCancelled else { return }
+        
+        if let index = self.models.firstIndex(where: { $0.id == model.id }) {
+            self.models[index].isDownloaded = true
+        }
+        self.selectModel(model)
     }
     
     func cancelDownload() {
         downloadTask?.cancel()
-        if let modelName = downloadingModelName {
-            if let model = unifiedModels.first(where: { $0.name == modelName }) {
-                if case .whisper(let url, _) = model.type {
-                    let filename = url.lastPathComponent
-                    modelManager.cancelDownload(name: filename)
-                }
-            }
-            if let index = unifiedModels.firstIndex(where: { $0.name == modelName }) {
-                unifiedModels[index].downloadProgress = 0.0
-            }
-        }
         isDownloading = false
         downloadingModelName = nil
-        downloadProgress = 0.0
     }
 }
 
@@ -414,17 +237,17 @@ struct OnboardingView: View {
                     
                     // Model Selection
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Model")
+                        Text("MLX Model")
                             .font(.headline)
                             .fontWeight(.semibold)
                         
-                        Text("Download a model to get started")
+                        Text("Download an MLX model to get started")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         
                         VStack(spacing: 8) {
-                            ForEach($viewModel.unifiedModels) { $model in
-                                OnboardingUnifiedModelItemView(model: $model, viewModel: viewModel)
+                            ForEach($viewModel.models) { $model in
+                                OnboardingMLXModelItemView(model: $model, viewModel: viewModel)
                             }
                         }
                     }
@@ -483,19 +306,14 @@ struct OnboardingView: View {
     }
 }
 
-struct OnboardingUnifiedModelItemView: View {
-    @Binding var model: OnboardingUnifiedModel
+struct OnboardingMLXModelItemView: View {
+    @Binding var model: OnboardingMLXModel
     @ObservedObject var viewModel: OnboardingViewModel
     @State private var showError = false
     @State private var errorMessage = ""
     
     var isSelected: Bool {
         viewModel.selectedModelId == model.id
-    }
-    
-    var isParakeet: Bool {
-        if case .parakeet = model.type { return true }
-        return false
     }
     
     var body: some View {
@@ -505,6 +323,13 @@ struct OnboardingUnifiedModelItemView: View {
                     Text(model.name)
                         .font(.subheadline)
                         .fontWeight(.medium)
+                    
+                    Text(model.size)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color(.controlBackgroundColor)))
                     
                     if model.isDownloaded {
                         Image(systemName: "arrow.down.circle.fill")
@@ -517,15 +342,10 @@ struct OnboardingUnifiedModelItemView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                if viewModel.isDownloading && viewModel.downloadingModelName == model.name && isParakeet {
+                if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
                         .scaleEffect(0.7)
-                        .padding(.top, 4)
-                } else if model.downloadProgress > 0 && model.downloadProgress < 1 {
-                    ProgressView(value: model.downloadProgress)
-                        .progressViewStyle(LinearProgressViewStyle())
-                        .frame(height: 6)
                         .padding(.top, 4)
                 }
             }
@@ -780,4 +600,3 @@ struct OnboardingShortcutCard: View {
 #Preview {
     OnboardingView()
 }
-

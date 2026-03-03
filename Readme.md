@@ -1,6 +1,6 @@
 # OpenSuperMLX
 
-OpenSuperMLX is a macOS application that provides real-time audio transcription using the Whisper model. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
+OpenSuperMLX is a macOS application that provides real-time audio transcription powered by [MLX](https://github.com/ml-explore/mlx-swift) on Apple Silicon. It offers a seamless way to record and transcribe audio with customizable settings and keyboard shortcuts.
 
 <p align="center">
 <img src="docs/image.png" width="400" /> <img src="docs/image_indicator.png" width="400" />
@@ -9,7 +9,7 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 ## Features
 
 - 🎙️ Real-time audio recording and transcription
-- 🧠 Two transcription engines: [Whisper](https://github.com/ggerganov/whisper.cpp) and [Parakeet](https://github.com/AntinomyCollective/FluidAudio) — download models directly from the app
+- 🧠 MLX-based transcription engine — download models directly from the app
 - ⌨️ Global keyboard shortcuts — key combination or single modifier key (e.g. Left ⌘, Right ⌥, Fn)
 - ✊ Hold-to-record mode — hold the shortcut to record, release to stop
 - 📁 Drag & drop audio files for transcription with queue processing
@@ -19,12 +19,7 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 
 ## Installation
 
-```shell
-brew update # Optional
-brew install opensupermlx
-```
-
-Or from [GitHub releases page](https://github.com/axot/OpenSuperMLX/releases).
+Download from [GitHub releases page](https://github.com/axot/OpenSuperMLX/releases).
 
 ## Requirements
 
@@ -58,7 +53,7 @@ Contributions are welcome! Please feel free to submit pull requests or create is
 ### Contribution TODO list
 
 - [ ] Streaming transcription ([#22](https://github.com/axot/OpenSuperMLX/issues/22))
-- [ ] Custom dictionary ([#20](https://github.com/axot/OpenSuperMLX/issues/35))
+- [ ] Custom dictionary ([#35](https://github.com/axot/OpenSuperMLX/issues/35))
 - [ ] Intel macOS compatibility ([#16](https://github.com/axot/OpenSuperMLX/issues/16))
 - [ ] Agent mode ([#14](https://github.com/axot/OpenSuperMLX/issues/14))
 - [x] Background app ([#9](https://github.com/axot/OpenSuperMLX/issues/9))
@@ -72,6 +67,12 @@ OpenSuperMLX is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 OpenSuperMLX is forked from [OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) by [@Starmel](https://github.com/Starmel). Thanks to the original project for providing the foundation for this work.
 
-## Whisper Models
+## Models
 
-You can download Whisper model files (`.bin`) from the [Whisper.cpp Hugging Face repository](https://huggingface.co/ggerganov/whisper.cpp/tree/main). Place the downloaded `.bin` files in the app's models directory. On first launch, the app will attempt to copy a default model automatically, but you can add more models manually.
+MLX models are downloaded automatically from Hugging Face when selected in the app. Built-in models:
+
+- **Qwen3-ASR-0.6B-4bit** — Smallest model, fastest inference
+- **Qwen3-ASR-1.7B-8bit** — Recommended balance of accuracy and speed
+- **Qwen3-ASR-1.7B-bf16** — Highest quality, best accuracy
+
+Custom models can be added via HuggingFace repository ID.

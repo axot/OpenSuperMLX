@@ -28,39 +28,26 @@ final class AppPreferences {
     }
     
     private func migrateOldPreferences() {
-        if let oldPath = UserDefaults.standard.string(forKey: "selectedModelPath"),
-           UserDefaults.standard.string(forKey: "selectedWhisperModelPath") == nil {
-            UserDefaults.standard.set(oldPath, forKey: "selectedWhisperModelPath")
+        if let oldLanguage = UserDefaults.standard.string(forKey: "whisperLanguage"),
+           UserDefaults.standard.string(forKey: "mlxLanguage") == nil {
+            UserDefaults.standard.set(oldLanguage, forKey: "mlxLanguage")
         }
+        
+        UserDefaults.standard.removeObject(forKey: "selectedEngine")
+        UserDefaults.standard.removeObject(forKey: "selectedWhisperModelPath")
+        UserDefaults.standard.removeObject(forKey: "fluidAudioModelVersion")
+        UserDefaults.standard.removeObject(forKey: "whisperLanguage")
+        UserDefaults.standard.removeObject(forKey: "noSpeechThreshold")
+        UserDefaults.standard.removeObject(forKey: "initialPrompt")
+        UserDefaults.standard.removeObject(forKey: "useBeamSearch")
+        UserDefaults.standard.removeObject(forKey: "beamSize")
     }
     
-    // Engine settings
-    @UserDefault(key: "selectedEngine", defaultValue: "whisper")
-    var selectedEngine: String
+    @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
+    var selectedMLXModel: String
     
-    // Model settings
-    var selectedModelPath: String? {
-        get {
-            if selectedEngine == "whisper" {
-                return selectedWhisperModelPath
-            }
-            return nil
-        }
-        set {
-            if selectedEngine == "whisper" {
-                selectedWhisperModelPath = newValue
-            }
-        }
-    }
-    
-    @OptionalUserDefault(key: "selectedWhisperModelPath")
-    var selectedWhisperModelPath: String?
-    
-    @UserDefault(key: "fluidAudioModelVersion", defaultValue: "v3")
-    var fluidAudioModelVersion: String
-    
-    @UserDefault(key: "whisperLanguage", defaultValue: "en")
-    var whisperLanguage: String
+    @UserDefault(key: "mlxLanguage", defaultValue: "en")
+    var mlxLanguage: String
     
     // Transcription settings
     @UserDefault(key: "translateToEnglish", defaultValue: false)
@@ -74,18 +61,6 @@ final class AppPreferences {
     
     @UserDefault(key: "temperature", defaultValue: 0.0)
     var temperature: Double
-    
-    @UserDefault(key: "noSpeechThreshold", defaultValue: 0.6)
-    var noSpeechThreshold: Double
-    
-    @UserDefault(key: "initialPrompt", defaultValue: "")
-    var initialPrompt: String
-    
-    @UserDefault(key: "useBeamSearch", defaultValue: false)
-    var useBeamSearch: Bool
-    
-    @UserDefault(key: "beamSize", defaultValue: 5)
-    var beamSize: Int
     
     @UserDefault(key: "debugMode", defaultValue: false)
     var debugMode: Bool

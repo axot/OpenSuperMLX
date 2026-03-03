@@ -147,7 +147,7 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
             "tag_name": "'${NEW_VERSION}'",
             "target_commitish": "master",
             "name": "Release '${NEW_VERSION}'",
-            "body": "## OpenSuperMLX '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using Whisper.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensupermlx\n```\n\n### Manual Installation\n1. Download the `OpenSuperMLX.dmg` file below\n2. Open the DMG and drag OpenSuperMLX to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
+            "body": "## OpenSuperMLX '${NEW_VERSION}'\n\nReal-time audio transcription for macOS using MLX.\n\n## Installation\n\n### Homebrew (Recommended)\n```bash\nbrew update\nbrew install opensupermlx\n```\n\n### Manual Installation\n1. Download the `OpenSuperMLX.dmg` file below\n2. Open the DMG and drag OpenSuperMLX to Applications\n3. Launch the app and grant necessary permissions\n\n## Requirements\n- macOS 14.0 (Sonoma) or later\n- Apple Silicon (ARM64) Mac",
             "draft": false,
             "prerelease": false,
             "generate_release_notes": false
@@ -245,7 +245,7 @@ cask "opensupermlx" do
 
   url "https://github.com/axot/OpenSuperMLX/releases/download/#{version}/OpenSuperMLX.dmg"
   name "OpenSuperMLX"
-  desc "Whisper dictation/transcription app"
+  desc "MLX-based dictation/transcription app"
   homepage "https://github.com/axot/OpenSuperMLX"
 
   depends_on macos: ">= :sonoma"

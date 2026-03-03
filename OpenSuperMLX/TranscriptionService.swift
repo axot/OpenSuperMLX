@@ -1,5 +1,8 @@
 import AVFoundation
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionService")
 
 @MainActor
 class TranscriptionService: ObservableObject {
@@ -9,13 +12,12 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var transcribedText = ""
     @Published private(set) var currentSegment = ""
     @Published private(set) var isLoading = false
+    @Published private(set) var loadError: Error?
     @Published private(set) var progress: Float = 0.0
-    @Published private(set) var isConverting = false
-    @Published private(set) var conversionProgress: Float = 0.0
     
     private var currentEngine: TranscriptionEngine?
     private var totalDuration: Float = 0.0
-    private var transcriptionTask: Task<String, Error>? = nil
+    private var transcriptionTask: Task<String, Error>?
     private var isCancelled = false
     
     init() {
@@ -31,73 +33,65 @@ class TranscriptionService: ObservableObject {
         isTranscribing = false
         currentSegment = ""
         progress = 0.0
-        isCancelled = false
     }
     
     private func loadEngine() {
-        let selectedEngine = AppPreferences.shared.selectedEngine
-        print("Loading engine: \(selectedEngine)")
+        logger.info("Loading MLX engine")
         
         isLoading = true
+        loadError = nil
         
         Task.detached(priority: .userInitiated) {
-            let engine: TranscriptionEngine?
-            
-            if selectedEngine == "fluidaudio" {
-                engine = await FluidAudioEngine()
-            } else {
-                engine = await WhisperEngine()
-            }
+            let engine = await MLXEngine()
             
             do {
-                try await engine?.initialize()
-                
+                try await engine.initialize()
                 await MainActor.run {
                     self.currentEngine = engine
-                    self.isLoading = false
-                    print("Engine loaded: \(selectedEngine)")
+                    logger.info("MLX engine loaded successfully")
                 }
             } catch {
                 await MainActor.run {
-                    self.isLoading = false
-                    print("Failed to load engine: \(error)")
+                    self.loadError = error
+                    logger.error("Failed to load MLX engine: \(error)")
                 }
+            }
+            
+            await MainActor.run {
+                self.isLoading = false
             }
         }
     }
     
     func reloadEngine() {
+        guard !isTranscribing else {
+            logger.warning("Cannot reload engine while transcribing")
+            return
+        }
         loadEngine()
     }
     
     func reloadModel(with path: String) {
-        if AppPreferences.shared.selectedEngine == "whisper" {
-            AppPreferences.shared.selectedWhisperModelPath = path
-            reloadEngine()
-        }
+        reloadEngine()
     }
     
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
-        await MainActor.run {
-            self.progress = 0.0
-            self.conversionProgress = 0.0
-            self.isConverting = true
-            self.isTranscribing = true
-            self.transcribedText = ""
-            self.currentSegment = ""
-            self.isCancelled = false
-        }
+        logger.info("Starting transcription for: \(url.lastPathComponent)")
+        
+        self.progress = 0.0
+        self.isTranscribing = true
+        self.transcribedText = ""
+        self.currentSegment = ""
+        self.isCancelled = false
         
         defer {
-            Task { @MainActor in
-                self.isTranscribing = false
-                self.isConverting = false
-                self.currentSegment = ""
-                if !self.isCancelled {
-                    self.progress = 1.0
-                }
-                self.transcriptionTask = nil
+            self.isTranscribing = false
+            self.currentSegment = ""
+            if !self.isCancelled {
+                self.progress = 1.0
             }
+            self.transcriptionTask = nil
+            logger.info("Transcription state cleaned up")
         }
         
         let durationInSeconds: Float = await (try? Task.detached(priority: .userInitiated) {
@@ -106,30 +100,23 @@ class TranscriptionService: ObservableObject {
             return Float(CMTimeGetSeconds(duration))
         }.value) ?? 0.0
         
-        await MainActor.run {
-            self.totalDuration = durationInSeconds
-        }
+        self.totalDuration = durationInSeconds
+        logger.info("Audio duration: \(durationInSeconds)s")
         
         guard let engine = currentEngine else {
             throw TranscriptionError.contextInitializationFailed
         }
         
-        // Setup progress callback for engines
-        if let whisperEngine = engine as? WhisperEngine {
-            whisperEngine.onProgressUpdate = { [weak self] newProgress in
-                Task { @MainActor in
-                    guard let self = self, !self.isCancelled else { return }
-                    self.progress = newProgress
-                }
-            }
-        } else if let fluidEngine = engine as? FluidAudioEngine {
-            fluidEngine.onProgressUpdate = { [weak self] newProgress in
+        if let mlxEngine = engine as? MLXEngine {
+            mlxEngine.onProgressUpdate = { [weak self] (newProgress: Float) in
                 Task { @MainActor in
                     guard let self = self, !self.isCancelled else { return }
                     self.progress = newProgress
                 }
             }
         }
+        
+        logger.info("Starting MLX generate...")
         
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             try Task.checkCancellation()
@@ -147,35 +134,23 @@ class TranscriptionService: ObservableObject {
             
             try Task.checkCancellation()
             
-            let finalCancelled = await MainActor.run {
-                guard let self = self else { return true }
-                return self.isCancelled
-            }
-            
             await MainActor.run {
                 guard let self = self, !self.isCancelled else { return }
                 self.transcribedText = result
                 self.progress = 1.0
-            }
-            
-            guard !finalCancelled else {
-                throw CancellationError()
+                logger.info("Transcription completed: \(result.prefix(50))...")
             }
             
             return result
         }
         
-        await MainActor.run {
-            self.transcriptionTask = task
-        }
+        self.transcriptionTask = task
         
         do {
             return try await task.value
         } catch is CancellationError {
-            await MainActor.run {
-                self.isCancelled = true
-            }
-            throw TranscriptionError.processingFailed
+            self.isCancelled = true
+            throw TranscriptionError.cancelled
         }
     }
 }
@@ -184,4 +159,5 @@ enum TranscriptionError: Error {
     case contextInitializationFailed
     case audioConversionFailed
     case processingFailed
+    case cancelled
 }

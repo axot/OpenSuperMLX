@@ -41,7 +41,7 @@ struct OpenSuperMLXApp: App {
     init() {
         _ = ShortcutManager.shared
         _ = MicrophoneService.shared
-        WhisperModelManager.shared.ensureDefaultModelPresent()
+        // MLX models are downloaded on-demand via MLXEngine
     }
 }
 
@@ -177,7 +177,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let languageItem = NSMenuItem(title: languageName, action: #selector(selectLanguage(_:)), keyEquivalent: "")
             languageItem.target = self
             languageItem.representedObject = languageCode
-            languageItem.state = (AppPreferences.shared.whisperLanguage == languageCode) ? .on : .off
+            languageItem.state = (AppPreferences.shared.mlxLanguage == languageCode) ? .on : .off
             languageSubmenu?.addItem(languageItem)
         }
         
@@ -276,7 +276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let languageCode = sender.representedObject as? String else { return }
         
         // Update preferences
-        AppPreferences.shared.whisperLanguage = languageCode
+        AppPreferences.shared.mlxLanguage = languageCode
         
         // Update menu item states
         if let submenu = sender.menu {
@@ -294,7 +294,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateLanguageMenuSelection() {
         guard let languageSubmenu = languageSubmenu else { return }
         
-        let currentLanguage = AppPreferences.shared.whisperLanguage
+        let currentLanguage = AppPreferences.shared.mlxLanguage
         
         for item in languageSubmenu.items {
             if let languageCode = item.representedObject as? String {

@@ -5,14 +5,6 @@ if [[ "$1" == "build" ]]; then
     JUST_BUILD=true
 fi
 
-# Configure libwhisper
-echo "Configuring libwhisper..."
-cmake -G Xcode -B libwhisper/build -S libwhisper
-if [[ $? -ne 0 ]]; then
-    echo "CMake configuration failed!"
-    exit 1
-fi
-
 echo "Building autocorrect-swift..."
 mkdir -p build
 cargo build -p autocorrect-swift --release --target aarch64-apple-darwin --manifest-path=asian-autocorrect/Cargo.toml
