@@ -24,6 +24,8 @@ cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
 install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign "${CODE_SIGN_IDENTITY}" --timestamp ./build/libomp.dylib
 
+"$(dirname "$0")/Scripts/resolve_and_patch.sh"
+
 xcodebuild \
   -scheme "OpenSuperMLX" \
   -configuration Release \
@@ -34,6 +36,7 @@ xcodebuild \
   OTHER_CODE_SIGN_FLAGS=--timestamp \
   CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
   -derivedDataPath build \
+  -clonedSourcePackagesDirPath SourcePackages \
   build | xcpretty --simple --color
 
 rm -f "${ZIP_PATH}"
