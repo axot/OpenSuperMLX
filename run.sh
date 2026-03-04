@@ -17,9 +17,16 @@ if [[ $? -ne 0 ]]; then
 fi
 
 echo "Copying libomp.dylib..."
+rm -f ./build/libomp.dylib
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
 install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign - ./build/libomp.dylib
+
+# Apply patches to SPM checkouts (idempotent — skips if already applied)
+for p in patches/*.patch; do
+    [ -f "$p" ] && patch --dry-run -N -p1 -d SourcePackages/checkouts/mlx-audio-swift < "$p" >/dev/null 2>&1 && \
+        patch -N -p1 -d SourcePackages/checkouts/mlx-audio-swift < "$p"
+done
 
 # Build the app
 echo "Building OpenSuperMLX..."
