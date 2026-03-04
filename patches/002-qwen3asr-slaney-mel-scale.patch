@@ -1,0 +1,31 @@
+--- a/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ASR.swift
++++ b/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ASR.swift
+@@ -974,21 +974,22 @@
+     // MARK: - Audio Preprocessing
+ 
+     public func preprocessAudio(_ audio: MLXArray) -> (MLXArray, MLXArray, Int) {
+-        // Compute mel spectrogram
+         let melSpec = MLXAudioCore.computeMelSpectrogram(
+             audio: audio,
+             sampleRate: 16000,
+             nFft: 400,
+             hopLength: 160,
+-            nMels: config.audioConfig.numMelBins
++            nMels: config.audioConfig.numMelBins,
++            melScale: .slaney
+         )
+ 
+-        // melSpec shape: [numFrames, nMels] -> need [1, nMels, numFrames]
+-        let transposed = melSpec.transposed(1, 0)
++        // Drop last STFT frame to match WhisperFeatureExtractor
++        let trimmed = melSpec[0..<(melSpec.dim(0) - 1)]
++
++        let transposed = trimmed.transposed(1, 0)
+         let inputFeatures = transposed.expandedDimensions(axis: 0)
+ 
+-        // Create attention mask (all ones for single audio)
+-        let numFrames = melSpec.dim(0)
++        let numFrames = trimmed.dim(0)
+         let featureAttentionMask = MLX.ones([1, numFrames]).asType(.int32)
+ 
+         // Compute number of audio tokens after CNN

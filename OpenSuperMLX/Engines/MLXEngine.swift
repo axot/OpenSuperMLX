@@ -61,7 +61,7 @@ class MLXEngine: TranscriptionEngine {
         Memory.cacheLimit = 64 * 1024 * 1024
 
         let language = mapLanguageCode(settings.selectedLanguage)
-        let chunkDuration: Float = 300.0
+        let chunkDuration: Float = 1200.0
         let expectedChunks = max(1, Int(ceil(audioDurationSec / chunkDuration)))
         let maxTokens = expectedChunks * 4096
         logger.info("Generating with language: \(language), maxTokens: \(maxTokens), chunks: ~\(expectedChunks), chunkDuration: \(chunkDuration)s")

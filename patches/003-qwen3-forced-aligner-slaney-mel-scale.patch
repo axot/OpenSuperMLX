@@ -1,0 +1,23 @@
+--- a/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ForcedAligner.swift
++++ b/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ForcedAligner.swift
+@@ -412,13 +412,17 @@
+             sampleRate: 16000,
+             nFft: 400,
+             hopLength: 160,
+-            nMels: config.audioConfig.numMelBins
++            nMels: config.audioConfig.numMelBins,
++            melScale: .slaney
+         )
+ 
+-        let transposed = melSpec.transposed(1, 0)
++        // Drop last STFT frame to match WhisperFeatureExtractor
++        let trimmed = melSpec[0..<(melSpec.dim(0) - 1)]
++
++        let transposed = trimmed.transposed(1, 0)
+         let inputFeatures = transposed.expandedDimensions(axis: 0)
+ 
+-        let numFrames = melSpec.dim(0)
++        let numFrames = trimmed.dim(0)
+         let featureAttentionMask = MLX.ones([1, numFrames]).asType(.int32)
+ 
+         let audioLengths = featureAttentionMask.sum(axis: -1).asType(.int32)
