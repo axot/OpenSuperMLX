@@ -58,7 +58,7 @@ class MLXEngine: TranscriptionEngine {
             throw CancellationError()
         }
 
-        Memory.cacheLimit = 512 * 1024 * 1024
+        Memory.cacheLimit = 4 * 1024 * 1024
 
         let language = mapLanguageCode(settings.selectedLanguage)
         let maxTokens = max(200, Int(audioDurationSec * 50))
