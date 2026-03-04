@@ -58,13 +58,15 @@ class MLXEngine: TranscriptionEngine {
             throw CancellationError()
         }
 
-        Memory.cacheLimit = 4 * 1024 * 1024
+        Memory.cacheLimit = 64 * 1024 * 1024
 
         let language = mapLanguageCode(settings.selectedLanguage)
-        let maxTokens = max(200, Int(audioDurationSec * 50))
-        logger.info("Generating with language: \(language), maxTokens: \(maxTokens)")
+        let chunkDuration: Float = 300.0
+        let expectedChunks = max(1, Int(ceil(audioDurationSec / chunkDuration)))
+        let maxTokens = expectedChunks * 4096
+        logger.info("Generating with language: \(language), maxTokens: \(maxTokens), chunks: ~\(expectedChunks), chunkDuration: \(chunkDuration)s")
         let startTime = Date()
-        let output = model.generate(audio: audio, maxTokens: maxTokens, language: language)
+        let output = model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
         let elapsed = Date().timeIntervalSince(startTime)
         logger.info("Generate completed in \(String(format: "%.1f", elapsed))s, tokens: \(output.totalTokens), text length: \(output.text.count)")
 
