@@ -330,6 +330,9 @@ class StreamingAudioService: ObservableObject {
             text = AutocorrectWrapper.format(text)
         }
 
+        // Apply Bedrock LLM correction (mirrors TranscriptionService line 142)
+        text = await BedrockService.shared.correctTranscription(text)
+
         let timestamp = Date()
         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
         let recording = Recording(

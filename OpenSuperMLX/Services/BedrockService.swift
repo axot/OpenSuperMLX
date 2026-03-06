@@ -2,6 +2,7 @@
 // OpenSuperMLX
 
 import Foundation
+import UserNotifications
 import os.log
 
 import AWSBedrockRuntime
@@ -41,6 +42,12 @@ final class BedrockService {
         """
 
     private init() {}
+
+    // MARK: - Notification Permission
+
+    static func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
 
     // MARK: - Error Types
 
@@ -149,6 +156,19 @@ final class BedrockService {
                 object: nil,
                 userInfo: ["error": error]
             )
+
+            let content = UNMutableNotificationContent()
+            content.title = "Bedrock Correction Failed"
+            content.body = error.localizedDescription
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            try? await UNUserNotificationCenter.current().add(request)
+
             return text
         }
     }
