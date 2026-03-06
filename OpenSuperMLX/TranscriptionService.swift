@@ -2,6 +2,8 @@ import AVFoundation
 import Foundation
 import os.log
 
+import MLXAudioSTT
+
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionService")
 
 @MainActor
@@ -16,6 +18,10 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var progress: Float = 0.0
     
     private var currentEngine: TranscriptionEngine?
+
+    var streamingModel: Qwen3ASRModel? {
+        (currentEngine as? MLXEngine)?.qwen3Model
+    }
     private var totalDuration: Float = 0.0
     private var transcriptionTask: Task<String, Error>?
     private var isCancelled = false

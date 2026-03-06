@@ -106,6 +106,12 @@ class SettingsViewModel: ObservableObject {
     @Published var bedrockCorrectionPrompt: String {
         didSet { AppPreferences.shared.bedrockCorrectionPrompt = bedrockCorrectionPrompt }
     }
+
+    @Published var useStreamingTranscription: Bool {
+        didSet {
+            AppPreferences.shared.useStreamingTranscription = useStreamingTranscription
+        }
+    }
     
     init() {
         let prefs = AppPreferences.shared
@@ -128,6 +134,7 @@ class SettingsViewModel: ObservableObject {
         self.bedrockRegion = prefs.bedrockRegion
         self.bedrockModelId = prefs.bedrockModelId
         self.bedrockCorrectionPrompt = prefs.bedrockCorrectionPrompt
+        self.useStreamingTranscription = prefs.useStreamingTranscription
     }
 }
 
@@ -140,6 +147,7 @@ struct Settings {
     var showTimestamps: Bool
     var temperature: Double
     var useAsianAutocorrect: Bool
+    var useStreamingTranscription: Bool
     
     var isAsianLanguage: Bool {
         Settings.asianLanguages.contains(selectedLanguage)
@@ -157,6 +165,7 @@ struct Settings {
         self.showTimestamps = prefs.showTimestamps
         self.temperature = prefs.temperature
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+        self.useStreamingTranscription = prefs.useStreamingTranscription
     }
 }
 
@@ -415,6 +424,33 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             Toggle("", isOn: $viewModel.suppressBlankAudio)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+                
+                // Streaming
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Streaming")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Streaming Transcription")
+                                    .font(.subheadline)
+                                Text("Experimental: transcribe in real-time while recording")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.useStreamingTranscription)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                         }

@@ -22,6 +22,7 @@ class IndicatorViewModel: ObservableObject {
     @Published var isBlinking = false
     @Published var recorder: AudioRecorder = .shared
     @Published var isVisible = false
+    @Published private(set) var isStreamingMode = false
     
     var delegate: IndicatorViewDelegate?
     private var blinkTimer: Timer?
@@ -31,6 +32,7 @@ class IndicatorViewModel: ObservableObject {
     private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
     private let transcriptionQueue: TranscriptionQueue
+    private let streamingService = StreamingAudioService.shared
     
     init() {
         self.recordingStore = RecordingStore.shared
@@ -40,7 +42,7 @@ class IndicatorViewModel: ObservableObject {
         recorder.$isConnecting
             .receive(on: RunLoop.main)
             .sink { [weak self] isConnecting in
-                guard let self = self else { return }
+                guard let self = self, !self.isStreamingMode else { return }
                 if isConnecting {
                     self.state = .connecting
                     self.stopBlinking()
@@ -51,7 +53,7 @@ class IndicatorViewModel: ObservableObject {
         recorder.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
-                guard let self = self else { return }
+                guard let self = self, !self.isStreamingMode else { return }
                 if isRecording {
                     self.state = .recording
                     self.startBlinking()
@@ -61,7 +63,7 @@ class IndicatorViewModel: ObservableObject {
     }
     
     var isTranscriptionBusy: Bool {
-        transcriptionService.isTranscribing || transcriptionQueue.isProcessing
+        transcriptionService.isTranscribing || transcriptionQueue.isProcessing || streamingService.isStreaming
     }
     
     func showBusyMessage() {
@@ -81,89 +83,102 @@ class IndicatorViewModel: ObservableObject {
             return
         }
         
-        if MicrophoneService.shared.isActiveMicrophoneRequiresConnection() {
-            state = .connecting
-            stopBlinking()
-        } else {
+        if AppPreferences.shared.useStreamingTranscription {
+            isStreamingMode = true
             state = .recording
             startBlinking()
-        }
-        
-        Task.detached { [recorder] in
-            recorder.startRecording()
+            
+            Task {
+                do {
+                    try await streamingService.startStreaming()
+                } catch {
+                    print("Failed to start streaming: \(error)")
+                    state = .idle
+                    isStreamingMode = false
+                    stopBlinking()
+                }
+            }
+        } else {
+            isStreamingMode = false
+            
+            if MicrophoneService.shared.isActiveMicrophoneRequiresConnection() {
+                state = .connecting
+                stopBlinking()
+            } else {
+                state = .recording
+                startBlinking()
+            }
+            
+            Task.detached { [recorder] in
+                recorder.startRecording()
+            }
         }
     }
     
     func startDecoding() {
         stopBlinking()
         
-        if isTranscriptionBusy {
-            recorder.cancelRecording()
-            showBusyMessage()
-            return
-        }
-        
-        state = .decoding
-        
-        if let tempURL = recorder.stopRecording() {
+        if isStreamingMode {
+            state = .decoding
+            
             Task { [weak self] in
                 guard let self = self else { return }
                 
-                do {
-                    print("start decoding...")
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
-                    
-                    // Create a new Recording instance
-                    let timestamp = Date()
-                    let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
-                    let recordingId = UUID()
-                    let finalURL = Recording(
-                        id: recordingId,
-                        timestamp: timestamp,
-                        fileName: fileName,
-                        transcription: text,
-                        duration: 0,
-                        status: .completed,
-                        progress: 1.0,
-                        sourceFileURL: nil
-                    ).url
-                    
-                    // Move the temporary recording to final location
-                    try recorder.moveTemporaryRecording(from: tempURL, to: finalURL)
-                    
-                    // Save the recording to store
-                    await MainActor.run {
-                        self.recordingStore.addRecording(Recording(
-                            id: recordingId,
-                            timestamp: timestamp,
-                            fileName: fileName,
-                            transcription: text,
-                            duration: 0,
-                            status: .completed,
-                            progress: 1.0,
-                            sourceFileURL: nil
-                        ))
-                    }
-                    
-                    insertText(text)
-                    print("Transcription result: \(text)")
-                } catch {
-                    print("Error transcribing audio: \(error)")
-                    try? FileManager.default.removeItem(at: tempURL)
+                guard let result = await self.streamingService.finalizeRecording() else {
+                    self.state = .idle
+                    self.isStreamingMode = false
+                    self.delegate?.didFinishDecoding()
+                    return
                 }
                 
-                await MainActor.run {
-                    self.delegate?.didFinishDecoding()
-                }
+                self.recordingStore.addRecording(result.recording)
+                self.insertText(result.text)
+                print("Transcription result: \(result.text)")
+                
+                self.isStreamingMode = false
+                self.delegate?.didFinishDecoding()
             }
         } else {
+            if isTranscriptionBusy {
+                recorder.cancelRecording()
+                showBusyMessage()
+                return
+            }
             
-            print("!!! Not found record url !!!")
+            state = .decoding
             
-            Task {
-                await MainActor.run {
+            if let tempURL = recorder.stopRecording() {
+                Task { [weak self] in
+                    guard let self = self else { return }
+                    
+                    do {
+                        print("start decoding...")
+                        let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                        
+                        let timestamp = Date()
+                        let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
+                        let recording = Recording(
+                            id: UUID(), timestamp: timestamp, fileName: fileName,
+                            transcription: text, duration: 0,
+                            status: .completed, progress: 1.0, sourceFileURL: nil
+                        )
+                        
+                        try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
+                        self.recordingStore.addRecording(recording)
+                        
+                        self.insertText(text)
+                        print("Transcription result: \(text)")
+                    } catch {
+                        print("Error transcribing audio: \(error)")
+                        try? FileManager.default.removeItem(at: tempURL)
+                    }
+                    
                     self.delegate?.didFinishDecoding()
                 }
+            } else {
+                
+                print("!!! Not found record url !!!")
+                self.delegate?.didFinishDecoding()
             }
         }
     }
@@ -193,13 +208,22 @@ class IndicatorViewModel: ObservableObject {
         stopBlinking()
         hideTimer?.invalidate()
         hideTimer = nil
+        if isStreamingMode {
+            streamingService.cancelStreaming()
+            isStreamingMode = false
+        }
         cancellables.removeAll()
     }
 
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
-        recorder.cancelRecording()
+        if isStreamingMode {
+            streamingService.cancelStreaming()
+            isStreamingMode = false
+        } else {
+            recorder.cancelRecording()
+        }
     }
 
     @MainActor

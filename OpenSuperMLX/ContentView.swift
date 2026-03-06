@@ -25,7 +25,11 @@ class ContentViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var microphoneService = MicrophoneService.shared
     @Published var shouldClearSearch = false
+    @Published var streamingConfirmedText = ""
+    @Published var streamingProvisionalText = ""
+    @Published private(set) var isStreamingMode = false
     
+    private let streamingService = StreamingAudioService.shared
     private var currentPage = 0
     private let pageSize = 100
     private var currentSearchQuery = ""
@@ -51,7 +55,7 @@ class ContentViewModel: ObservableObject {
         recorder.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
-                guard let self = self else { return }
+                guard let self = self, !self.isStreamingMode else { return }
                 if isRecording && self.state != .decoding {
                     self.state = .recording
                     self.startBlinking()
@@ -62,6 +66,20 @@ class ContentViewModel: ObservableObject {
                     self.stopDurationTimer()
                     self.recordingDuration = 0
                 }
+            }
+            .store(in: &cancellables)
+        
+        streamingService.$confirmedText
+            .receive(on: RunLoop.main)
+            .sink { [weak self] text in
+                self?.streamingConfirmedText = text
+            }
+            .store(in: &cancellables)
+        
+        streamingService.$provisionalText
+            .receive(on: RunLoop.main)
+            .sink { [weak self] text in
+                self?.streamingProvisionalText = text
             }
             .store(in: &cancellables)
     }
@@ -153,25 +171,60 @@ class ContentViewModel: ObservableObject {
     }
 
     var isRecording: Bool {
-        recorder.isRecording
+        if isStreamingMode {
+            return streamingService.isStreaming
+        }
+        return recorder.isRecording
     }
-    
+
+    var isTranscriptionBusy: Bool {
+        transcriptionService.isTranscribing || transcriptionQueue.isProcessing || streamingService.isStreaming
+    }
+
     func startRecording() {
-        if microphoneService.isActiveMicrophoneRequiresConnection() {
-            state = .connecting
-            stopBlinking()
-            stopDurationTimer()
-            recordingDuration = 0
-        } else {
+        if isTranscriptionBusy {
+            return
+        }
+
+        if AppPreferences.shared.useStreamingTranscription {
+            isStreamingMode = true
             state = .recording
             startBlinking()
             recordingStartTime = Date()
             recordingDuration = 0
             startDurationTimerIfNeeded()
-        }
-        
-        Task.detached { [recorder] in
-            recorder.startRecording()
+            
+            Task {
+                do {
+                    try await streamingService.startStreaming()
+                } catch {
+                    print("Failed to start streaming: \(error)")
+                    state = .idle
+                    isStreamingMode = false
+                    stopBlinking()
+                    stopDurationTimer()
+                    recordingDuration = 0
+                }
+            }
+        } else {
+            isStreamingMode = false
+            
+            if microphoneService.isActiveMicrophoneRequiresConnection() {
+                state = .connecting
+                stopBlinking()
+                stopDurationTimer()
+                recordingDuration = 0
+            } else {
+                state = .recording
+                startBlinking()
+                recordingStartTime = Date()
+                recordingDuration = 0
+                startDurationTimerIfNeeded()
+            }
+            
+            Task.detached { [recorder] in
+                recorder.startRecording()
+            }
         }
     }
 
@@ -182,56 +235,55 @@ class ContentViewModel: ObservableObject {
         
         IndicatorWindowManager.shared.hide()
 
-        if let tempURL = recorder.stopRecording() {
+        if isStreamingMode {
+            Task { [weak self] in
+                guard let self = self else { return }
+
+                guard let result = await self.streamingService.finalizeRecording(duration: self.recordingDuration) else {
+                    self.state = .idle
+                    self.recordingDuration = 0
+                    self.isStreamingMode = false
+                    return
+                }
+
+                self.recordingStore.addRecording(result.recording)
+
+                if !self.currentSearchQuery.isEmpty {
+                    self.shouldClearSearch = true
+                    self.currentSearchQuery = ""
+                }
+                self.recordings.insert(result.recording, at: 0)
+
+                print("Transcription result: \(result.text)")
+
+                self.state = .idle
+                self.recordingDuration = 0
+                self.isStreamingMode = false
+            }
+        } else if let tempURL = recorder.stopRecording() {
             Task { [weak self] in
                 guard let self = self else { return }
 
                 do {
                     print("start decoding...")
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                    let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
 
-                    // Capture the current recording duration
-                    let duration = await MainActor.run { self.recordingDuration }
-                    
-                    // Create a new Recording instance
                     let timestamp = Date()
                     let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
-                    let recordingId = UUID()
-                    let finalURL = Recording(
-                        id: recordingId,
-                        timestamp: timestamp,
-                        fileName: fileName,
-                        transcription: text,
-                        duration: duration,
-                        status: .completed,
-                        progress: 1.0,
-                        sourceFileURL: nil
-                    ).url
+                    let recording = Recording(
+                        id: UUID(), timestamp: timestamp, fileName: fileName,
+                        transcription: text, duration: self.recordingDuration,
+                        status: .completed, progress: 1.0, sourceFileURL: nil
+                    )
 
-                    // Move the temporary recording to final location
-                    try recorder.moveTemporaryRecording(from: tempURL, to: finalURL)
+                    try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
+                    self.recordingStore.addRecording(recording)
 
-                    // Save the recording to store
-                    await MainActor.run {
-                        let newRecording = Recording(
-                            id: recordingId,
-                            timestamp: timestamp,
-                            fileName: fileName,
-                            transcription: text,
-                            duration: self.recordingDuration,
-                            status: .completed,
-                            progress: 1.0,
-                            sourceFileURL: nil
-                        )
-                        self.recordingStore.addRecording(newRecording)
-                        
-                        // Clear search and show the new recording
-                        if !self.currentSearchQuery.isEmpty {
-                            self.shouldClearSearch = true
-                            self.currentSearchQuery = ""
-                        }
-                        self.recordings.insert(newRecording, at: 0)
+                    if !self.currentSearchQuery.isEmpty {
+                        self.shouldClearSearch = true
+                        self.currentSearchQuery = ""
                     }
+                    self.recordings.insert(recording, at: 0)
 
                     print("Transcription result: \(text)")
                 } catch {
@@ -239,15 +291,26 @@ class ContentViewModel: ObservableObject {
                     try? FileManager.default.removeItem(at: tempURL)
                 }
 
-                await MainActor.run {
-                    self.state = .idle
-                    self.recordingDuration = 0
-                }
+                self.state = .idle
+                self.recordingDuration = 0
             }
         } else {
             state = .idle
             recordingDuration = 0
         }
+    }
+
+    func cancelRecording() {
+        if isStreamingMode {
+            streamingService.cancelStreaming()
+        }
+        isStreamingMode = false
+        state = .idle
+        stopBlinking()
+        stopDurationTimer()
+        recordingDuration = 0
+        streamingConfirmedText = ""
+        streamingProvisionalText = ""
     }
 
     private func stopDurationTimer() {
@@ -488,6 +551,42 @@ struct ContentView: View {
                                 )
                             )
                             .frame(height: 20)
+                    }
+
+                    // MARK: - Streaming transcription text
+                    if viewModel.isStreamingMode && viewModel.state == .recording {
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                (Text(viewModel.streamingConfirmedText)
+                                    .foregroundColor(.primary)
+                                + Text(viewModel.streamingProvisionalText)
+                                    .foregroundColor(.primary.opacity(0.5)))
+                                    .font(.body)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .id("streamingTextBottom")
+                            }
+                            .frame(maxHeight: 120)
+                            .background(ThemePalette.panelSurface(colorScheme))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
+                            )
+                            .cornerRadius(12)
+                            .padding(.horizontal)
+                            .onChange(of: viewModel.streamingConfirmedText) { _, _ in
+                                withAnimation {
+                                    proxy.scrollTo("streamingTextBottom", anchor: .bottom)
+                                }
+                            }
+                            .onChange(of: viewModel.streamingProvisionalText) { _, _ in
+                                withAnimation {
+                                    proxy.scrollTo("streamingTextBottom", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.isStreamingMode)
                     }
 
                     VStack(spacing: 16) {

@@ -60,6 +60,7 @@ class TranscriptionQueue: ObservableObject {
 
     func startProcessingQueue() {
         guard !isProcessing else { return }
+        guard !StreamingAudioService.shared.isStreaming else { return }
 
         isProcessing = true
 

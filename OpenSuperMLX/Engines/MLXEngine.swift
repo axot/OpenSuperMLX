@@ -21,6 +21,8 @@ class MLXEngine: TranscriptionEngine {
 
     var onProgressUpdate: ((Float) -> Void)?
 
+    var qwen3Model: Qwen3ASRModel? { model }
+
     var isModelLoaded: Bool {
         model != nil
     }
