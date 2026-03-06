@@ -75,6 +75,38 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    @Published var bedrockEnabled: Bool {
+        didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
+    }
+    
+    @Published var bedrockAuthMode: String {
+        didSet { AppPreferences.shared.bedrockAuthMode = bedrockAuthMode }
+    }
+    
+    @Published var bedrockProfileName: String {
+        didSet { AppPreferences.shared.bedrockProfileName = bedrockProfileName }
+    }
+    
+    @Published var bedrockAccessKey: String {
+        didSet { AppPreferences.shared.bedrockAccessKey = bedrockAccessKey }
+    }
+    
+    @Published var bedrockSecretKey: String {
+        didSet { AppPreferences.shared.bedrockSecretKey = bedrockSecretKey }
+    }
+    
+    @Published var bedrockRegion: String {
+        didSet { AppPreferences.shared.bedrockRegion = bedrockRegion }
+    }
+    
+    @Published var bedrockModelId: String {
+        didSet { AppPreferences.shared.bedrockModelId = bedrockModelId }
+    }
+    
+    @Published var bedrockCorrectionPrompt: String {
+        didSet { AppPreferences.shared.bedrockCorrectionPrompt = bedrockCorrectionPrompt }
+    }
+    
     init() {
         let prefs = AppPreferences.shared
         self.selectedMLXModel = prefs.selectedMLXModel
@@ -88,6 +120,14 @@ class SettingsViewModel: ObservableObject {
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.holdToRecord = prefs.holdToRecord
+        self.bedrockEnabled = prefs.bedrockEnabled
+        self.bedrockAuthMode = prefs.bedrockAuthMode
+        self.bedrockProfileName = prefs.bedrockProfileName
+        self.bedrockAccessKey = prefs.bedrockAccessKey
+        self.bedrockSecretKey = prefs.bedrockSecretKey
+        self.bedrockRegion = prefs.bedrockRegion
+        self.bedrockModelId = prefs.bedrockModelId
+        self.bedrockCorrectionPrompt = prefs.bedrockCorrectionPrompt
     }
 }
 
@@ -153,6 +193,12 @@ struct SettingsView: View {
                     Label("Advanced", systemImage: "gear")
                 }
                 .tag(3)
+            
+            llmSettings
+                .tabItem {
+                    Label("LLM", systemImage: "brain")
+                }
+                .tag(4)
         }
         .padding()
         .frame(width: 550)
@@ -469,6 +515,149 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
+            }
+            .padding()
+        }
+    }
+    
+    // MARK: - LLM Settings
+    
+    private var llmSettings: some View {
+        Form {
+            VStack(spacing: 20) {
+                // LLM Correction
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("LLM Transcription Correction")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Enable LLM Correction")
+                                .font(.subheadline)
+                            Text("Experimental: Use AWS Bedrock to correct transcription output")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $viewModel.bedrockEnabled)
+                            .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                            .labelsHidden()
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+                
+                if viewModel.bedrockEnabled {
+                    // Authentication
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Authentication")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Auth Mode", selection: $viewModel.bedrockAuthMode) {
+                                Text("AWS Profile").tag("profile")
+                                Text("Access Key").tag("accessKey")
+                            }
+                            .pickerStyle(.segmented)
+                            
+                            if viewModel.bedrockAuthMode == "profile" {
+                                HStack {
+                                    Text("Profile Name")
+                                        .font(.subheadline)
+                                        .frame(width: 100, alignment: .leading)
+                                    TextField("", text: $viewModel.bedrockProfileName, prompt: Text("default"))
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            } else {
+                                HStack {
+                                    Text("Access Key")
+                                        .font(.subheadline)
+                                        .frame(width: 100, alignment: .leading)
+                                    TextField("", text: $viewModel.bedrockAccessKey, prompt: Text("AKIA..."))
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                
+                                HStack {
+                                    Text("Secret Key")
+                                        .font(.subheadline)
+                                        .frame(width: 100, alignment: .leading)
+                                    SecureField("Secret access key", text: $viewModel.bedrockSecretKey)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.controlBackgroundColor).opacity(0.3))
+                    .cornerRadius(12)
+                    
+                    // Configuration
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Configuration")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Region")
+                                    .font(.subheadline)
+                                    .frame(width: 100, alignment: .leading)
+                                TextField("", text: $viewModel.bedrockRegion, prompt: Text("us-east-1"))
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            
+                            HStack {
+                                Text("Model ID")
+                                    .font(.subheadline)
+                                    .frame(width: 100, alignment: .leading)
+                                TextField("", text: $viewModel.bedrockModelId, prompt: Text("anthropic.claude-3-haiku-20240307-v1:0"))
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.controlBackgroundColor).opacity(0.3))
+                    .cornerRadius(12)
+                    
+                    // Correction Prompt
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Correction Prompt")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("System prompt sent to the LLM for transcription correction")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            TextEditor(text: $viewModel.bedrockCorrectionPrompt)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(minHeight: 80)
+                                .padding(4)
+                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .cornerRadius(6)
+                            
+                            HStack {
+                                Spacer()
+                                Button("Reset to Default") {
+                                    viewModel.bedrockCorrectionPrompt = BedrockService.defaultCorrectionPrompt
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.caption)
+                            }
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.controlBackgroundColor).opacity(0.3))
+                    .cornerRadius(12)
+                }
             }
             .padding()
         }

@@ -133,15 +133,17 @@ class TranscriptionService: ObservableObject {
             let result = try await engine.transcribeAudio(url: url, settings: settings)
             
             try Task.checkCancellation()
+            let correctedResult = await BedrockService.shared.correctTranscription(result)
+            try Task.checkCancellation()
             
             await MainActor.run {
                 guard let self = self, !self.isCancelled else { return }
-                self.transcribedText = result
+                self.transcribedText = correctedResult
                 self.progress = 1.0
-                logger.info("Transcription completed: \(result.prefix(50))...")
+                logger.info("Transcription completed: \(correctedResult.prefix(50))...")
             }
             
-            return result
+            return correctedResult
         }
         
         self.transcriptionTask = task

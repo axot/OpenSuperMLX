@@ -82,4 +82,30 @@ final class AppPreferences {
     
     @UserDefault(key: "holdToRecord", defaultValue: true)
     var holdToRecord: Bool
+    
+    // MARK: - Bedrock LLM
+    
+    @UserDefault(key: "bedrockEnabled", defaultValue: false)
+    var bedrockEnabled: Bool
+    
+    @UserDefault(key: "bedrockAuthMode", defaultValue: "profile")
+    var bedrockAuthMode: String
+    
+    @UserDefault(key: "bedrockProfileName", defaultValue: "default")
+    var bedrockProfileName: String
+    
+    @UserDefault(key: "bedrockAccessKey", defaultValue: "")
+    var bedrockAccessKey: String
+    
+    @UserDefault(key: "bedrockSecretKey", defaultValue: "")
+    var bedrockSecretKey: String
+    
+    @UserDefault(key: "bedrockRegion", defaultValue: "us-east-1")
+    var bedrockRegion: String
+    
+    @UserDefault(key: "bedrockModelId", defaultValue: "anthropic.claude-3-haiku-20240307-v1:0")
+    var bedrockModelId: String
+    
+    @UserDefault(key: "bedrockCorrectionPrompt", defaultValue: BedrockService.defaultCorrectionPrompt)
+    var bedrockCorrectionPrompt: String
 }

@@ -222,6 +222,8 @@
 			CE0EAD6D2D56ACA80067FDEE /* GRDB */,
 			CEAC000A2D82F60000000000 /* MLXAudioSTT */,
 			CEAC000B2D82F60000000000 /* MLXAudioCore */,
+				102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */,
+				845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */,
 		);
 			productName = OpenSuperMLX;
 			productReference = CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */;
@@ -309,6 +311,7 @@
 			CE84E17B2D56550B00C54EA6 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 			CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 			CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */,
+				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
 		);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE57B0292D52C7BB00929AF3 /* Products */;
@@ -791,7 +794,15 @@
 			kind = revision;
 			revision = b76c81fa3d15600e68323b94d740bb346f3455ef;
 		};
-	};
+		};
+		9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awslabs/aws-sdk-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -815,6 +826,16 @@
 		package = CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
 		productName = MLXAudioCore;
 	};
+		102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
+			productName = AWSBedrockRuntime;
+		};
+		845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
+			productName = AWSSDKIdentity;
+		};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CE57B0202D52C7BB00929AF3 /* Project object */;
