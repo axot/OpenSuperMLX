@@ -1,0 +1,13 @@
+--- a/Sources/MLXAudioSTT/Streaming/IncrementalMelSpectrogram.swift
++++ b/Sources/MLXAudioSTT/Streaming/IncrementalMelSpectrogram.swift
+@@ -54,8 +54,9 @@
+ 
+         self.window = hanningWindow(size: nFft)
+         self.filters = melFilters(
+             sampleRate: sampleRate,
+             nFft: nFft,
+             nMels: nMels,
+-            norm: "slaney"
++            norm: "slaney",
++            melScale: .slaney
+         )
