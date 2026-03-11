@@ -68,6 +68,7 @@ class StreamingAudioService: ObservableObject {
             throw StreamingAudioError.modelNotLoaded
         }
 
+        ringBuffer.withLock { $0.removeAll() }
         confirmedText = ""
         provisionalText = ""
 
@@ -223,6 +224,11 @@ class StreamingAudioService: ObservableObject {
         feedTask?.cancel()
         feedTask = nil
 
+        // Stop audio capture FIRST — prevents new samples from leaking into ring buffer
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+
+        // Now drain safely — buffer contains only legitimate samples from this session
         let remainingSamples = ringBuffer.withLock { buffer -> [Float] in
             let drained = buffer
             buffer.removeAll()
@@ -250,8 +256,6 @@ class StreamingAudioService: ObservableObject {
         }
         eventTask = nil
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
         audioEngine = nil
         audioConverter = nil
 
@@ -279,6 +283,7 @@ class StreamingAudioService: ObservableObject {
         currentWAVURL = nil
 
         logger.info("Streaming stopped, WAV at: \(url?.lastPathComponent ?? "nil")")
+        ringBuffer.withLock { $0.removeAll() }
         guard let url else { return nil }
         return (text: finalText, url: url)
     }
