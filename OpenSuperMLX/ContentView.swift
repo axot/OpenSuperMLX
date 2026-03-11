@@ -661,19 +661,18 @@ struct ContentView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .help("Delete all recordings")
-                                    .confirmationDialog(
+                                    .alert(
                                         "Delete All Recordings",
-                                        isPresented: $showDeleteConfirmation,
-                                        titleVisibility: .visible
+                                        isPresented: $showDeleteConfirmation
                                     ) {
                                         Button("Delete All", role: .destructive) {
                                             viewModel.deleteAllRecordings()
                                         }
+                                        .keyboardShortcut(.defaultAction)
                                         Button("Cancel", role: .cancel) {}
                                     } message: {
                                         Text("Are you sure you want to delete all recordings? This action cannot be undone.")
                                     }
-                                    .interactiveDismissDisabled()
                                 }
                                 
                                 Button(action: {
