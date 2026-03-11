@@ -43,7 +43,7 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -only-testing:OpenSuperMLXTests/MicrophoneServiceBluetoothTests/testBluetoothDetection_BluetoothInName
 ```
 
-Note: `ClipboardUtilPasteIntegrationTests` require accessibility permissions and an active display — they `XCTSkip` when unavailable.
+`ClipboardUtilPasteIntegrationTests` require accessibility permissions and an active display — they `XCTSkip` when unavailable.
 
 ## Patches
 
@@ -52,33 +52,49 @@ Note: `ClipboardUtilPasteIntegrationTests` require accessibility permissions and
 ## Project Structure
 
 ```
-OpenSuperMLX/              # Main app target
-├── OpenSuperMLXApp.swift  # @main entry, AppState, AppDelegate
-├── ContentView.swift      # Main UI (recording list, search, controls)
-├── Settings.swift         # Settings UI + SettingsViewModel + Settings value type
-├── AudioRecorder.swift    # AVAudioRecorder/Player wrapper (singleton)
-├── TranscriptionService.swift  # Transcription orchestration (singleton)
-├── TranscriptionQueue.swift    # File queue processing (singleton)
-├── MLXModelManager.swift  # Model catalog + custom model management
-├── MicrophoneService.swift     # Audio device enumeration + selection
+OpenSuperMLX/                    # Main app target
+├── OpenSuperMLXApp.swift        # @main entry, AppState, AppDelegate, menu bar
+├── ContentView.swift            # Main UI (recording list, search, mic picker)
+├── Settings.swift               # Settings UI + SettingsViewModel + Settings value type
+├── AudioRecorder.swift          # AVAudioRecorder/Player wrapper (singleton)
+├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
+├── TranscriptionService.swift   # Transcription orchestration (singleton)
+├── TranscriptionQueue.swift     # File queue processing (singleton)
+├── MLXModelManager.swift        # Model catalog + custom model management
+├── MicrophoneService.swift      # Audio device enumeration, selection, CoreAudio
+├── ShortcutManager.swift        # Global hotkey handling + hold-to-record
+├── ModifierKeyMonitor.swift     # Single modifier key (⌘, ⌥, Fn) monitoring
+├── FileDropHandler.swift        # Drag-and-drop audio file import
+├── PermissionsManager.swift     # Microphone + accessibility permission checks
 ├── Engines/
 │   ├── TranscriptionEngine.swift  # Protocol definition
 │   └── MLXEngine.swift            # MLX-based implementation
+├── Services/
+│   └── BedrockService.swift       # AWS Bedrock LLM post-transcription correction
 ├── Models/
-│   └── Recording.swift    # Recording model + RecordingStore (GRDB)
-├── Indicator/             # Floating mini-recorder overlay
-├── Onboarding/            # First-launch onboarding flow
-├── Utils/                 # AppPreferences, AutocorrectWrapper, ClipboardUtil, etc.
-├── Bridge.h               # Bridging header for autocorrect C library
-OpenSuperMLXTests/         # Unit tests (XCTest)
-asian-autocorrect/         # Git submodule — Rust autocorrect library
-patches/                   # Patches applied to SPM checkouts by run.sh
+│   └── Recording.swift          # Recording model + RecordingStore (GRDB)
+├── Indicator/                   # Floating mini-recorder overlay
+│   ├── IndicatorWindow.swift    # IndicatorViewModel — recording/decoding state machine
+│   └── IndicatorWindowManager.swift  # Window positioning + lifecycle
+├── Onboarding/                  # First-launch onboarding flow
+├── Utils/
+│   ├── AppPreferences.swift     # UserDefaults wrappers (@UserDefault, @OptionalUserDefault)
+│   ├── ClipboardUtil.swift      # Paste-via-CGEvent, keyboard layout detection
+│   ├── AutocorrectWrapper.swift # Bridge to Rust autocorrect dylib
+│   ├── DevConfig.swift          # #if DEBUG toggles
+│   ├── FocusUtils.swift         # Accessibility API caret/cursor position
+│   ├── LanguageUtil.swift       # Language code ↔ display name mapping
+│   └── NotificationName+App.swift  # Typed Notification.Name extensions
+├── Bridge.h                     # Bridging header for autocorrect C library
+OpenSuperMLXTests/               # Unit tests (XCTest)
+asian-autocorrect/               # Git submodule — Rust autocorrect library
+patches/                         # Patches applied to SPM checkouts by run.sh
 ```
 
 ## Dependencies
 
-- **SPM**: GRDB.swift, KeyboardShortcuts, MLX/MLXAudioSTT/MLXAudioCore, HuggingFace
-- **System frameworks**: Metal, Accelerate, AVFoundation, ApplicationServices, Carbon
+- **SPM**: GRDB.swift, KeyboardShortcuts, MLX/MLXAudioSTT/MLXAudioCore, HuggingFace, AWSBedrockRuntime, EventSource
+- **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodule**: `asian-autocorrect` (Rust → dylib via Cargo, bridged through `Bridge.h`)
 
 ## Code Style
@@ -110,13 +126,14 @@ patches/                   # Patches applied to SPM checkouts by run.sh
 - **MVVM**: `@StateObject` ViewModels with `ObservableObject`
 - **Protocol abstraction**: `TranscriptionEngine` protocol, `MLXEngine` implementation
 - **Communication**: `NotificationCenter` with typed `Notification.Name` extensions
-- **Reactive**: Combine `$published` sinks with `AnyCancellable` sets
+- **Recording flow**: ShortcutManager → IndicatorViewModel.startRecording() → StreamingAudioService or AudioRecorder
 
 ### Concurrency
 
 - `@MainActor` on UI-touching classes (`TranscriptionService`, `TranscriptionQueue`, `RecordingStore`)
 - `Task.detached(priority: .userInitiated)` for heavy work off main thread
 - `nonisolated` for methods callable from any actor
+- `OSAllocatedUnfairLock` for thread-safe shared state (see `StreamingAudioService.ringBuffer`)
 - Prefer Swift concurrency (`async/await`) over GCD for new code
 
 ### Error Handling
@@ -141,7 +158,7 @@ patches/                   # Patches applied to SPM checkouts by run.sh
 ### Data Layer
 
 - **GRDB** for SQLite: `FetchableRecord`/`PersistableRecord`, `DatabaseMigrator` with versioned migrations
-- **UserDefaults** via `@UserDefault` / `@OptionalUserDefault` property wrappers
+- **UserDefaults** via `@UserDefault` / `@OptionalUserDefault` property wrappers in `AppPreferences`
 
 ### Testing
 
@@ -157,7 +174,7 @@ patches/                   # Patches applied to SPM checkouts by run.sh
 
 ## CI
 
-GitHub Actions: `.github/workflows/build.yml` — runs `./run.sh build` on `macos-latest`.
+GitHub Actions: `.github/workflows/build.yml` — runs `./run.sh build` on `macos-latest` for pushes and PRs.
 
 ## Release
 
