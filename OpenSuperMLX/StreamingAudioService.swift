@@ -92,8 +92,7 @@ class StreamingAudioService: ObservableObject {
         let session = StreamingInferenceSession(model: model, config: config)
         streamingSession = session
 
-        if let activeMic = MicrophoneService.shared.getActiveMicrophone() {
-            _ = MicrophoneService.shared.setAsSystemDefaultInput(activeMic)
+        if let activeMic = MicrophoneService.shared.activateForRecording() {
             logger.info("Set system default input to: \(activeMic.displayName)")
         }
 
