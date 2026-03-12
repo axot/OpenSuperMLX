@@ -11,7 +11,7 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 - 🎙️ Real-time audio recording and transcription
 - 🔴 Streaming transcription — see results as you speak
 - 🧠 MLX-based transcription engine — download models directly from the app
-- ⌨️ Global keyboard shortcuts — key combination or single modifier key (e.g. Left ⌘, Right ⌥, Fn)
+- ⌨️ Global keyboard shortcuts — customizable key combination for recording toggle
 - 📁 Drag & drop audio files for transcription with queue processing
 - 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
 - 🌍 Support for multiple languages with auto-detection

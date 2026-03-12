@@ -1,6 +1,5 @@
 import AppKit
 import ApplicationServices
-import Carbon
 import Cocoa
 import Foundation
 import KeyboardShortcuts
@@ -16,20 +15,11 @@ class ShortcutManager {
     static let shared = ShortcutManager()
 
     private var activeVm: IndicatorViewModel?
-    private var useModifierOnlyHotkey = false
 
     private init() {
         print("ShortcutManager init")
         
         setupKeyboardShortcuts()
-        setupModifierKeyMonitor()
-        
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(hotkeySettingsChanged),
-            name: .hotkeySettingsChanged,
-            object: nil
-        )
         
         NotificationCenter.default.addObserver(
             self,
@@ -41,10 +31,6 @@ class ShortcutManager {
     
     @objc private func indicatorWindowDidHide() {
         activeVm = nil
-    }
-    
-    @objc private func hotkeySettingsChanged() {
-        setupModifierKeyMonitor()
     }
     
     private func setupKeyboardShortcuts() {
@@ -68,32 +54,7 @@ class ShortcutManager {
         KeyboardShortcuts.disable(.escape)
     }
     
-    private func setupModifierKeyMonitor() {
-        let modifierKeyString = AppPreferences.shared.modifierOnlyHotkey
-        let modifierKey = ModifierKey(rawValue: modifierKeyString) ?? .none
-        
-        if modifierKey != .none {
-            useModifierOnlyHotkey = true
-            KeyboardShortcuts.disable(.toggleRecord)
-            KeyboardShortcuts.disable(.toggleRecordWithLLM)
-            
-            ModifierKeyMonitor.shared.onKeyDown = { [weak self] in
-                self?.handleKeyDown()
-            }
-            
-            ModifierKeyMonitor.shared.start(modifierKey: modifierKey)
-            print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName)")
-        } else {
-            useModifierOnlyHotkey = false
-            ModifierKeyMonitor.shared.stop()
-            KeyboardShortcuts.enable(.toggleRecord)
-            KeyboardShortcuts.enable(.toggleRecordWithLLM)
-            print("ShortcutManager: Using regular keyboard shortcut")
-        }
-    }
-    
     private func handleKeyDown(forceLLM: Bool = false) {
-
         Task { @MainActor in
             if self.activeVm == nil {
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()

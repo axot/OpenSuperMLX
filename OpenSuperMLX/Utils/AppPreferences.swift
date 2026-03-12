@@ -41,6 +41,7 @@ final class AppPreferences {
         UserDefaults.standard.removeObject(forKey: "initialPrompt")
         UserDefaults.standard.removeObject(forKey: "useBeamSearch")
         UserDefaults.standard.removeObject(forKey: "beamSize")
+        UserDefaults.standard.removeObject(forKey: "modifierOnlyHotkey")
     }
     
     @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
@@ -73,9 +74,6 @@ final class AppPreferences {
     
     @OptionalUserDefault(key: "selectedMicrophoneData")
     var selectedMicrophoneData: Data?
-    
-    @UserDefault(key: "modifierOnlyHotkey", defaultValue: "none")
-    var modifierOnlyHotkey: String
     
     // MARK: - Bedrock LLM
     
