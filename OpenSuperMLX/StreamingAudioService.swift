@@ -326,7 +326,7 @@ class StreamingAudioService: ObservableObject {
         let recording: Recording
     }
 
-    func finalizeRecording(duration: TimeInterval = 0, forceLLM: Bool = false) async -> StreamingResult? {
+    func finalizeRecording(duration: TimeInterval = 0, applyCorrection: Bool = true, forceLLM: Bool = false) async -> StreamingResult? {
         guard let result = await stopStreaming() else { return nil }
 
         var text = result.text
@@ -334,8 +334,10 @@ class StreamingAudioService: ObservableObject {
             text = AutocorrectWrapper.format(text)
         }
 
-        // Apply Bedrock LLM correction (mirrors TranscriptionService line 142)
-        text = await BedrockService.shared.correctTranscription(text, forceEnabled: forceLLM)
+        // Apply Bedrock LLM correction (conditional — caller controls this for indicator state)
+        if applyCorrection {
+            text = await BedrockService.shared.correctTranscription(text, forceEnabled: forceLLM)
+        }
 
         let timestamp = Date()
         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"

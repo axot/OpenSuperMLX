@@ -7,6 +7,7 @@ enum RecordingState {
     case connecting
     case recording
     case decoding
+    case correcting
     case busy
 }
 
@@ -34,6 +35,8 @@ class IndicatorViewModel: ObservableObject {
     private let transcriptionService: TranscriptionService
     private let transcriptionQueue: TranscriptionQueue
     private let streamingService = StreamingAudioService.shared
+    private var correctionTask: Task<Void, Never>?
+    private var decodingTask: Task<Void, Never>?
     
     init() {
         self.recordingStore = RecordingStore.shared
@@ -64,7 +67,7 @@ class IndicatorViewModel: ObservableObject {
     }
     
     var isTranscriptionBusy: Bool {
-        transcriptionService.isTranscribing || transcriptionQueue.isProcessing || streamingService.isStreaming
+        transcriptionService.isTranscribing || transcriptionQueue.isProcessing || streamingService.isStreaming || state == .correcting
     }
     
     func showBusyMessage() {
@@ -122,10 +125,10 @@ class IndicatorViewModel: ObservableObject {
         if isStreamingMode {
             state = .decoding
             
-            Task { [weak self] in
+            decodingTask = Task { [weak self] in
                 guard let self = self else { return }
                 
-                guard let result = await self.streamingService.finalizeRecording(forceLLM: self.forceLLMCorrection) else {
+                guard let result = await self.streamingService.finalizeRecording(applyCorrection: false) else {
                     self.state = .idle
                     self.isStreamingMode = false
                     self.delegate?.didFinishDecoding()
@@ -133,8 +136,22 @@ class IndicatorViewModel: ObservableObject {
                 }
                 
                 self.recordingStore.addRecording(result.recording)
-                self.insertText(result.text)
-                print("Transcription result: \(result.text)")
+                
+                guard let finalText = await self.runLLMCorrectionIfNeeded(on: result.text) else {
+                    self.isStreamingMode = false
+                    self.delegate?.didFinishDecoding()
+                    return
+                }
+                
+                // Update recording in DB if correction changed the text
+                if finalText != result.text {
+                    var updatedRecording = result.recording
+                    updatedRecording.transcription = finalText
+                    self.recordingStore.updateRecording(updatedRecording)
+                }
+                
+                self.insertText(finalText)
+                print("Transcription result: \(finalText)")
                 
                 self.isStreamingMode = false
                 self.delegate?.didFinishDecoding()
@@ -149,26 +166,31 @@ class IndicatorViewModel: ObservableObject {
             state = .decoding
             
             if let tempURL = recorder.stopRecording() {
-                Task { [weak self] in
+                decodingTask = Task { [weak self] in
                     guard let self = self else { return }
                     
                     do {
                         print("start decoding...")
-                        let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), forceLLM: self.forceLLMCorrection)
+                        let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
+                        
+                        guard let finalText = await self.runLLMCorrectionIfNeeded(on: rawText) else {
+                            self.delegate?.didFinishDecoding()
+                            return
+                        }
                         
                         let timestamp = Date()
                         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
                         let recording = Recording(
                             id: UUID(), timestamp: timestamp, fileName: fileName,
-                            transcription: text, duration: 0,
+                            transcription: finalText, duration: 0,
                             status: .completed, progress: 1.0, sourceFileURL: nil
                         )
                         
                         try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
                         self.recordingStore.addRecording(recording)
                         
-                        self.insertText(text)
-                        print("Transcription result: \(text)")
+                        self.insertText(finalText)
+                        print("Transcription result: \(finalText)")
                     } catch {
                         print("Error transcribing audio: \(error)")
                         try? FileManager.default.removeItem(at: tempURL)
@@ -186,6 +208,37 @@ class IndicatorViewModel: ObservableObject {
     
     func insertText(_ text: String) {
         ClipboardUtil.insertText(text)
+    }
+    
+    // MARK: - LLM Correction
+    
+    /// Returns corrected text, the original text if correction is disabled, or `nil` if cancelled.
+    private func runLLMCorrectionIfNeeded(on text: String) async -> String? {
+        guard AppPreferences.shared.bedrockEnabled || forceLLMCorrection else {
+            return text
+        }
+        
+        state = .correcting
+        var correctedText = text
+        correctionTask = Task {
+            let result = await BedrockService.shared.correctTranscription(text, forceEnabled: self.forceLLMCorrection)
+            guard !Task.isCancelled else { return }
+            correctedText = result
+        }
+        await correctionTask?.value
+        correctionTask = nil
+        
+        guard !Task.isCancelled else { return nil }
+        return correctedText
+    }
+    
+    // MARK: - Task Cleanup
+    
+    private func cancelActiveTasks() {
+        decodingTask?.cancel()
+        decodingTask = nil
+        correctionTask?.cancel()
+        correctionTask = nil
     }
     
     private func startBlinking() {
@@ -209,6 +262,7 @@ class IndicatorViewModel: ObservableObject {
         stopBlinking()
         hideTimer?.invalidate()
         hideTimer = nil
+        cancelActiveTasks()
         if isStreamingMode {
             streamingService.cancelStreaming()
             isStreamingMode = false
@@ -219,6 +273,7 @@ class IndicatorViewModel: ObservableObject {
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
+        cancelActiveTasks()
         if isStreamingMode {
             streamingService.cancelStreaming()
             isStreamingMode = false
@@ -305,6 +360,17 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
                     
                     Text("Transcribing...")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+            case .correcting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .frame(width: 24)
+                    
+                    Text("Correcting...")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

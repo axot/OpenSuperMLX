@@ -81,7 +81,7 @@ class TranscriptionService: ObservableObject {
         reloadEngine()
     }
     
-    func transcribeAudio(url: URL, settings: Settings, forceLLM: Bool = false) async throws -> String {
+    func transcribeAudio(url: URL, settings: Settings, applyCorrection: Bool = true, forceLLM: Bool = false) async throws -> String {
         logger.info("Starting transcription for: \(url.lastPathComponent)")
         
         self.progress = 0.0
@@ -139,7 +139,12 @@ class TranscriptionService: ObservableObject {
             let result = try await engine.transcribeAudio(url: url, settings: settings)
             
             try Task.checkCancellation()
-            let correctedResult = await BedrockService.shared.correctTranscription(result, forceEnabled: forceLLM)
+            let correctedResult: String
+            if applyCorrection {
+                correctedResult = await BedrockService.shared.correctTranscription(result, forceEnabled: forceLLM)
+            } else {
+                correctedResult = result
+            }
             try Task.checkCancellation()
             
             await MainActor.run {

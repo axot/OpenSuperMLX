@@ -43,7 +43,7 @@ class ContentViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] isConnecting in
                 guard let self = self else { return }
-                if isConnecting && self.state != .decoding {
+                if isConnecting && !self.isProcessing {
                     self.state = .connecting
                     self.stopBlinking()
                     self.stopDurationTimer()
@@ -56,7 +56,7 @@ class ContentViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
                 guard let self = self, !self.isStreamingMode else { return }
-                if isRecording && self.state != .decoding {
+                if isRecording && !self.isProcessing {
                     self.state = .recording
                     self.startBlinking()
                     self.startDurationTimerIfNeeded()
@@ -179,6 +179,10 @@ class ContentViewModel: ObservableObject {
 
     var isTranscriptionBusy: Bool {
         transcriptionService.isTranscribing || transcriptionQueue.isProcessing || streamingService.isStreaming
+    }
+
+    var isProcessing: Bool {
+        state == .decoding || state == .correcting
     }
 
     func startRecording() {
@@ -594,7 +598,7 @@ struct ContentView: View {
                                 viewModel.startRecording()
                             }
                         }) {
-                            if viewModel.state == .decoding || viewModel.state == .connecting {
+                            if viewModel.isProcessing || viewModel.state == .connecting {
                                 ProgressView()
                                     .scaleEffect(1.0)
                                     .frame(width: 48, height: 48)
@@ -604,7 +608,7 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.state == .decoding)
+                        .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.isProcessing)
                         .padding(.top, 24)
                         .padding(.bottom, 16)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isRecording)
