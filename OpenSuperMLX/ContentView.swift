@@ -365,10 +365,7 @@ struct ContentView: View {
     @State private var searchTask: Task<Void, Never>? = nil
 
     private var currentShortcutDescription: String {
-        let modifierKey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
-        if modifierKey != .none {
-            return modifierKey.shortSymbol
-        } else if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleRecord) {
+        if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleRecord) {
             return shortcut.description
         }
         return ""

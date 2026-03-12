@@ -62,13 +62,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    @Published var modifierOnlyHotkey: ModifierKey {
-        didSet {
-            AppPreferences.shared.modifierOnlyHotkey = modifierOnlyHotkey.rawValue
-            NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
-        }
-    }
-    
     @Published var bedrockEnabled: Bool {
         didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
     }
@@ -118,7 +111,6 @@ class SettingsViewModel: ObservableObject {
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
-        self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
@@ -690,10 +682,6 @@ struct SettingsView: View {
         }
     }
     
-    private var useModifierKey: Bool {
-        viewModel.modifierOnlyHotkey != .none
-    }
-    
     private var shortcutSettings: some View {
         Form {
             VStack(spacing: 20) {
@@ -703,65 +691,23 @@ struct SettingsView: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    VStack(alignment: .leading, spacing: 16) {
-                        Picker("", selection: Binding(
-                            get: { useModifierKey },
-                            set: { newValue in
-                                if !newValue {
-                                    viewModel.modifierOnlyHotkey = .none
-                                } else if viewModel.modifierOnlyHotkey == .none {
-                                    viewModel.modifierOnlyHotkey = .leftCommand
-                                }
-                            }
-                        )) {
-                            Text("Key Combination").tag(false)
-                            Text("Single Modifier Key").tag(true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Shortcut")
+                                .font(.subheadline)
+                            Spacer()
+                            KeyboardShortcuts.Recorder("", name: .toggleRecord)
+                                .frame(width: 150)
                         }
-                        .pickerStyle(.segmented)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.textBackgroundColor).opacity(0.5))
+                        .cornerRadius(8)
                         
-                        if useModifierKey {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Modifier Key")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Picker("", selection: $viewModel.modifierOnlyHotkey) {
-                                        ForEach(ModifierKey.allCases.filter { $0 != .none }) { key in
-                                            Text(key.displayName).tag(key)
-                                        }
-                                    }
-                                    .pickerStyle(.menu)
-                                    .frame(width: 200)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(Color(.textBackgroundColor).opacity(0.5))
-                                .cornerRadius(8)
-                                
-                                Text("One-tap to toggle recording")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Shortcut")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    KeyboardShortcuts.Recorder("", name: .toggleRecord)
-                                        .frame(width: 150)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(Color(.textBackgroundColor).opacity(0.5))
-                                .cornerRadius(8)
-                                
-                                if isRecordingNewShortcut {
-                                    Text("Press your new shortcut combination...")
-                                        .foregroundColor(.secondary)
-                                        .font(.subheadline)
-                                }
-                            }
+                        if isRecordingNewShortcut {
+                            Text("Press your new shortcut combination...")
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
                         }
                     }
                 }
