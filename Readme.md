@@ -48,18 +48,6 @@ To build locally, you'll need:
 In case of problems, consult `.github/workflows/build.yml` which is our CI workflow
 where the app gets built automatically on GitHub's CI.
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit pull requests or create issues for bugs and feature requests.
-
-### Contribution TODO list
-
-- [x] Streaming transcription ([#22](https://github.com/axot/OpenSuperMLX/issues/22))
-- [ ] Custom dictionary ([#35](https://github.com/axot/OpenSuperMLX/issues/35))
-- [ ] Intel macOS compatibility ([#16](https://github.com/axot/OpenSuperMLX/issues/16))
-- [ ] Agent mode ([#14](https://github.com/axot/OpenSuperMLX/issues/14))
-- [x] Background app ([#9](https://github.com/axot/OpenSuperMLX/issues/9))
-
 ## License
 
 OpenSuperMLX is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
