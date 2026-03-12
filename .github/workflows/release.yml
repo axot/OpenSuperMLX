@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: brew install cmake libomp rust
+
+      - name: Set up Ruby (for xcpretty)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+
+      - name: Install xcpretty
+        run: gem install xcpretty
+
+      - name: Build Rust autocorrect dylib
+        run: |
+          mkdir -p build
+          cargo build -p autocorrect-swift --release --target aarch64-apple-darwin \
+            --manifest-path=asian-autocorrect/Cargo.toml
+          cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.dylib \
+            ./build/libautocorrect_swift.dylib
+          install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
+          codesign --force --sign - ./build/libautocorrect_swift.dylib
+
+      - name: Copy libomp
+        run: |
+          cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
+          install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
+          codesign --force --sign - ./build/libomp.dylib
+
+      - name: Resolve SPM packages and apply patches
+        run: |
+          chmod +x ./Scripts/resolve_and_patch.sh
+          ./Scripts/resolve_and_patch.sh
+
+      - name: Build app (Release)
+        run: |
+          xcodebuild -scheme OpenSuperMLX -configuration Release -jobs 8 \
+            -derivedDataPath build -quiet \
+            -destination 'platform=macOS,arch=arm64' \
+            -skipPackagePluginValidation -skipMacroValidation \
+            -UseModernBuildSystem=YES \
+            -clonedSourcePackagesDirPath SourcePackages \
+            -skipUnavailableActions \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | xcpretty --simple --color
+
+      - name: Create DMG
+        run: |
+          APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "❌ App not found at $APP_PATH"
+            exit 1
+          fi
+          mkdir -p dmg_staging
+          cp -R "$APP_PATH" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create -volname "OpenSuperMLX" -srcfolder dmg_staging \
+            -ov -format UDZO OpenSuperMLX.dmg
+          shasum -a 256 OpenSuperMLX.dmg > OpenSuperMLX.dmg.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          SHA256=$(cut -d' ' -f1 OpenSuperMLX.dmg.sha256)
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --notes "$(cat <<'EOF'
+          ## OpenSuperMLX
+
+          Real-time audio transcription for macOS powered by MLX on Apple Silicon.
+
+          ### Installation
+
+          1. Download **OpenSuperMLX.dmg** below
+          2. Open the DMG and drag OpenSuperMLX to Applications
+          3. On first launch: right-click the app → **Open** (required for unsigned apps)
+          4. Grant microphone and accessibility permissions when prompted
+
+          ### Requirements
+
+          - macOS 15.1 or later
+          - Apple Silicon (M1/M2/M3/M4) Mac
+
+          > ⚠️ This build is **not code-signed**. macOS will show an "unidentified developer" warning on first launch. Right-click → Open to bypass.
+          EOF
+          )" \
+            OpenSuperMLX.dmg \
+            OpenSuperMLX.dmg.sha256
