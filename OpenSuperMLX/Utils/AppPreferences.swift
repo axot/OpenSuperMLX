@@ -109,6 +109,6 @@ final class AppPreferences {
     @UserDefault(key: "bedrockCorrectionPrompt", defaultValue: BedrockService.defaultCorrectionPrompt)
     var bedrockCorrectionPrompt: String
 
-    @UserDefault(key: "useStreamingTranscription", defaultValue: false)
+    @UserDefault(key: "useStreamingTranscription", defaultValue: true)
     var useStreamingTranscription: Bool
 }
