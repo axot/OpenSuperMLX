@@ -32,12 +32,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
-    @Published var showTimestamps: Bool {
-        didSet {
-            AppPreferences.shared.showTimestamps = showTimestamps
-        }
-    }
-    
     @Published var temperature: Double {
         didSet {
             AppPreferences.shared.temperature = temperature
@@ -119,7 +113,6 @@ class SettingsViewModel: ObservableObject {
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
         self.suppressBlankAudio = prefs.suppressBlankAudio
-        self.showTimestamps = prefs.showTimestamps
         self.temperature = prefs.temperature
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
@@ -144,7 +137,6 @@ struct Settings {
     var selectedLanguage: String
     var translateToEnglish: Bool
     var suppressBlankAudio: Bool
-    var showTimestamps: Bool
     var temperature: Double
     var useAsianAutocorrect: Bool
     var useStreamingTranscription: Bool
@@ -162,7 +154,6 @@ struct Settings {
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
         self.suppressBlankAudio = prefs.suppressBlankAudio
-        self.showTimestamps = prefs.showTimestamps
         self.temperature = prefs.temperature
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.useStreamingTranscription = prefs.useStreamingTranscription
@@ -410,15 +401,6 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Show Timestamps")
-                                .font(.subheadline)
-                            Spacer()
-                            Toggle("", isOn: $viewModel.showTimestamps)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                .labelsHidden()
-                        }
-                        
                         HStack {
                             Text("Suppress Blank Audio")
                                 .font(.subheadline)

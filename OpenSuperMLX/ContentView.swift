@@ -966,16 +966,6 @@ struct RecordingRow: View {
                 .padding(.vertical, 8)
 
             HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(recording.timestamp, style: .date)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    Text(recording.timestamp, style: .time)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
                 if isRegenerating {
                     Spacer()
                         .frame(width: 2)

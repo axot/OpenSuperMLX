@@ -56,9 +56,6 @@ final class AppPreferences {
     @UserDefault(key: "suppressBlankAudio", defaultValue: true)
     var suppressBlankAudio: Bool
     
-    @UserDefault(key: "showTimestamps", defaultValue: false)
-    var showTimestamps: Bool
-    
     @UserDefault(key: "temperature", defaultValue: 0.0)
     var temperature: Double
     
