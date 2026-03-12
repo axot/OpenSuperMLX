@@ -15,9 +15,6 @@ class ShortcutManager {
     static let shared = ShortcutManager()
 
     private var activeVm: IndicatorViewModel?
-    private var holdWorkItem: DispatchWorkItem?
-    private let holdThreshold: TimeInterval = 0.3
-    private var holdMode = false
     private var useModifierOnlyHotkey = false
 
     private init() {
@@ -43,7 +40,6 @@ class ShortcutManager {
     
     @objc private func indicatorWindowDidHide() {
         activeVm = nil
-        holdMode = false
     }
     
     @objc private func hotkeySettingsChanged() {
@@ -53,10 +49,6 @@ class ShortcutManager {
     private func setupKeyboardShortcuts() {
         KeyboardShortcuts.onKeyDown(for: .toggleRecord) { [weak self] in
             self?.handleKeyDown()
-        }
-
-        KeyboardShortcuts.onKeyUp(for: .toggleRecord) { [weak self] in
-            self?.handleKeyUp()
         }
 
         KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
@@ -82,10 +74,6 @@ class ShortcutManager {
                 self?.handleKeyDown()
             }
             
-            ModifierKeyMonitor.shared.onKeyUp = { [weak self] in
-                self?.handleKeyUp()
-            }
-            
             ModifierKeyMonitor.shared.start(modifierKey: modifierKey)
             print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName)")
         } else {
@@ -97,11 +85,6 @@ class ShortcutManager {
     }
     
     private func handleKeyDown() {
-        holdWorkItem?.cancel()
-        holdMode = false
-        
-        let holdToRecordEnabled = AppPreferences.shared.holdToRecord
-        
         Task { @MainActor in
             if self.activeVm == nil {
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()
@@ -114,33 +97,11 @@ class ShortcutManager {
                 let vm = IndicatorWindowManager.shared.show(nearPoint: indicatorPoint)
                 vm.startRecording()
                 self.activeVm = vm
-            } else if !self.holdMode {
+            } else {
                 IndicatorWindowManager.shared.stopRecording()
                 self.activeVm = nil
             }
-        }
-        
-        if holdToRecordEnabled {
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.holdMode = true
-            }
-            holdWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold, execute: workItem)
         }
     }
     
-    private func handleKeyUp() {
-        holdWorkItem?.cancel()
-        holdWorkItem = nil
-        
-        let holdToRecordEnabled = AppPreferences.shared.holdToRecord
-        
-        Task { @MainActor in
-            if holdToRecordEnabled && self.holdMode {
-                IndicatorWindowManager.shared.stopRecording()
-                self.activeVm = nil
-                self.holdMode = false
-            }
-        }
-    }
 }

@@ -69,12 +69,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    @Published var holdToRecord: Bool {
-        didSet {
-            AppPreferences.shared.holdToRecord = holdToRecord
-        }
-    }
-    
     @Published var bedrockEnabled: Bool {
         didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
     }
@@ -125,7 +119,6 @@ class SettingsViewModel: ObservableObject {
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
-        self.holdToRecord = prefs.holdToRecord
         self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
@@ -784,20 +777,6 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     
                     VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Hold to Record")
-                                    .font(.subheadline)
-                                Text("Hold the shortcut to record, release to stop")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Toggle("", isOn: $viewModel.holdToRecord)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                .labelsHidden()
-                        }
-                        
                         HStack {
                             Text("Play sound when recording starts")
                                 .font(.subheadline)

@@ -12,7 +12,6 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 - 🔴 Streaming transcription — see results as you speak
 - 🧠 MLX-based transcription engine — download models directly from the app
 - ⌨️ Global keyboard shortcuts — key combination or single modifier key (e.g. Left ⌘, Right ⌥, Fn)
-- ✊ Hold-to-record mode — hold the shortcut to record, release to stop
 - 📁 Drag & drop audio files for transcription with queue processing
 - 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
 - 🌍 Support for multiple languages with auto-detection
@@ -60,7 +59,6 @@ Contributions are welcome! Please feel free to submit pull requests or create is
 - [ ] Intel macOS compatibility ([#16](https://github.com/axot/OpenSuperMLX/issues/16))
 - [ ] Agent mode ([#14](https://github.com/axot/OpenSuperMLX/issues/14))
 - [x] Background app ([#9](https://github.com/axot/OpenSuperMLX/issues/9))
-- [x] Support long-press single key audio recording ([#19](https://github.com/axot/OpenSuperMLX/issues/19))
 
 ## License
 

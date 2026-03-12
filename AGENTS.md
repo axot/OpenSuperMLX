@@ -62,7 +62,7 @@ OpenSuperMLX/                    # Main app target
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
 ├── MLXModelManager.swift        # Model catalog + custom model management
 ├── MicrophoneService.swift      # Audio device enumeration, selection, CoreAudio
-├── ShortcutManager.swift        # Global hotkey handling + hold-to-record
+├── ShortcutManager.swift        # Global hotkey handling
 ├── ModifierKeyMonitor.swift     # Single modifier key (⌘, ⌥, Fn) monitoring
 ├── FileDropHandler.swift        # Drag-and-drop audio file import
 ├── PermissionsManager.swift     # Microphone + accessibility permission checks

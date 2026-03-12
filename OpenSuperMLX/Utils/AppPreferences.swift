@@ -80,9 +80,6 @@ final class AppPreferences {
     @UserDefault(key: "modifierOnlyHotkey", defaultValue: "none")
     var modifierOnlyHotkey: String
     
-    @UserDefault(key: "holdToRecord", defaultValue: true)
-    var holdToRecord: Bool
-    
     // MARK: - Bedrock LLM
     
     @UserDefault(key: "bedrockEnabled", defaultValue: false)
