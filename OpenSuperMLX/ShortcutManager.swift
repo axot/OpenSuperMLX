@@ -8,6 +8,7 @@ import SwiftUI
 
 extension KeyboardShortcuts.Name {
     static let toggleRecord = Self("toggleRecord", default: .init(.backtick, modifiers: .option))
+    static let toggleRecordWithLLM = Self("toggleRecordWithLLM", default: .init(.backtick, modifiers: [.option, .shift]))
     static let escape = Self("escape", default: .init(.escape))
 }
 
@@ -51,6 +52,11 @@ class ShortcutManager {
             self?.handleKeyDown()
         }
 
+        KeyboardShortcuts.onKeyDown(for: .toggleRecordWithLLM) { [weak self] in
+            self?.handleKeyDown(forceLLM: true)
+        }
+
+
         KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
             Task { @MainActor in
                 if self?.activeVm != nil {
@@ -69,6 +75,7 @@ class ShortcutManager {
         if modifierKey != .none {
             useModifierOnlyHotkey = true
             KeyboardShortcuts.disable(.toggleRecord)
+            KeyboardShortcuts.disable(.toggleRecordWithLLM)
             
             ModifierKeyMonitor.shared.onKeyDown = { [weak self] in
                 self?.handleKeyDown()
@@ -80,11 +87,13 @@ class ShortcutManager {
             useModifierOnlyHotkey = false
             ModifierKeyMonitor.shared.stop()
             KeyboardShortcuts.enable(.toggleRecord)
+            KeyboardShortcuts.enable(.toggleRecordWithLLM)
             print("ShortcutManager: Using regular keyboard shortcut")
         }
     }
     
-    private func handleKeyDown() {
+    private func handleKeyDown(forceLLM: Bool = false) {
+
         Task { @MainActor in
             if self.activeVm == nil {
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()
@@ -95,6 +104,7 @@ class ShortcutManager {
                     indicatorPoint = cursorPosition
                 }
                 let vm = IndicatorWindowManager.shared.show(nearPoint: indicatorPoint)
+                if forceLLM { vm.forceLLMCorrection = true }
                 vm.startRecording()
                 self.activeVm = vm
             } else {

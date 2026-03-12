@@ -738,6 +738,18 @@ struct SettingsView: View {
                                 .background(Color(.textBackgroundColor).opacity(0.5))
                                 .cornerRadius(8)
                                 
+                                HStack {
+                                    Text("Record with LLM")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM)
+                                        .frame(width: 150)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .cornerRadius(8)
+                                
                                 if isRecordingNewShortcut {
                                     Text("Press your new shortcut combination...")
                                         .foregroundColor(.secondary)

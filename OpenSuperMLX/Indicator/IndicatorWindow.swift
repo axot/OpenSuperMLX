@@ -23,6 +23,7 @@ class IndicatorViewModel: ObservableObject {
     @Published var recorder: AudioRecorder = .shared
     @Published var isVisible = false
     @Published private(set) var isStreamingMode = false
+    var forceLLMCorrection: Bool = false
     
     var delegate: IndicatorViewDelegate?
     private var blinkTimer: Timer?
@@ -124,7 +125,7 @@ class IndicatorViewModel: ObservableObject {
             Task { [weak self] in
                 guard let self = self else { return }
                 
-                guard let result = await self.streamingService.finalizeRecording() else {
+                guard let result = await self.streamingService.finalizeRecording(forceLLM: self.forceLLMCorrection) else {
                     self.state = .idle
                     self.isStreamingMode = false
                     self.delegate?.didFinishDecoding()
@@ -153,7 +154,7 @@ class IndicatorViewModel: ObservableObject {
                     
                     do {
                         print("start decoding...")
-                        let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                        let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), forceLLM: self.forceLLMCorrection)
                         
                         let timestamp = Date()
                         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"

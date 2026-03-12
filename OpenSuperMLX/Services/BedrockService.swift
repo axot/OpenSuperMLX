@@ -58,10 +58,10 @@ final class BedrockService {
 
     // MARK: - Public API
 
-    func correctTranscription(_ text: String) async -> String {
+    func correctTranscription(_ text: String, forceEnabled: Bool = false) async -> String {
         let prefs = AppPreferences.shared
 
-        guard prefs.bedrockEnabled else {
+        guard forceEnabled || prefs.bedrockEnabled else {
             return text
         }
 
