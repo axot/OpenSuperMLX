@@ -11,7 +11,10 @@ import Carbon
 import Cocoa
 import Foundation
 import KeyboardShortcuts
+import os
 import SwiftUI
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "FocusUtils")
 
 class FocusUtils {
     
@@ -29,14 +32,13 @@ class FocusUtils {
                                                          kAXFocusedUIElementAttribute as CFString,
                                                          &focusedElement)
         
-        print("errorFocused: \(errorFocused)")
         guard errorFocused == .success else {
-            print("Не удалось получить фокусированный элемент")
+            logger.warning("Failed to get focused element: \(String(describing: errorFocused), privacy: .public)")
             return nil
         }
         
-        guard let focusedElementCF = focusedElement else { // Optional binding to safely unwrap CFTypeRef
-            print("Не удалось получить фокусированный элемент (CFTypeRef is nil)") // Extra safety check, though unlikely
+        guard let focusedElementCF = focusedElement else {
+            logger.warning("Focused element is nil after successful AX query")
             return nil
         }
         
@@ -49,7 +51,7 @@ class FocusUtils {
         guard errorRange == .success,
               let textRange = selectedTextRange
         else {
-            print("Не удалось получить диапазон выделенного текста")
+            logger.warning("Failed to get selected text range: \(String(describing: errorRange), privacy: .public)")
             return nil
         }
         
@@ -60,9 +62,8 @@ class FocusUtils {
                                                                      textRange,
                                                                      &caretBounds)
         
-        print("errorbounds: \(errorBounds), caretBounds \(String(describing: caretBounds))")
         guard errorBounds == .success else {
-            print("Не удалось получить границы каретки")
+            logger.warning("Failed to get bounds: \(String(describing: errorBounds), privacy: .public), caretBounds: \(String(describing: caretBounds), privacy: .public)")
             return nil
         }
         
@@ -102,7 +103,7 @@ class FocusUtils {
                                                    &focusedWindow)
         
         guard result == .success else {
-            print("Не удалось получить сфокусированное окно")
+            logger.warning("Failed to get focused window: \(String(describing: result), privacy: .public)")
             return NSScreen.main
         }
         let windowElement = focusedWindow as! AXUIElement
@@ -114,14 +115,14 @@ class FocusUtils {
                                                         &windowFrameValue)
         
         guard frameResult == .success else {
-            print("Не удалось получить фрейм окна")
+            logger.warning("Failed to get window frame: \(String(describing: frameResult), privacy: .public)")
             return NSScreen.main
         }
         let frameValue = windowFrameValue as! AXValue
         
         var windowFrame = CGRect.zero
         guard AXValueGetValue(frameValue, AXValueType.cgRect, &windowFrame) else {
-            print("Не удалось извлечь CGRect из AXValue")
+            logger.warning("Failed to extract CGRect from AXValue for window frame")
             return NSScreen.main
         }
         
@@ -142,14 +143,14 @@ private extension AXValue {
         let type: AXValueType = AXValueGetType(self)
         
         guard type == .cgRect else {
-            print("AXValue is not of type CGRect, but \(type)") // More informative error
+            logger.warning("AXValue is not of type CGRect, but \(String(describing: type), privacy: .public)")
             return nil
         }
         
         let success = AXValueGetValue(self, .cgRect, &rect)
         
         guard success else {
-            print("Failed to get CGRect value from AXValue")
+            logger.warning("Failed to get CGRect value from AXValue")
             return nil
         }
         return rect

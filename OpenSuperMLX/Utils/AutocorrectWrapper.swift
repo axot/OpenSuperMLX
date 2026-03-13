@@ -1,6 +1,8 @@
 import Foundation
+import os
 
 /// Swift wrapper for the autocorrect C library
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "AutocorrectWrapper")
 class AutocorrectWrapper {
     
     /// Format text using autocorrect
@@ -10,12 +12,12 @@ class AutocorrectWrapper {
         guard !text.isEmpty else { return text }
         
         guard let cText = text.cString(using: .utf8) else {
-            print("Failed to convert text to C string")
+            logger.error("Failed to convert text to C string")
             return text
         }
         
         guard let formattedCString = autocorrect_format(cText) else {
-            print("Autocorrect format returned null")
+            logger.error("Autocorrect format returned null")
             return text
         }
         
@@ -24,7 +26,7 @@ class AutocorrectWrapper {
         }
         
         guard let formattedText = String(cString: formattedCString, encoding: .utf8) else {
-            print("Failed to convert formatted C string back to Swift string")
+            logger.error("Failed to convert formatted C string back to Swift string")
             return text
         }
         
@@ -41,12 +43,12 @@ class AutocorrectWrapper {
         
         guard let cText = text.cString(using: .utf8),
               let cFilename = filename.cString(using: .utf8) else {
-            print("Failed to convert text or filename to C string")
+            logger.error("Failed to convert text or filename to C string")
             return text
         }
         
         guard let formattedCString = autocorrect_format_for(cText, cFilename) else {
-            print("Autocorrect format_for returned null")
+            logger.error("Autocorrect format_for returned null")
             return text
         }
         
@@ -55,7 +57,7 @@ class AutocorrectWrapper {
         }
         
         guard let formattedText = String(cString: formattedCString, encoding: .utf8) else {
-            print("Failed to convert formatted C string back to Swift string")
+            logger.error("Failed to convert formatted C string back to Swift string")
             return text
         }
         

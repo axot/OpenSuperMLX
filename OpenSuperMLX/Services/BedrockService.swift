@@ -51,9 +51,18 @@ final class BedrockService {
 
     // MARK: - Error Types
 
-    private enum BedrockError: Error {
+    private enum BedrockError: LocalizedError {
         case timeout
         case emptyResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .timeout:
+                return "Request to Bedrock service timed out."
+            case .emptyResponse:
+                return "Bedrock service returned an empty response."
+            }
+        }
     }
 
     // MARK: - Public API
@@ -84,6 +93,9 @@ final class BedrockService {
             let config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(
                 region: prefs.bedrockRegion
             )
+            if AppPreferences.shared.debugMode {
+                logger.debug("[DEBUG] Bedrock request: region=\(prefs.bedrockRegion, privacy: .public), modelId=\(prefs.bedrockModelId, privacy: .public), authMode=\(prefs.bedrockAuthMode, privacy: .public), inputLength=\(text.count, privacy: .public)")
+            }
 
             switch prefs.bedrockAuthMode {
             case "profile":
@@ -147,10 +159,13 @@ final class BedrockService {
             }
 
             logger.info("Bedrock correction applied successfully")
+            if AppPreferences.shared.debugMode {
+                logger.debug("[DEBUG] Bedrock response: outputLength=\(trimmedResult.count, privacy: .public), inputLength=\(text.count, privacy: .public), changed=\(trimmedResult != text.trimmingCharacters(in: .whitespacesAndNewlines), privacy: .public)")
+            }
             return trimmedResult
 
         } catch {
-            logger.error("Bedrock correction failed: \(error.localizedDescription)")
+            logger.error("Bedrock correction failed: \(error.localizedDescription, privacy: .public)")
             NotificationCenter.default.post(
                 name: .bedrockCorrectionFailed,
                 object: nil,

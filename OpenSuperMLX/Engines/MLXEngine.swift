@@ -30,10 +30,13 @@ class MLXEngine: TranscriptionEngine {
     func initialize() async throws {
         let modelId = AppPreferences.shared.selectedMLXModel
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
-        logger.info("Initializing MLX model: \(modelId) from \(MLXModelManager.modelsDirectory.path)")
+        logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
         let model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache)
         self.model = model
         logger.info("MLX model initialized")
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] MLX engine config: modelId=\(modelId, privacy: .public), cacheDir=\(MLXModelManager.modelsDirectory.path, privacy: .public)")
+        }
     }
 
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
@@ -43,7 +46,7 @@ class MLXEngine: TranscriptionEngine {
 
         isCancelled = false
         onProgressUpdate?(0.02)
-        logger.info("Transcribing: \(url.lastPathComponent)")
+        logger.info("Transcribing: \(url.lastPathComponent, privacy: .public)")
 
         guard !isCancelled else {
             throw CancellationError()
@@ -52,7 +55,7 @@ class MLXEngine: TranscriptionEngine {
         logger.info("Loading audio...")
         let (_, audio) = try loadAudioArray(from: url, sampleRate: 16000)
         let audioDurationSec = Float(audio.shape[0]) / 16000.0
-        logger.info("Audio loaded, samples: \(audio.shape[0]), duration: \(audioDurationSec)s")
+        logger.info("Audio loaded, samples: \(audio.shape[0], privacy: .public), duration: \(audioDurationSec, privacy: .public)s")
 
         onProgressUpdate?(0.10)
 
@@ -66,11 +69,18 @@ class MLXEngine: TranscriptionEngine {
         let chunkDuration: Float = 1200.0
         let expectedChunks = max(1, Int(ceil(audioDurationSec / chunkDuration)))
         let maxTokens = expectedChunks * 4096
-        logger.info("Generating with language: \(language), maxTokens: \(maxTokens), chunks: ~\(expectedChunks), chunkDuration: \(chunkDuration)s")
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Generation params: language=\(language, privacy: .public), maxTokens=\(maxTokens, privacy: .public), chunks=\(expectedChunks, privacy: .public), chunkDuration=\(chunkDuration, privacy: .public)s, memoryCacheLimit=64MB")
+        }
+        logger.info("Generating with language: \(language, privacy: .public), maxTokens: \(maxTokens, privacy: .public), chunks: ~\(expectedChunks, privacy: .public), chunkDuration: \(chunkDuration, privacy: .public)s")
         let startTime = Date()
         let output = model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
         let elapsed = Date().timeIntervalSince(startTime)
-        logger.info("Generate completed in \(String(format: "%.1f", elapsed))s, tokens: \(output.totalTokens), text length: \(output.text.count)")
+        logger.info("Generate completed in \(String(format: "%.1f", elapsed), privacy: .public)s, tokens: \(output.totalTokens, privacy: .public), text length: \(output.text.count, privacy: .public)")
+        if AppPreferences.shared.debugMode {
+            let tokensPerSec = elapsed > 0 ? Double(output.totalTokens) / elapsed : 0
+            logger.debug("[DEBUG] Generate performance: elapsed=\(String(format: "%.2f", elapsed), privacy: .public)s, tokensPerSec=\(String(format: "%.1f", tokensPerSec), privacy: .public), autocorrect=\(settings.shouldApplyAsianAutocorrect, privacy: .public)")
+        }
 
         Memory.clearCache()
 

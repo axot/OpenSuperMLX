@@ -1,5 +1,6 @@
 import Cocoa
 import Combine
+import os
 import SwiftUI
 
 enum RecordingState {
@@ -30,6 +31,7 @@ class IndicatorViewModel: ObservableObject {
     private var blinkTimer: Timer?
     private var hideTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "IndicatorViewModel")
     
     private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
@@ -96,7 +98,7 @@ class IndicatorViewModel: ObservableObject {
                 do {
                     try await streamingService.startStreaming()
                 } catch {
-                    print("Failed to start streaming: \(error)")
+                    logger.error("Failed to start streaming: \(error, privacy: .public)")
                     state = .idle
                     isStreamingMode = false
                     stopBlinking()
@@ -192,7 +194,7 @@ class IndicatorViewModel: ObservableObject {
                         self.insertText(finalText)
                         print("Transcription result: \(finalText)")
                     } catch {
-                        print("Error transcribing audio: \(error)")
+                        logger.error("Error transcribing audio: \(error, privacy: .public)")
                         try? FileManager.default.removeItem(at: tempURL)
                     }
                     
@@ -200,7 +202,7 @@ class IndicatorViewModel: ObservableObject {
                 }
             } else {
                 
-                print("!!! Not found record url !!!")
+                logger.warning("No recording URL found after stopping recorder")
                 self.delegate?.didFinishDecoding()
             }
         }

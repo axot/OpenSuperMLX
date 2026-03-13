@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 import AVFoundation
+import os
 
 @MainActor
 class FileDropHandler: ObservableObject {
@@ -10,6 +11,7 @@ class FileDropHandler: ObservableObject {
     @Published var isDragging = false
     
     private let transcriptionQueue: TranscriptionQueue
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "FileDropHandler")
     
     private init() {
         self.transcriptionQueue = TranscriptionQueue.shared
@@ -30,7 +32,7 @@ class FileDropHandler: ObservableObject {
                     }
                     
                     guard let url = url else {
-                        print("Error loading item: not a URL")
+                        logger.error("Error loading item: not a URL")
                         continue
                     }
                     
@@ -38,7 +40,7 @@ class FileDropHandler: ObservableObject {
                     await transcriptionQueue.addFileToQueue(url: url)
                     
                 } catch {
-                    print("Error loading dropped audio file: \(error)")
+                    logger.error("Error loading dropped audio file: \(error, privacy: .public)")
                 }
             }
         }
