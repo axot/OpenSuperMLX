@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os
 import SwiftUI
 import AppKit
 import CoreAudio
@@ -20,6 +21,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var microphoneChangeObserver: Any?
     private var connectionCheckTimer: DispatchSourceTimer?
     private var recordingDeviceID: AudioDeviceID?
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "AudioRecorder")
 
     // MARK: - Singleton Instance
 
@@ -79,14 +81,14 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create temporary recordings directory: \(error)")
+            logger.error("Failed to create temporary recordings directory: \(error, privacy: .public)")
         }
     }
     
     private func playNotificationSound() {
         // Try to play using NSSound first
         guard let soundURL = Bundle.main.url(forResource: "notification", withExtension: "mp3") else {
-            print("Failed to find notification sound file")
+            logger.warning("Failed to find notification sound file")
             // Fall back to system sound if notification.mp3 is not found
             NSSound.beep()
             return
@@ -98,7 +100,7 @@ class AudioRecorder: NSObject, ObservableObject {
             sound.play()
             notificationSound = sound
         } else {
-            print("Failed to create NSSound from URL, falling back to system beep")
+            logger.warning("Failed to create NSSound from URL, falling back to system beep")
             // Fall back to system beep if NSSound creation fails
             NSSound.beep()
         }
@@ -168,7 +170,7 @@ class AudioRecorder: NSObject, ObservableObject {
             }
             print("Recording started successfully")
         } catch {
-            print("Failed to start recording: \(error)")
+            logger.error("Failed to start recording: \(error, privacy: .public)")
             currentRecordingURL = nil
             updateRecordingState(isRecording: false, isConnecting: false)
         }
@@ -229,7 +231,7 @@ class AudioRecorder: NSObject, ObservableObject {
             isPlaying = true
             currentlyPlayingURL = url
         } catch {
-            print("Failed to play recording: \(error), url: \(url)")
+            logger.error("Failed to play recording: \(error, privacy: .public), url: \(url, privacy: .public)")
             isPlaying = false
             currentlyPlayingURL = nil
         }

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import os
 
 @MainActor
 class TranscriptionQueue: ObservableObject {
@@ -11,6 +12,7 @@ class TranscriptionQueue: ObservableObject {
 
     private let transcriptionService: TranscriptionService
     private let recordingStore: RecordingStore
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionQueue")
     private var processingTask: Task<Void, Never>?
     private var currentTranscriptionTask: Task<Void, Never>?
     private var cancelledRecordingIds: Set<UUID> = []
@@ -124,7 +126,7 @@ class TranscriptionQueue: ObservableObject {
 
             startProcessingQueue()
         } catch {
-            print("Failed to add file to queue: \(error)")
+            logger.error("Failed to add file to queue: \(error, privacy: .public)")
         }
     }
 
@@ -160,7 +162,7 @@ class TranscriptionQueue: ObservableObject {
         do {
             try await recordingStore.updateSourceFileURL(recording.id, sourceURL: sourceURL.path)
         } catch {
-            print("Failed to update source URL: \(error)")
+            logger.error("Failed to update source URL: \(error, privacy: .public)")
         }
 
         startProcessingQueue()

@@ -91,14 +91,20 @@ class StreamingAudioService: ObservableObject {
         )
         let session = StreamingInferenceSession(model: model, config: config)
         streamingSession = session
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public), decodeInterval=\(config.decodeIntervalSeconds, privacy: .public)s")
+        }
 
         if let activeMic = MicrophoneService.shared.activateForRecording() {
-            logger.info("Set system default input to: \(activeMic.displayName)")
+            logger.info("Set system default input to: \(activeMic.displayName, privacy: .public)")
         }
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Audio input: sampleRate=\(nativeFormat.sampleRate, privacy: .public)Hz, channels=\(nativeFormat.channelCount, privacy: .public), bufferSize=4096")
+        }
 
         let targetSampleRate: Double = 16000
         guard let targetFormat = AVAudioFormat(
@@ -113,7 +119,7 @@ class StreamingAudioService: ObservableObject {
         let converter: AVAudioConverter?
         if nativeFormat.sampleRate != targetSampleRate || nativeFormat.channelCount != 1 {
             converter = AVAudioConverter(from: nativeFormat, to: targetFormat)
-            logger.info("Audio converter: \(nativeFormat.sampleRate)Hz/\(nativeFormat.channelCount)ch → 16kHz/1ch")
+            logger.info("Audio converter: \(nativeFormat.sampleRate, privacy: .public)Hz/\(nativeFormat.channelCount, privacy: .public)ch → 16kHz/1ch")
         } else {
             converter = nil
             logger.info("Native format already 16kHz mono")
@@ -201,7 +207,7 @@ class StreamingAudioService: ObservableObject {
                     do {
                         try writer.writeChunk(samples)
                     } catch {
-                        logger.error("Failed to write WAV chunk: \(error)")
+                        logger.error("Failed to write WAV chunk: \(error, privacy: .public)")
                     }
                 }
 
@@ -233,6 +239,9 @@ class StreamingAudioService: ObservableObject {
             buffer.removeAll()
             return drained
         }
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Stop streaming: remainingSamples=\(remainingSamples.count, privacy: .public), confirmedTextLength=\(self.confirmedText.count, privacy: .public)")
+        }
 
         if let session = streamingSession, !remainingSamples.isEmpty {
             session.feedAudio(samples: remainingSamples)
@@ -242,7 +251,7 @@ class StreamingAudioService: ObservableObject {
             do {
                 try writer.writeChunk(remainingSamples)
             } catch {
-                logger.error("Failed to write final WAV chunk: \(error)")
+                logger.error("Failed to write final WAV chunk: \(error, privacy: .public)")
             }
         }
 
@@ -264,7 +273,7 @@ class StreamingAudioService: ObservableObject {
         if let startTime = recordingStartTime {
             let duration = Date().timeIntervalSince(startTime)
             if duration < 1.0 {
-                logger.info("Recording too short (\(String(format: "%.1f", duration))s), discarding")
+                logger.info("Recording too short (\(String(format: "%.1f", duration), privacy: .public)s), discarding")
                 if let url = finalURL {
                     try? FileManager.default.removeItem(at: url)
                 }
@@ -281,7 +290,7 @@ class StreamingAudioService: ObservableObject {
         let url = finalURL ?? currentWAVURL
         currentWAVURL = nil
 
-        logger.info("Streaming stopped, WAV at: \(url?.lastPathComponent ?? "nil")")
+        logger.info("Streaming stopped, WAV at: \(url?.lastPathComponent ?? "nil", privacy: .public)")
         ringBuffer.withLock { $0.removeAll() }
         guard let url else { return nil }
         return (text: finalText, url: url)
@@ -310,7 +319,7 @@ class StreamingAudioService: ObservableObject {
         wavWriter = nil
         if let url = currentWAVURL {
             try? FileManager.default.removeItem(at: url)
-            logger.info("Cancelled streaming, deleted WAV: \(url.lastPathComponent)")
+            logger.info("Cancelled streaming, deleted WAV: \(url.lastPathComponent, privacy: .public)")
         }
         currentWAVURL = nil
 
@@ -350,7 +359,7 @@ class StreamingAudioService: ObservableObject {
         do {
             try AudioRecorder.shared.moveTemporaryRecording(from: result.url, to: recording.url)
         } catch {
-            print("Error moving recording: \(error)")
+            logger.error("Error moving recording: \(error, privacy: .public)")
         }
 
         return StreamingResult(text: text, recording: recording)
@@ -371,14 +380,16 @@ class StreamingAudioService: ObservableObject {
             provisionalText = provisional
 
         case .stats(let stats):
-            logger.debug(
-                "Stats: \(stats.tokensPerSecond, format: .fixed(precision: 1)) tok/s, \(stats.totalAudioSeconds, format: .fixed(precision: 1))s audio, \(stats.peakMemoryGB, format: .fixed(precision: 2)) GB"
-            )
+            if AppPreferences.shared.debugMode {
+                logger.debug(
+                    "Stats: \(stats.tokensPerSecond, format: .fixed(precision: 1), privacy: .public) tok/s, \(stats.totalAudioSeconds, format: .fixed(precision: 1), privacy: .public)s audio, \(stats.peakMemoryGB, format: .fixed(precision: 2), privacy: .public) GB"
+                )
+            }
 
         case .ended(let fullText):
             confirmedText = fullText
             provisionalText = ""
-            logger.info("Streaming ended, full text length: \(fullText.count)")
+            logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public)")
         }
     }
 

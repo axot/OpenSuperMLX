@@ -43,6 +43,9 @@ class TranscriptionService: ObservableObject {
     
     private func loadEngine() {
         logger.info("Loading MLX engine")
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Engine load requested: model=\(AppPreferences.shared.selectedMLXModel, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
+        }
         
         isLoading = true
         loadError = nil
@@ -59,7 +62,7 @@ class TranscriptionService: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.loadError = error
-                    logger.error("Failed to load MLX engine: \(error)")
+                    logger.error("Failed to load MLX engine: \(error, privacy: .public)")
                 }
             }
             
@@ -82,7 +85,10 @@ class TranscriptionService: ObservableObject {
     }
     
     func transcribeAudio(url: URL, settings: Settings, applyCorrection: Bool = true, forceLLM: Bool = false) async throws -> String {
-        logger.info("Starting transcription for: \(url.lastPathComponent)")
+        logger.info("Starting transcription for: \(url.lastPathComponent, privacy: .public)")
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Transcription settings: language=\(settings.selectedLanguage, privacy: .public), temperature=\(settings.temperature, privacy: .public), applyCorrection=\(applyCorrection, privacy: .public), forceLLM=\(forceLLM, privacy: .public)")
+        }
         
         self.progress = 0.0
         self.isTranscribing = true
@@ -107,7 +113,10 @@ class TranscriptionService: ObservableObject {
         }.value) ?? 0.0
         
         self.totalDuration = durationInSeconds
-        logger.info("Audio duration: \(durationInSeconds)s")
+        logger.info("Audio duration: \(durationInSeconds, privacy: .public)s")
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Engine state: engineLoaded=\(self.currentEngine != nil, privacy: .public), isTranscribing=\(self.isTranscribing, privacy: .public), totalDuration=\(durationInSeconds, privacy: .public)s")
+        }
         
         guard let engine = currentEngine else {
             throw TranscriptionError.contextInitializationFailed
@@ -151,7 +160,7 @@ class TranscriptionService: ObservableObject {
                 guard let self = self, !self.isCancelled else { return }
                 self.transcribedText = correctedResult
                 self.progress = 1.0
-                logger.info("Transcription completed: \(correctedResult.prefix(50))...")
+                logger.info("Transcription completed: \(correctedResult.prefix(50), privacy: .public)...")
             }
             
             return correctedResult
@@ -168,9 +177,22 @@ class TranscriptionService: ObservableObject {
     }
 }
 
-enum TranscriptionError: Error {
+enum TranscriptionError: LocalizedError {
     case contextInitializationFailed
     case audioConversionFailed
     case processingFailed
     case cancelled
+
+    var errorDescription: String? {
+        switch self {
+        case .contextInitializationFailed:
+            return "Failed to initialize transcription context."
+        case .audioConversionFailed:
+            return "Failed to convert audio to the required format."
+        case .processingFailed:
+            return "An error occurred during transcription processing."
+        case .cancelled:
+            return "Transcription was cancelled."
+        }
+    }
 }

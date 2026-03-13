@@ -1,4 +1,5 @@
 import Foundation
+import os
 import GRDB
 
 enum RecordingStatus: String, Codable {
@@ -74,6 +75,7 @@ class RecordingStore: ObservableObject {
 
     @Published private(set) var recordings: [Recording] = []
     private let dbQueue: DatabaseQueue
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "RecordingStore")
 
     private init() {
         let applicationSupport = FileManager.default.urls(
@@ -157,7 +159,7 @@ class RecordingStore: ObservableObject {
                     .fetchAll(db)
             }
         } catch {
-            print("Failed to get pending recordings: \(error)")
+            logger.error("Failed to get pending recordings: \(error, privacy: .public)")
             return []
         }
     }
@@ -172,7 +174,7 @@ class RecordingStore: ObservableObject {
                     .fetchOne(db)
             }
         } catch {
-            print("Failed to get next pending recording: \(error)")
+            logger.error("Failed to get next pending recording: \(error, privacy: .public)")
             return nil
         }
     }
@@ -180,6 +182,9 @@ class RecordingStore: ObservableObject {
     static let recordingsDidUpdateNotification = Notification.Name("RecordingStore.recordingsDidUpdate")
 
     func addRecording(_ recording: Recording) {
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Adding recording: id=\(recording.id, privacy: .public), status=\(recording.status.rawValue, privacy: .public), fileName=\(recording.fileName, privacy: .public)")
+        }
         Task {
             do {
                 try await insertRecording(recording)
@@ -187,7 +192,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to add recording: \(error)")
+                logger.error("Failed to add recording: \(error, privacy: .public)")
             }
         }
     }
@@ -213,7 +218,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to update recording: \(error)")
+                logger.error("Failed to update recording: \(error, privacy: .public)")
             }
         }
     }
@@ -269,7 +274,7 @@ class RecordingStore: ObservableObject {
                 NotificationCenter.default.post(name: Self.recordingProgressDidUpdateNotification, object: nil, userInfo: userInfo)
             }
         } catch {
-            print("Failed to update recording progress: \(error)")
+            logger.error("Failed to update recording progress: \(error, privacy: .public)")
         }
     }
 
@@ -316,7 +321,7 @@ class RecordingStore: ObservableObject {
                 NotificationCenter.default.post(name: Self.recordingProgressDidUpdateNotification, object: nil, userInfo: userInfo)
             }
         } catch {
-            print("Failed to update recording status: \(error)")
+            logger.error("Failed to update recording status: \(error, privacy: .public)")
         }
     }
 
@@ -327,6 +332,9 @@ class RecordingStore: ObservableObject {
     }
 
     func deleteRecording(_ recording: Recording) {
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Deleting recording: id=\(recording.id, privacy: .public), fileName=\(recording.fileName, privacy: .public), isPending=\(recording.isPending, privacy: .public)")
+        }
         if recording.isPending {
             TranscriptionQueue.shared.cancelRecording(recording.id)
         }
@@ -339,7 +347,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to delete recording: \(error)")
+                logger.error("Failed to delete recording: \(error, privacy: .public)")
             }
         }
     }
@@ -362,7 +370,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to delete all recordings: \(error)")
+                logger.error("Failed to delete all recordings: \(error, privacy: .public)")
             }
         }
     }
@@ -375,15 +383,19 @@ class RecordingStore: ObservableObject {
 
     func searchRecordings(query: String) -> [Recording] {
         do {
-            return try dbQueue.read { db in
+            let results = try dbQueue.read { db in
                 try Recording
                     .filter(Recording.Columns.transcription.like("%\(query)%").collating(.nocase))
                     .order(Recording.Columns.timestamp.desc)
                     .limit(100)
                     .fetchAll(db)
             }
+            if AppPreferences.shared.debugMode {
+                logger.debug("[DEBUG] Search recordings: query=\(query, privacy: .public), results=\(results.count, privacy: .public)")
+            }
+            return results
         } catch {
-            print("Failed to search recordings: \(error)")
+            logger.error("Failed to search recordings: \(error, privacy: .public)")
             return []
         }
     }
@@ -398,7 +410,7 @@ class RecordingStore: ObservableObject {
                     .fetchAll(db)
             }
         } catch {
-            print("Failed to search recordings: \(error)")
+            logger.error("Failed to search recordings: \(error, privacy: .public)")
             return []
         }
     }

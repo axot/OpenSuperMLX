@@ -8,6 +8,7 @@
 import AVFoundation
 import Combine
 import KeyboardShortcuts
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -30,6 +31,7 @@ class ContentViewModel: ObservableObject {
     @Published private(set) var isStreamingMode = false
     
     private let streamingService = StreamingAudioService.shared
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "ContentView")
     private var currentPage = 0
     private let pageSize = 100
     private var currentSearchQuery = ""
@@ -202,7 +204,7 @@ class ContentViewModel: ObservableObject {
                 do {
                     try await streamingService.startStreaming()
                 } catch {
-                    print("Failed to start streaming: \(error)")
+                    logger.error("Failed to start streaming: \(error, privacy: .public)")
                     state = .idle
                     isStreamingMode = false
                     stopBlinking()
@@ -291,7 +293,7 @@ class ContentViewModel: ObservableObject {
 
                     print("Transcription result: \(text)")
                 } catch {
-                    print("Error transcribing audio: \(error)")
+                    logger.error("Error transcribing audio: \(error, privacy: .public)")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
 

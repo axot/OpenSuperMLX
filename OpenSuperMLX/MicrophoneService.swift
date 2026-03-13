@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import Combine
 import CoreAudio
+import os
 
 class MicrophoneService: ObservableObject {
     static let shared = MicrophoneService()
@@ -12,6 +13,7 @@ class MicrophoneService: ObservableObject {
     
     private var deviceChangeObserver: Any?
     private var timer: Timer?
+    private let logger = Logger(subsystem: "OpenSuperMLX", category: "MicrophoneService")
     
     struct AudioDevice: Identifiable, Equatable, Codable {
         let id: String
@@ -89,6 +91,9 @@ class MicrophoneService: ObservableObject {
                     isBuiltIn: isBuiltIn
                 )
             }
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Discovered \(self.availableMicrophones.count, privacy: .public) microphones: \(self.availableMicrophones.map { $0.name }.joined(separator: ", "), privacy: .public)")
+        }
         
         if availableMicrophones.isEmpty {
             selectedMicrophone = nil
@@ -164,6 +169,9 @@ class MicrophoneService: ObservableObject {
         selectedMicrophone = device
         saveMicrophone(device)
         updateCurrentMicrophone()
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Microphone selected: name=\(device.name, privacy: .public), id=\(device.id, privacy: .public), isBuiltIn=\(device.isBuiltIn, privacy: .public), manufacturer=\(device.manufacturer ?? "unknown", privacy: .public)")
+        }
         
         NotificationCenter.default.post(
             name: .microphoneDidChange,
@@ -181,12 +189,15 @@ class MicrophoneService: ObservableObject {
     /// device whose host app isn't running), updating selection state accordingly.
     func activateForRecording() -> AudioDevice? {
         guard let device = getActiveMicrophone() else { return nil }
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Activating microphone for recording: name=\(device.name, privacy: .public), isBluetooth=\(self.isBluetoothMicrophone(device), privacy: .public), isContinuity=\(self.isContinuityMicrophone(device), privacy: .public)")
+        }
         
         if setAsSystemDefaultInput(device) {
             return device
         }
         
-        print("Failed to set \(device.displayName) as system default input, falling back to default microphone")
+        logger.warning("Failed to set \(device.displayName, privacy: .public) as system default input, falling back to default microphone")
         resetToDefault()
         
         guard let fallback = currentMicrophone,
