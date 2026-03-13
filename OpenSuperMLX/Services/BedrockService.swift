@@ -94,7 +94,7 @@ final class BedrockService {
                 region: prefs.bedrockRegion
             )
             if AppPreferences.shared.debugMode {
-                logger.debug("[DEBUG] Bedrock request: region=\(prefs.bedrockRegion, privacy: .public), modelId=\(prefs.bedrockModelId, privacy: .public), authMode=\(prefs.bedrockAuthMode, privacy: .public), inputLength=\(text.count, privacy: .public)")
+                logger.debug("[DEBUG] Bedrock request: region=\(prefs.bedrockRegion, privacy: .public), modelId=\(prefs.bedrockModelId, privacy: .public), authMode=\(prefs.bedrockAuthMode, privacy: .public), profileName=\(prefs.bedrockProfileName, privacy: .public), inputLength=\(text.count, privacy: .public)")
             }
 
             switch prefs.bedrockAuthMode {
@@ -165,7 +165,8 @@ final class BedrockService {
             return trimmedResult
 
         } catch {
-            logger.error("Bedrock correction failed: \(error.localizedDescription, privacy: .public)")
+            let errorDetail = String(describing: error)
+            logger.error("Bedrock correction failed: \(errorDetail, privacy: .public)")
             NotificationCenter.default.post(
                 name: .bedrockCorrectionFailed,
                 object: nil,

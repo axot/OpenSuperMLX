@@ -1,0 +1,27 @@
+diff --git a/Sources/Core/AWSSDKIdentity/Sources/AWSSDKIdentity/BearerTokenIdentityResolvers/SSOBearerTokenIdentityResolver.swift b/Sources/Core/AWSSDKIdentity/Sources/AWSSDKIdentity/BearerTokenIdentityResolvers/SSOBearerTokenIdentityResolver.swift
+index a907aa433b..d912c206a9 100644
+--- a/Sources/Core/AWSSDKIdentity/Sources/AWSSDKIdentity/BearerTokenIdentityResolvers/SSOBearerTokenIdentityResolver.swift
++++ b/Sources/Core/AWSSDKIdentity/Sources/AWSSDKIdentity/BearerTokenIdentityResolvers/SSOBearerTokenIdentityResolver.swift
+@@ -237,9 +237,12 @@ struct SSOToken: Codable {
+ 
+         accessToken = try container.decode(String.self, forKey: .accessToken)
+         let dateFormatter = ISO8601DateFormatter()
+-        dateFormatter.formatOptions = [.withInternetDateTime]
++        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
++        let dateFormatterNoFraction = ISO8601DateFormatter()
++        dateFormatterNoFraction.formatOptions = [.withInternetDateTime]
+         let expiresAtString = try container.decode(String.self, forKey: .expiresAt)
+-        guard let expiresAtDate = dateFormatter.date(from: expiresAtString) else {
++        guard let expiresAtDate = dateFormatter.date(from: expiresAtString)
++                ?? dateFormatterNoFraction.date(from: expiresAtString) else {
+             throw DecodingError.dataCorruptedError(
+                 forKey: .expiresAt,
+                 in: container,
+@@ -260,6 +263,7 @@ struct SSOToken: Codable {
+             forKey: .registrationExpiresAt
+         ) {
+             registrationExpiresAt = dateFormatter.date(from: registrationExpiresAtString)
++                ?? dateFormatterNoFraction.date(from: registrationExpiresAtString)
+         } else {
+             registrationExpiresAt = nil
+         }
