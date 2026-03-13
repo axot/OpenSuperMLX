@@ -15,13 +15,27 @@ git submodule update --init --recursive
 
 # Build and run
 ./run.sh
+```
 
-# Xcode-only build (after dylibs exist in build/)
+### Fast Incremental Build (~3-5 seconds)
+
+For **Swift-only changes**, skip `run.sh` and run xcodebuild directly. This is the **preferred build command during development** — use it after the initial `./run.sh build` succeeds:
+
+```bash
 xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
   -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' \
   -skipPackagePluginValidation -skipMacroValidation \
   -clonedSourcePackagesDirPath SourcePackages CODE_SIGNING_ALLOWED=NO build
 ```
+
+This skips Cargo compilation, libomp copying, SPM resolution, and patch application — Xcode's incremental compiler only rebuilds changed `.swift` files. Requires `build/` to already contain `libautocorrect_swift.dylib`, `libomp.dylib`, and `SourcePackages/` to be populated.
+
+**Fall back to `./run.sh build`** when:
+- First build on a fresh clone
+- After modifying anything in `asian-autocorrect/` (Rust source)
+- After changing `patches/*.patch` files
+- After adding/removing/updating SPM dependencies
+- After `build/` directory was deleted or corrupted
 
 ## Tests
 

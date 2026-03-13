@@ -202,7 +202,7 @@ class IndicatorViewModel: ObservableObject {
                 }
             } else {
                 
-                print("!!! Not found record url !!!")
+                logger.warning("No recording URL found after stopping recorder")
                 self.delegate?.didFinishDecoding()
             }
         }

@@ -37,8 +37,8 @@ class FocusUtils {
             return nil
         }
         
-        guard let focusedElementCF = focusedElement else { // Optional binding to safely unwrap CFTypeRef
-            print("Не удалось получить фокусированный элемент (CFTypeRef is nil)") // Extra safety check, though unlikely
+        guard let focusedElementCF = focusedElement else {
+            logger.warning("Focused element is nil after successful AX query")
             return nil
         }
         
@@ -51,7 +51,7 @@ class FocusUtils {
         guard errorRange == .success,
               let textRange = selectedTextRange
         else {
-            print("Не удалось получить диапазон выделенного текста")
+            logger.warning("Failed to get selected text range: \(String(describing: errorRange), privacy: .public)")
             return nil
         }
         
@@ -103,7 +103,7 @@ class FocusUtils {
                                                    &focusedWindow)
         
         guard result == .success else {
-            print("Не удалось получить сфокусированное окно")
+            logger.warning("Failed to get focused window: \(String(describing: result), privacy: .public)")
             return NSScreen.main
         }
         let windowElement = focusedWindow as! AXUIElement
@@ -115,14 +115,14 @@ class FocusUtils {
                                                         &windowFrameValue)
         
         guard frameResult == .success else {
-            print("Не удалось получить фрейм окна")
+            logger.warning("Failed to get window frame: \(String(describing: frameResult), privacy: .public)")
             return NSScreen.main
         }
         let frameValue = windowFrameValue as! AXValue
         
         var windowFrame = CGRect.zero
         guard AXValueGetValue(frameValue, AXValueType.cgRect, &windowFrame) else {
-            print("Не удалось извлечь CGRect из AXValue")
+            logger.warning("Failed to extract CGRect from AXValue for window frame")
             return NSScreen.main
         }
         
