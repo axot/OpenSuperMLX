@@ -145,7 +145,7 @@ jobs:
             OpenSuperMLX.dmg.sha256
 
       - name: Update Homebrew tap
-        if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
