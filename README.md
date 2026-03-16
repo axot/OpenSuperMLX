@@ -21,6 +21,15 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 
 ## Installation
 
+### Homebrew (Recommended)
+
+```bash
+brew tap axot/tap
+brew install --cask opensupermlx
+```
+
+### Manual
+
 Download from [GitHub releases page](https://github.com/axot/OpenSuperMLX/releases).
 
 ## Requirements
