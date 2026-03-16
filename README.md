@@ -32,6 +32,18 @@ brew install --cask opensupermlx
 
 Download from [GitHub releases page](https://github.com/axot/OpenSuperMLX/releases).
 
+### macOS Security Approval
+
+Since OpenSuperMLX is not signed with an Apple Developer ID, macOS will block the app on first launch. You need to manually approve it:
+
+1. Open the app — macOS will show a warning that it cannot be opened
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down to the **Security** section — you'll see a message about OpenSuperMLX being blocked
+4. Click **Open Anyway**
+5. Confirm in the dialog that appears
+
+You only need to do this once. After approval, the app will launch normally.
+
 ## Requirements
 
 - macOS 15.1+ (Apple Silicon/ARM64)
