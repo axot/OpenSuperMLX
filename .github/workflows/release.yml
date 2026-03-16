@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    runs-on: macos-latest
+    runs-on: macos-15
     permissions:
       contents: write
     steps:
@@ -67,6 +67,19 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | xcpretty --simple --color
 
+      - name: Ad-hoc sign app bundle
+        run: |
+          APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "❌ App not found at $APP_PATH"
+            exit 1
+          fi
+          # --deep signs all nested code (dylibs, frameworks, bundles) inside-out.
+          # Appropriate for ad-hoc signing; avoids the find -type f bug with .framework dirs.
+          codesign --force --deep --sign - "$APP_PATH"
+          echo "✅ Ad-hoc signed app bundle"
+          codesign -vv "$APP_PATH"
+
       - name: Create DMG
         run: |
           APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
@@ -94,7 +107,14 @@ jobs:
 
           Real-time audio transcription for macOS powered by MLX on Apple Silicon.
 
-          ### Installation
+          ### Installation via Homebrew (Recommended)
+
+          ```bash
+          brew tap axot/tap
+          brew install --cask opensupermlx
+          ```
+
+          ### Manual Installation
 
           1. Download **OpenSuperMLX.dmg** below
           2. Open the DMG and drag OpenSuperMLX to Applications
@@ -105,9 +125,49 @@ jobs:
 
           - macOS 15.1 or later
           - Apple Silicon (M1/M2/M3/M4) Mac
-
-          > ⚠️ This build is **not code-signed**. macOS will show an "unidentified developer" warning on first launch. Right-click → Open to bypass.
           EOF
           )" \
             OpenSuperMLX.dmg \
             OpenSuperMLX.dmg.sha256
+
+      - name: Update Homebrew tap
+        if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME}"
+          SHA256=$(cut -d' ' -f1 OpenSuperMLX.dmg.sha256)
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/axot/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Casks
+
+          cat > /tmp/homebrew-tap/Casks/opensupermlx.rb <<CASK
+          cask "opensupermlx" do
+            version "${VERSION}"
+            sha256 "${SHA256}"
+
+            url "https://github.com/axot/OpenSuperMLX/releases/download/#{version}/OpenSuperMLX.dmg"
+            name "OpenSuperMLX"
+            desc "Real-time audio transcription for macOS powered by MLX on Apple Silicon"
+            homepage "https://github.com/axot/OpenSuperMLX"
+
+            depends_on macos: ">= :sequoia"
+            depends_on arch: :arm64
+
+            app "OpenSuperMLX.app"
+
+            zap trash: [
+              "~/Library/Application Scripts/org.axot.OpenSuperMLX",
+              "~/Library/Application Support/org.axot.OpenSuperMLX",
+              "~/Library/Preferences/org.axot.OpenSuperMLX.plist",
+            ]
+          end
+          CASK
+
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/opensupermlx.rb
+          git diff --cached --quiet || git commit -m "Update opensupermlx to ${VERSION}"
+          git push
