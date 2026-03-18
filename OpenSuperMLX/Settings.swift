@@ -412,7 +412,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Streaming Transcription")
                                     .font(.subheadline)
-                                Text("Experimental: transcribe in real-time while recording")
+                                Text("Transcribe in real-time while recording")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }

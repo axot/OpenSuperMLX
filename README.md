@@ -11,7 +11,7 @@ OpenSuperMLX is a macOS application that provides real-time audio transcription 
 - 🎙️ Real-time audio recording and transcription
 - 🔴 Streaming transcription — see results as you speak
 - 🧠 MLX-based transcription engine — download models directly from the app
-- ⌨️ Global keyboard shortcuts — customizable key combination for recording toggle
+- ⌨️ Global keyboard shortcuts — tap to toggle or hold to record, fully customizable
 - 📁 Drag & drop audio files for transcription with queue processing
 - 🎤 Microphone selection — switch between built-in, external, Bluetooth and iPhone (Apple Continuity) mics from the menu bar
 - 🌍 Support for multiple languages with auto-detection
@@ -43,6 +43,27 @@ Since OpenSuperMLX is not signed with an Apple Developer ID, macOS will block th
 5. Confirm in the dialog that appears
 
 You only need to do this once. After approval, the app will launch normally.
+
+## Usage
+
+### Keyboard Shortcuts
+
+OpenSuperMLX supports two recording modes via a global keyboard shortcut — it works from any app:
+
+| Shortcut | Action |
+|---|---|
+| `⌥`\`` (Option + Backtick) | Start/stop recording |
+| `⌥⇧`\`` (Option + Shift + Backtick) | Start/stop recording with LLM correction |
+| `Escape` | Cancel active recording |
+
+### Recording Modes
+
+The shortcut automatically switches between two modes based on how you press it:
+
+- **Tap** (quick press & release) — Toggles recording on and off. Press once to start recording, press again to stop. The transcribed text is automatically pasted into the frontmost app.
+- **Hold** (press and hold) — Records while the key is held down. Release to stop and the transcribed text is automatically pasted into the frontmost app.
+
+> **Tip:** Shortcuts are fully customizable in **Settings → Shortcuts**.
 
 ## Requirements
 
