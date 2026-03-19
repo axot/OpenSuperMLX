@@ -61,7 +61,9 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 
 ## Patches
 
-`run.sh` applies `patches/*.patch` to `SourcePackages/checkouts/mlx-audio-swift` on every build (idempotent via `patch -N`). When modifying upstream SPM dependencies, create a patch file — never fork the package.
+`run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). When adding new SPM dependencies that require patches, create a subdirectory under `patches/` matching the checkout directory name and add `.patch` files there.
+
+> **Note**: `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
 
 ## Project Structure
 
@@ -102,11 +104,14 @@ OpenSuperMLX/                    # Main app target
 OpenSuperMLXTests/               # Unit tests (XCTest)
 asian-autocorrect/               # Git submodule — Rust autocorrect library
 patches/                         # Patches applied to SPM checkouts by run.sh
+VendoredPackages/                # Vendored SPM packages (local source)
+└── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
 ```
 
 ## Dependencies
 
-- **SPM**: GRDB.swift, KeyboardShortcuts, MLX/MLXAudioSTT/MLXAudioCore, HuggingFace, AWSBedrockRuntime, EventSource
+- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
+- **Vendored**: mlx-audio-swift (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT) at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodule**: `asian-autocorrect` (Rust → dylib via Cargo, bridged through `Bridge.h`)
 
