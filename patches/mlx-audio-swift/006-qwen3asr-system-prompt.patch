@@ -1,0 +1,20 @@
+--- a/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ASR.swift
++++ b/Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ASR.swift
+@@ -1002,16 +1002,16 @@
+     // MARK: - Prompt Building
+ 
+-    public func buildPrompt(numAudioTokens: Int, language: String = "English") -> MLXArray {
++    public func buildPrompt(numAudioTokens: Int, language: String = "English", context: String = "Transcribe speech to clean text. Omit filler words and hesitations such as um, uh, hmm, er, like, you know, 嗯, 呃, 啊, えーと, あの, 음.") -> MLXArray {
+         guard let tokenizer = tokenizer else {
+             fatalError("Tokenizer not loaded")
+         }
+ 
+         let supported = config.supportLanguages
+         let supportedLower = Dictionary(uniqueKeysWithValues: supported.map { ($0.lowercased(), $0) })
+         let langName = supportedLower[language.lowercased()] ?? language
+ 
+-        let prompt = "<|im_start|>system\n<|im_end|>\n"
++        let prompt = "<|im_start|>system\n\(context)<|im_end|>\n"
+             + "<|im_start|>user\n<|audio_start|>"
+             + String(repeating: "<|audio_pad|>", count: numAudioTokens)
+             + "<|audio_end|><|im_end|>\n"
