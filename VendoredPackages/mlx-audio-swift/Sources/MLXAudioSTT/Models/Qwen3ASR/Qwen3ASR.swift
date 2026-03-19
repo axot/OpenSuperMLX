@@ -1002,7 +1002,7 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Prompt Building
 
-    public func buildPrompt(numAudioTokens: Int, language: String = "English", context: String = "Transcribe speech to clean text. Omit filler words and hesitations such as um, uh, hmm, er, like, you know, 嗯, 呃, 啊, えーと, あの, 음.") -> MLXArray {
+    public func buildPrompt(numAudioTokens: Int, language: String = "English", context: String = "Transcribe speech to clean text. Omit filler words and hesitations such as um, uh, hmm, er, like, you know, 嗯, 呃, 啊, えーと, あの, 음.", prefix: String = "") -> MLXArray {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
@@ -1016,9 +1016,8 @@ public class Qwen3ASRModel: Module {
             + String(repeating: "<|audio_pad|>", count: numAudioTokens)
             + "<|audio_end|><|im_end|>\n"
             + "<|im_start|>assistant\nlanguage \(langName)<asr_text>"
+            + prefix
 
-        print("[DEBUG-FILLER] buildPrompt system context: \(context.prefix(80))...")
-        print("[DEBUG-FILLER] Full prompt prefix: \(prompt.prefix(200))")
         let tokenIds = tokenizer.encode(text: prompt)
         return MLXArray(tokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
     }
