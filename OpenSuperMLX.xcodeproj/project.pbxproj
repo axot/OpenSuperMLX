@@ -310,7 +310,7 @@
 		packageReferences = (
 			CE84E17B2D56550B00C54EA6 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 			CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */,
-			CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */,
+			CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */,
 				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
 		);
 			preferredProjectObjectVersion = 77;
@@ -787,14 +787,6 @@
 				minimumVersion = 2.3.0;
 			};
 		};
-	CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */ = {
-		isa = XCRemoteSwiftPackageReference;
-		repositoryURL = "https://github.com/Blaizzy/mlx-audio-swift";
-		requirement = {
-			kind = revision;
-			revision = b76c81fa3d15600e68323b94d740bb346f3455ef;
-		};
-		};
 		9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/awslabs/aws-sdk-swift";
@@ -804,6 +796,13 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = VendoredPackages/mlx-audio-swift;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		CE0EAD6D2D56ACA80067FDEE /* GRDB */ = {
@@ -818,12 +817,10 @@
 		};
 	CEAC000A2D82F60000000000 /* MLXAudioSTT */ = {
 		isa = XCSwiftPackageProductDependency;
-		package = CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
 		productName = MLXAudioSTT;
 	};
 	CEAC000B2D82F60000000000 /* MLXAudioCore */ = {
 		isa = XCSwiftPackageProductDependency;
-		package = CEAC00092D82F60000000000 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
 		productName = MLXAudioCore;
 	};
 		102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */ = {
