@@ -36,12 +36,6 @@ public enum DelayPreset: Sendable {
 public struct StreamingConfig: Sendable {
     /// How often to run decode passes (seconds)
     public var decodeIntervalSeconds: Double
-    /// Faster decode interval used briefly after an 8s window boundary
-    public var boundaryDecodeIntervalSeconds: Double
-    /// Duration to keep boundary fast cadence active (seconds)
-    public var boundaryBoostSeconds: Double
-    /// Overlap duration between consecutive 8s encoder windows
-    public var encoderWindowOverlapSeconds: Double
     /// Maximum number of cached encoder windows (~8s each)
     public var maxCachedWindows: Int
     /// Delay preset controlling provisional → confirmed promotion
@@ -52,43 +46,25 @@ public struct StreamingConfig: Sendable {
     public var temperature: Float
     /// Maximum tokens per decode pass
     public var maxTokensPerPass: Int
-    /// Minimum consecutive matching passes before provisional tokens can promote
-    public var minAgreementPasses: Int
-    /// Stronger agreement threshold while boundary boost is active
-    public var boundaryMinAgreementPasses: Int
-    /// Maximum encoder windows visible to the decoder per pass (~8s each)
-    public var maxDecodeWindows: Int
-    /// Whether to run a one-shot decode on each completed 8s window for accuracy
-    public var finalizeCompletedWindows: Bool
+    /// Number of trailing tokens to keep unfixed for prefix-rollback
+    public var unfixedTokenNum: Int
 
     public init(
         decodeIntervalSeconds: Double = 1.0,
-        boundaryDecodeIntervalSeconds: Double = 0.2,
-        boundaryBoostSeconds: Double = 1.0,
-        encoderWindowOverlapSeconds: Double = 1.0,
         maxCachedWindows: Int = 60,
         delayPreset: DelayPreset = .agent,
         language: String = "English",
         temperature: Float = 0.0,
         maxTokensPerPass: Int = 512,
-        minAgreementPasses: Int = 2,
-        boundaryMinAgreementPasses: Int = 3,
-        maxDecodeWindows: Int = 1,
-        finalizeCompletedWindows: Bool = true
+        unfixedTokenNum: Int = 5
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
-        self.boundaryDecodeIntervalSeconds = boundaryDecodeIntervalSeconds
-        self.boundaryBoostSeconds = boundaryBoostSeconds
-        self.encoderWindowOverlapSeconds = encoderWindowOverlapSeconds
         self.maxCachedWindows = maxCachedWindows
         self.delayPreset = delayPreset
         self.language = language
         self.temperature = temperature
         self.maxTokensPerPass = maxTokensPerPass
-        self.minAgreementPasses = minAgreementPasses
-        self.boundaryMinAgreementPasses = boundaryMinAgreementPasses
-        self.maxDecodeWindows = maxDecodeWindows
-        self.finalizeCompletedWindows = finalizeCompletedWindows
+        self.unfixedTokenNum = unfixedTokenNum
     }
 }
 

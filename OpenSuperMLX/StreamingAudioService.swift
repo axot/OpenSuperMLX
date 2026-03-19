@@ -86,8 +86,7 @@ class StreamingAudioService: ObservableObject {
             decodeIntervalSeconds: 1.0,
             delayPreset: .subtitle,
             language: language,
-            temperature: Float(settings.temperature),
-            finalizeCompletedWindows: true
+            temperature: Float(settings.temperature)
         )
         let session = StreamingInferenceSession(model: model, config: config)
         streamingSession = session
