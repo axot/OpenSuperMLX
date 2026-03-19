@@ -84,7 +84,6 @@ class ShortcutManager {
                 self.activeVm = vm
             } else if !self.holdMode {
                 IndicatorWindowManager.shared.stopRecording()
-                self.activeVm = nil
             }
         }
         
@@ -102,7 +101,6 @@ class ShortcutManager {
         Task { @MainActor in
             if self.holdMode {
                 IndicatorWindowManager.shared.stopRecording()
-                self.activeVm = nil
                 self.holdMode = false
             }
         }

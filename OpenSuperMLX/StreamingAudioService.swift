@@ -57,7 +57,7 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Start Streaming
 
-    func startStreaming() async throws {
+    func startStreaming() throws {
         guard !isStreaming else {
             logger.warning("Already streaming, ignoring startStreaming()")
             return
@@ -171,8 +171,6 @@ class StreamingAudioService: ObservableObject {
         }
 
         playNotificationSound()
-        try await Task.sleep(for: .milliseconds(300))
-
         try engine.start()
         audioEngine = engine
         isStreaming = true
@@ -224,7 +222,7 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
 
-        isStreaming = false
+        defer { isStreaming = false }
 
         feedTask?.cancel()
         feedTask = nil

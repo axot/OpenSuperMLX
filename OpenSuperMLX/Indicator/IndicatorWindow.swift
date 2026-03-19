@@ -94,15 +94,13 @@ class IndicatorViewModel: ObservableObject {
             state = .recording
             startBlinking()
             
-            Task {
-                do {
-                    try await streamingService.startStreaming()
-                } catch {
-                    logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    state = .idle
-                    isStreamingMode = false
-                    stopBlinking()
-                }
+            do {
+                try streamingService.startStreaming()
+            } catch {
+                logger.error("Failed to start streaming: \(error, privacy: .public)")
+                state = .idle
+                isStreamingMode = false
+                stopBlinking()
             }
         } else {
             isStreamingMode = false
@@ -122,6 +120,10 @@ class IndicatorViewModel: ObservableObject {
     }
     
     func startDecoding() {
+        guard state == .recording else {
+            logger.warning("startDecoding() called but state is \(String(describing: self.state), privacy: .public), ignoring")
+            return
+        }
         stopBlinking()
         
         if isStreamingMode {

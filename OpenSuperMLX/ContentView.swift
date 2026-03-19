@@ -200,17 +200,15 @@ class ContentViewModel: ObservableObject {
             recordingDuration = 0
             startDurationTimerIfNeeded()
             
-            Task {
-                do {
-                    try await streamingService.startStreaming()
-                } catch {
-                    logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    state = .idle
-                    isStreamingMode = false
-                    stopBlinking()
-                    stopDurationTimer()
-                    recordingDuration = 0
-                }
+            do {
+                try streamingService.startStreaming()
+            } catch {
+                logger.error("Failed to start streaming: \(error, privacy: .public)")
+                state = .idle
+                isStreamingMode = false
+                stopBlinking()
+                stopDurationTimer()
+                recordingDuration = 0
             }
         } else {
             isStreamingMode = false
