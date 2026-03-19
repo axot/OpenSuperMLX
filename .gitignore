@@ -118,6 +118,7 @@ fastlane/test_output
 fastlane/build
 default.profraw
 *.profraw
+*.orig
 *.dmg
 .cursorrules
 OpenSuperWhisper.dmg.sha256
