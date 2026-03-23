@@ -56,6 +56,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    @Published var useChineseITN: Bool {
+        didSet {
+            AppPreferences.shared.useChineseITN = useChineseITN
+        }
+    }
+    
     @Published var bedrockEnabled: Bool {
         didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
     }
@@ -104,6 +110,7 @@ class SettingsViewModel: ObservableObject {
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+        self.useChineseITN = prefs.useChineseITN
         self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
@@ -124,6 +131,7 @@ struct Settings {
     var suppressBlankAudio: Bool
     var temperature: Double
     var useAsianAutocorrect: Bool
+    var useChineseITN: Bool
     var useStreamingTranscription: Bool
     
     var isAsianLanguage: Bool {
@@ -134,6 +142,10 @@ struct Settings {
         isAsianLanguage && useAsianAutocorrect
     }
     
+    var shouldApplyChineseITN: Bool {
+        selectedLanguage == "zh" || selectedLanguage == "auto"
+    }
+    
     init() {
         let prefs = AppPreferences.shared
         self.selectedLanguage = prefs.mlxLanguage
@@ -141,6 +153,7 @@ struct Settings {
         self.suppressBlankAudio = prefs.suppressBlankAudio
         self.temperature = prefs.temperature
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+        self.useChineseITN = prefs.useChineseITN
         self.useStreamingTranscription = prefs.useStreamingTranscription
     }
 }
@@ -372,6 +385,8 @@ struct SettingsView: View {
                             }
                             .padding(.top, 4)
                         }
+                        
+
                     }
                 }
                 .padding()

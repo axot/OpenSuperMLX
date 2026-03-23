@@ -336,8 +336,20 @@ class StreamingAudioService: ObservableObject {
         guard let result = await stopStreaming() else { return nil }
 
         var text = result.text
-        if Settings().shouldApplyAsianAutocorrect && !text.isEmpty {
-            text = AutocorrectWrapper.format(text)
+        let settings = Settings()
+        if !text.isEmpty && (settings.shouldApplyChineseITN || settings.shouldApplyAsianAutocorrect) {
+            let applyITN = settings.shouldApplyChineseITN
+            let applyAutocorrect = settings.shouldApplyAsianAutocorrect
+            text = await Task.detached(priority: .userInitiated) {
+                var t = text
+                if applyITN {
+                    t = ITNProcessor.process(t)
+                }
+                if applyAutocorrect {
+                    t = AutocorrectWrapper.format(t)
+                }
+                return t
+            }.value
         }
 
         // Apply Bedrock LLM correction (conditional — caller controls this for indicator state)

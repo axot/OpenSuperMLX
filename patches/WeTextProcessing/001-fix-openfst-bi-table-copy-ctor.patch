@@ -1,0 +1,11 @@
+--- a/src/include/fst/bi-table.h
++++ b/src/include/fst/bi-table.h
+@@ -317,7 +317,7 @@
+   }
+ 
+   VectorHashBiTable(const VectorHashBiTable<I, T, S, FP, H, HS> &table)
+-      : selector_(new S(table.s_)), fp_(new FP(*table.fp_)),
++      : selector_(new S(*table.selector_)), fp_(new FP(*table.fp_)),
+         h_(new H(*table.h_)), id2entry_(table.id2entry_),
+         fp2id_(table.fp2id_), hash_func_(*this), hash_equal_(*this),
+         keys_(table.keys_.size(), hash_func_, hash_equal_) {

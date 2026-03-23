@@ -72,6 +72,9 @@ final class AppPreferences {
     @UserDefault(key: "useAsianAutocorrect", defaultValue: true)
     var useAsianAutocorrect: Bool
     
+    @UserDefault(key: "useChineseITN", defaultValue: true)
+    var useChineseITN: Bool
+    
     @OptionalUserDefault(key: "selectedMicrophoneData")
     var selectedMicrophoneData: Data?
     
