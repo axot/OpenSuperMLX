@@ -78,7 +78,7 @@ class ITNProcessor {
         return true
     }
 
-    // MARK: - Private helpers
+    // MARK: - Punctuation Cleanup
 
     /// Clean up duplicate/leading punctuation left behind when ITN drops characters.
     /// e.g. "你好，，能听到" → "你好，能听到"
@@ -109,6 +109,8 @@ class ITNProcessor {
 
         return String(result)
     }
+
+    // MARK: - Private helpers
 
     private static func findBinaryPath() -> String? {
         // processor_main is copied to Contents/MacOS/ via the "Copy Executables" build phase

@@ -110,6 +110,20 @@ final class ITNProcessorTests: XCTestCase {
         XCTAssertEqual(ITNProcessor.cleanDuplicatePunctuation("你好世界"), "你好世界")
     }
 
+    func testCleanTriplePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("你好，，，世界"),
+            "你好，世界"
+        )
+    }
+
+    func testCleanTrailingDuplicatePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("你好，，"),
+            "你好，"
+        )
+    }
+
     // MARK: - Graceful Degradation
 
     func testGracefulDegradationReturnsOriginal() throws {
