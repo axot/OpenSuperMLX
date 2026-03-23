@@ -52,6 +52,17 @@ jobs:
           install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
           codesign --force --sign - ./build/libomp.dylib
 
+      - name: Build WeTextProcessing ITN processor
+        run: |
+          cmake -B WeTextProcessing/build -S WeTextProcessing/runtime \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          patch -p1 -N -d WeTextProcessing/runtime/fc_base-*/openfst-src \
+            < patches/WeTextProcessing/001-fix-openfst-bi-table-copy-ctor.patch 2>/dev/null || true
+          cmake --build WeTextProcessing/build -j8
+          cp WeTextProcessing/build/bin/processor_main ./build/processor_main
+          codesign --force --sign - ./build/processor_main
+          echo "✅ WeTextProcessing build successful"
+
       - name: Resolve SPM packages and apply patches
         run: |
           chmod +x ./Scripts/resolve_and_patch.sh
