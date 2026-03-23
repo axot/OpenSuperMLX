@@ -194,6 +194,16 @@ VendoredPackages/                # Vendored SPM packages (local source)
 
 GitHub Actions: `.github/workflows/build.yml` — runs `./run.sh build` on `macos-latest` for pushes and PRs.
 
+## Plan Conventions
+
+When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
+
+1. **Oracle Review Task** — Architecture and code review by Oracle agent after all implementation tasks complete. Oracle reads all new/modified files, checks correctness, safety, thread safety, and architecture quality. Fixes critical issues directly.
+
+2. **Code Simplifier Task** — Code simplification pass AFTER Oracle review (sequential, not parallel). Runs `code-simplifier` skill on all new/modified files to improve clarity, consistency, and maintainability. Must preserve all functionality.
+
+**Execution order**: Oracle review → Code Simplifier (always sequential, never parallel). Code Simplifier operates on Oracle-fixed code.
+
 ## Release
 
 ```bash
