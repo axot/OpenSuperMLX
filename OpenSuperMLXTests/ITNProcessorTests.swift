@@ -58,6 +58,58 @@ final class ITNProcessorTests: XCTestCase {
         _ = ITNProcessor.isAvailable()
     }
 
+    // MARK: - Duplicate Punctuation Cleanup
+
+    func testCleanDuplicateChinesePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("你好，，能听到我的吗？"),
+            "你好，能听到我的吗？"
+        )
+    }
+
+    func testCleanMultipleDuplicatePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("你好，，能听到我的吗？嗯，，明天怎么样天气？"),
+            "你好，能听到我的吗？嗯，明天怎么样天气？"
+        )
+    }
+
+    func testCleanLeadingPunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("，明天天气"),
+            "明天天气"
+        )
+    }
+
+    func testCleanLeadingDuplicatePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("，，明天天气"),
+            "明天天气"
+        )
+    }
+
+    func testCleanPreservesNonDuplicatePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("你好，世界！"),
+            "你好，世界！"
+        )
+    }
+
+    func testCleanPreservesDifferentConsecutivePunctuation() throws {
+        XCTAssertEqual(
+            ITNProcessor.cleanDuplicatePunctuation("真的！？好吧"),
+            "真的！？好吧"
+        )
+    }
+
+    func testCleanEmptyString() throws {
+        XCTAssertEqual(ITNProcessor.cleanDuplicatePunctuation(""), "")
+    }
+
+    func testCleanNoPunctuation() throws {
+        XCTAssertEqual(ITNProcessor.cleanDuplicatePunctuation("你好世界"), "你好世界")
+    }
+
     // MARK: - Graceful Degradation
 
     func testGracefulDegradationReturnsOriginal() throws {

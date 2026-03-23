@@ -61,7 +61,8 @@ class ITNProcessor {
                 .filter { !$0.isEmpty }
                 .last ?? ""
 
-            return result.isEmpty ? text : result
+            let cleaned = result.isEmpty ? text : result
+            return cleanDuplicatePunctuation(cleaned)
         } catch {
             logger.error("Failed to run processor_main: \(error)")
             return text
@@ -78,6 +79,36 @@ class ITNProcessor {
     }
 
     // MARK: - Private helpers
+
+    /// Clean up duplicate/leading punctuation left behind when ITN drops characters.
+    /// e.g. "你好，，能听到" → "你好，能听到"
+    ///      "，明天天气" → "明天天气"
+    static func cleanDuplicatePunctuation(_ text: String) -> String {
+        let punctuation: Set<Character> = ["，", "。", "、", "！", "？", "；", "：",
+                                           ",", ".", "!", "?", ";", ":"]
+
+        var result: [Character] = []
+        var lastWasPunctuation: Character? = nil
+
+        for char in text {
+            if punctuation.contains(char) {
+                if lastWasPunctuation == char {
+                    continue
+                }
+                lastWasPunctuation = char
+            } else {
+                lastWasPunctuation = nil
+            }
+            result.append(char)
+        }
+
+        // Strip leading punctuation
+        while let first = result.first, punctuation.contains(first) {
+            result.removeFirst()
+        }
+
+        return String(result)
+    }
 
     private static func findBinaryPath() -> String? {
         // processor_main is copied to Contents/MacOS/ via the "Copy Executables" build phase
