@@ -157,8 +157,9 @@ VendoredPackages/                # Vendored SPM packages (local source)
 ### Error Handling
 
 - Custom error enums: `enum TranscriptionError: Error { case ... }`
-- `Logger(subsystem: "OpenSuperMLX", category: "...")` for structured logging in services
-- `print()` for non-critical errors; `fatalError()` only for truly unrecoverable failures
+- `Logger(subsystem: "OpenSuperMLX", category: "...")` for structured logging — see [`docs/logging.md`](docs/logging.md)
+- Never use `print()` — it doesn't appear in unified logs for GUI apps
+- `fatalError()` only for truly unrecoverable failures
 - `try?` for optional file operations; `guard let ... else { return }` for early exits
 
 ### Access Control
