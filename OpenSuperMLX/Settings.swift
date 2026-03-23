@@ -143,7 +143,7 @@ struct Settings {
     }
     
     var shouldApplyChineseITN: Bool {
-        (selectedLanguage == "zh" || selectedLanguage == "auto") && useChineseITN
+        selectedLanguage == "zh" || selectedLanguage == "auto"
     }
     
     init() {
@@ -386,18 +386,7 @@ struct SettingsView: View {
                             .padding(.top, 4)
                         }
                         
-                        if viewModel.selectedLanguage == "zh" || viewModel.selectedLanguage == "auto" {
-                            HStack {
-                                Text("Chinese number normalization (ITN)")
-                                    .font(.subheadline)
-                                Spacer()
-                                Toggle("", isOn: $viewModel.useChineseITN)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                    .labelsHidden()
-                            }
-                            .padding(.top, 4)
-                            .help("Convert spoken Chinese numbers to written form (e.g., 一百二十三 → 123)")
-                        }
+
                     }
                 }
                 .padding()
