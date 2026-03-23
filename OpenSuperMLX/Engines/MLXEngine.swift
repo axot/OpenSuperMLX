@@ -92,6 +92,10 @@ class MLXEngine: TranscriptionEngine {
 
         var processedText = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        if settings.shouldApplyChineseITN && !processedText.isEmpty {
+            processedText = ITNProcessor.process(processedText)
+        }
+
         if settings.shouldApplyAsianAutocorrect && !processedText.isEmpty {
             processedText = AutocorrectWrapper.format(processedText)
         }
