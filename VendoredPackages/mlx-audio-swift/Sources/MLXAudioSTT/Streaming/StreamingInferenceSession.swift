@@ -25,6 +25,8 @@ private struct SessionState: Sendable {
 /// previously decoded tokens as context and rolling back only the trailing
 /// `unfixedTokenNum` tokens. This eliminates overlap/dedup logic entirely.
 public class StreamingInferenceSession: @unchecked Sendable {
+    private static let eosTokenIds = [151645, 151643]
+
     private let model: Qwen3ASRModel
     private let config: StreamingConfig
     private let melProcessor: IncrementalMelSpectrogram
@@ -153,7 +155,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
         let numAudioTokens = audioFeatures.dim(0)
         guard numAudioTokens > 0 else { return }
 
-        let eosTokenIds = [151645, 151643]
         let startTime = Date()
 
         // 1. Prefix rollback
@@ -273,15 +274,15 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         // Flush remaining audio
-        let (boxedFeatures, totalSamples, encodedWindowCount, continuation) = sessionLock.withLock {
-            _ -> (UncheckedSendableBox<MLXArray>?, Int, Int, AsyncStream<TranscriptionEvent>.Continuation?) in
+        let (boxedFeatures, continuation) = sessionLock.withLock {
+            _ -> (UncheckedSendableBox<MLXArray>?, AsyncStream<TranscriptionEvent>.Continuation?) in
             if let melFrames = melProcessor.flush() {
                 _ = encoder.feed(melFrames: melFrames)
             }
             _ = encoder.flushPartial()
             let features = encoder.getFullEncoderOutput()
             let boxed = features.map { UncheckedSendableBox($0) }
-            return (boxed, totalSamplesFed, encoder.encodedWindowCount, self.continuation)
+            return (boxed, self.continuation)
         }
         let audioFeatures = boxedFeatures?.value
 
@@ -351,7 +352,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return [] }
 
         let numAudioTokens = audioFeatures.dim(0)
-        let eosTokenIds = [151645, 151643]
 
         let inputIds = model.buildPrompt(
             numAudioTokens: numAudioTokens,

@@ -1002,7 +1002,12 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Prompt Building
 
-    public func buildPrompt(numAudioTokens: Int, language: String = "English", context: String = "Transcribe speech to clean text. Omit filler words and hesitations such as um, uh, hmm, er, like, you know, 嗯, 呃, 啊, えーと, あの, 음.", prefix: String = "") -> MLXArray {
+    public func buildPrompt(
+        numAudioTokens: Int,
+        language: String = "English",
+        context: String = "Transcribe speech to clean text. Omit filler words and hesitations such as um, uh, hmm, er, like, you know, 嗯, 呃, 啊, えーと, あの, 음.",
+        prefix: String = ""
+    ) -> MLXArray {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
