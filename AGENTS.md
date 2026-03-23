@@ -19,7 +19,7 @@ git submodule update --init --recursive
 
 ### Fast Incremental Build (~3-5 seconds)
 
-For **Swift-only changes**, skip `run.sh` and run xcodebuild directly. This is the **preferred build command during development** — use it after the initial `./run.sh build` succeeds:
+For **Swift-only changes**, skip `run.sh` and run xcodebuild directly — the **preferred build command during development** after an initial `./run.sh build`:
 
 ```bash
 xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
@@ -28,14 +28,7 @@ xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
   -clonedSourcePackagesDirPath SourcePackages CODE_SIGNING_ALLOWED=NO build
 ```
 
-This skips Cargo compilation, libomp copying, SPM resolution, and patch application — Xcode's incremental compiler only rebuilds changed `.swift` files. Requires `build/` to already contain `libautocorrect_swift.dylib`, `libomp.dylib`, and `SourcePackages/` to be populated.
-
-**Fall back to `./run.sh build`** when:
-- First build on a fresh clone
-- After modifying anything in `asian-autocorrect/` (Rust source)
-- After changing `patches/*.patch` files
-- After adding/removing/updating SPM dependencies
-- After `build/` directory was deleted or corrupted
+**Fall back to `./run.sh build`** when: first build on fresh clone, after modifying `asian-autocorrect/` (Rust), `patches/*.patch`, SPM dependencies, or if `build/` was deleted.
 
 ## Tests
 
@@ -48,22 +41,20 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 # Single test class
 xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
-  CODE_SIGNING_ALLOWED=NO -only-testing:OpenSuperMLXTests/MicrophoneServiceBluetoothTests
+  CODE_SIGNING_ALLOWED=NO -only-testing:OpenSuperMLXTests/ITNProcessorTests
 
 # Single test method
 xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
   CODE_SIGNING_ALLOWED=NO \
-  -only-testing:OpenSuperMLXTests/MicrophoneServiceBluetoothTests/testBluetoothDetection_BluetoothInName
+  -only-testing:OpenSuperMLXTests/ITNProcessorTests/testCleanDuplicateChinesePunctuation
 ```
 
 `ClipboardUtilPasteIntegrationTests` require accessibility permissions and an active display — they `XCTSkip` when unavailable.
 
 ## Patches
 
-`run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). When adding new SPM dependencies that require patches, create a subdirectory under `patches/` matching the checkout directory name and add `.patch` files there.
-
-> **Note**: `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
+`run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
 
 ## Project Structure
 
@@ -89,13 +80,12 @@ OpenSuperMLX/                    # Main app target
 ├── Models/
 │   └── Recording.swift          # Recording model + RecordingStore (GRDB)
 ├── Indicator/                   # Floating mini-recorder overlay
-│   ├── IndicatorWindow.swift    # IndicatorViewModel — recording/decoding state machine
-│   └── IndicatorWindowManager.swift  # Window positioning + lifecycle
 ├── Onboarding/                  # First-launch onboarding flow
 ├── Utils/
 │   ├── AppPreferences.swift     # UserDefaults wrappers (@UserDefault, @OptionalUserDefault)
 │   ├── ClipboardUtil.swift      # Paste-via-CGEvent, keyboard layout detection
 │   ├── AutocorrectWrapper.swift # Bridge to Rust autocorrect dylib
+│   ├── ITNProcessor.swift       # Chinese inverse text normalization (WeTextProcessing)
 │   ├── DevConfig.swift          # #if DEBUG toggles
 │   ├── FocusUtils.swift         # Accessibility API caret/cursor position
 │   ├── LanguageUtil.swift       # Language code ↔ display name mapping
@@ -104,14 +94,16 @@ OpenSuperMLX/                    # Main app target
 OpenSuperMLXTests/               # Unit tests (XCTest)
 asian-autocorrect/               # Git submodule — Rust autocorrect library
 patches/                         # Patches applied to SPM checkouts by run.sh
-VendoredPackages/                # Vendored SPM packages (local source)
+VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
+docs/
+└── logging.md                   # Logger usage guide and log reading commands
 ```
 
 ## Dependencies
 
 - **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
-- **Vendored**: mlx-audio-swift (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT) at `VendoredPackages/mlx-audio-swift/`
+- **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodule**: `asian-autocorrect` (Rust → dylib via Cargo, bridged through `Bridge.h`)
 
@@ -193,17 +185,16 @@ VendoredPackages/                # Vendored SPM packages (local source)
 
 ## CI
 
-GitHub Actions: `.github/workflows/build.yml` — runs `./run.sh build` on `macos-latest` for pushes and PRs.
+GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases.
 
 ## Plan Conventions
 
 When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
 
-1. **Oracle Review Task** — Architecture and code review by Oracle agent after all implementation tasks complete. Oracle reads all new/modified files, checks correctness, safety, thread safety, and architecture quality. Fixes critical issues directly.
+1. **Oracle Review Task** — Architecture and code review by Oracle agent after all implementation tasks complete.
+2. **Code Simplifier Task** — Code simplification pass AFTER Oracle review (sequential, not parallel).
 
-2. **Code Simplifier Task** — Code simplification pass AFTER Oracle review (sequential, not parallel). Runs `code-simplifier` skill on all new/modified files to improve clarity, consistency, and maintainability. Must preserve all functionality.
-
-**Execution order**: Oracle review → Code Simplifier (always sequential, never parallel). Code Simplifier operates on Oracle-fixed code.
+**Execution order**: Oracle review → Code Simplifier (always sequential, never parallel).
 
 ## Release
 
