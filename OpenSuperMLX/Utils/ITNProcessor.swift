@@ -39,9 +39,8 @@ class ITNProcessor {
             ]
 
             let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
             process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+            process.standardError = FileHandle.nullDevice
 
             try process.run()
             let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
@@ -57,9 +56,10 @@ class ITNProcessor {
                 return text
             }
 
-            let lines = output.components(separatedBy: .newlines)
-            let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            let result = nonEmpty.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let result = output.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .last ?? ""
 
             return result.isEmpty ? text : result
         } catch {
@@ -109,8 +109,7 @@ class ITNProcessor {
     }
 
     private static func findFSTPath(name: String) -> String? {
-        if let bundlePath = Bundle.main.path(forResource: name, ofType: "fst"),
-           FileManager.default.fileExists(atPath: bundlePath) {
+        if let bundlePath = Bundle.main.path(forResource: name, ofType: "fst") {
             return bundlePath
         }
 
