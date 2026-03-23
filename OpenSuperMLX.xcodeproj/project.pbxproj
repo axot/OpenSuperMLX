@@ -29,6 +29,9 @@
 		CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; };
 		CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00072D82F40000000000 /* libomp.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		FF00AA11BB22CC33DD450001 /* processor_main in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440001 /* processor_main */; };
+		FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */; };
+		FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -74,6 +77,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FF00AA11BB22CC33DD460001 /* Copy Executables */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				FF00AA11BB22CC33DD450001 /* processor_main in CopyFiles */,
+			);
+			name = "Copy Executables";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF00AA11BB22CC33DD460002 /* Copy ITN Resources */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 7;
+			files = (
+				FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in CopyFiles */,
+				FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in CopyFiles */,
+			);
+			name = "Copy ITN Resources";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 	/* Begin PBXFileReference section */
@@ -88,6 +114,9 @@
 		CE84DF792D5578BE00C54EA6 /* jfk.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = jfk.wav; sourceTree = "<group>"; };
 		CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libautocorrect_swift.dylib; path = build/libautocorrect_swift.dylib; sourceTree = "<group>"; };
 		CEAC00072D82F40000000000 /* libomp.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libomp.dylib; path = build/libomp.dylib; sourceTree = "<group>"; };
+		FF00AA11BB22CC33DD440001 /* processor_main */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = processor_main; path = build/processor_main; sourceTree = "<group>"; };
+		FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_tagger.fst; path = "Resources/ITN/zh_itn_tagger.fst"; sourceTree = "<group>"; };
+		FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_verbalizer.fst; path = "Resources/ITN/zh_itn_verbalizer.fst"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -193,6 +222,9 @@
 			children = (
 				CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */,
 				CEAC00072D82F40000000000 /* libomp.dylib */,
+				FF00AA11BB22CC33DD440001 /* processor_main */,
+				FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */,
+				FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -208,6 +240,8 @@
 				CE57B0252D52C7BB00929AF3 /* Frameworks */,
 				CE57B0262D52C7BB00929AF3 /* Resources */,
 				CEAC00052D82F20000000000 /* CopyFiles */,
+				FF00AA11BB22CC33DD460001 /* Copy Executables */,
+				FF00AA11BB22CC33DD460002 /* Copy ITN Resources */,
 			);
 			buildRules = (
 			);
