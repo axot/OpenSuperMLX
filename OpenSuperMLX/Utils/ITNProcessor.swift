@@ -88,7 +88,7 @@ class ITNProcessor {
                                            ",", ".", "!", "?", ";", ":"]
 
         var result: [Character] = []
-        var lastWasPunctuation: Character? = nil
+        var lastWasPunctuation: Character?
 
         for char in text {
             if punctuation.contains(char) {
