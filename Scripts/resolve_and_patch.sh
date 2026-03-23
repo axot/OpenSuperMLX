@@ -24,8 +24,8 @@ for pkg_dir in "$PROJECT_DIR"/patches/*/; do
     checkout_dir="$CHECKOUTS_DIR/$pkg_name"
 
     if [[ ! -d "$checkout_dir" ]]; then
-        echo "❌ $pkg_name checkout not found at $checkout_dir after resolve"
-        exit 1
+        echo "⏭️  Skipping $pkg_name (not an SPM checkout)"
+        continue
     fi
 
     echo "Applying patches to $pkg_name..."
