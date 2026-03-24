@@ -53,6 +53,11 @@ public struct StreamingConfig: Sendable {
     public var maxTokensPerPass: Int
     /// Number of trailing tokens to keep unfixed for prefix-rollback
     public var unfixedTokenNum: Int
+    /// Penalty factor applied to recently-seen tokens to prevent repetition loops.
+    /// 1.0 = disabled. ASR-safe default is 1.2.
+    public var repetitionPenalty: Float
+    /// Number of recent tokens considered for repetition penalty.
+    public var repetitionContextSize: Int
 
     public init(
         decodeIntervalSeconds: Double = 1.0,
@@ -62,7 +67,9 @@ public struct StreamingConfig: Sendable {
         language: String = "English",
         temperature: Float = 0.0,
         maxTokensPerPass: Int = 512,
-        unfixedTokenNum: Int = 5
+        unfixedTokenNum: Int = 5,
+        repetitionPenalty: Float = 1.2,
+        repetitionContextSize: Int = 32
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
         self.maxCachedWindows = maxCachedWindows
@@ -72,6 +79,8 @@ public struct StreamingConfig: Sendable {
         self.temperature = temperature
         self.maxTokensPerPass = maxTokensPerPass
         self.unfixedTokenNum = unfixedTokenNum
+        self.repetitionPenalty = repetitionPenalty
+        self.repetitionContextSize = repetitionContextSize
     }
 }
 

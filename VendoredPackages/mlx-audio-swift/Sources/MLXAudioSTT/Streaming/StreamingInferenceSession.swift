@@ -26,6 +26,7 @@ private struct SessionState: Sendable {
 /// `unfixedTokenNum` tokens. This eliminates overlap/dedup logic entirely.
 public class StreamingInferenceSession: @unchecked Sendable {
     private static let eosTokenIds = [151645, 151643]
+    private static let repetitionThreshold = 8
 
     private let model: Qwen3ASRModel
     private let config: StreamingConfig
@@ -195,6 +196,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
         // 4. Autoregressive generation
         var newTokenIds: [Int] = []
+        var recentTokenIds: [Int] = Array(prefixIds.suffix(config.repetitionContextSize))
         for _ in 0..<config.maxTokensPerPass {
             if Task.isCancelled { return }
 
@@ -202,10 +204,30 @@ public class StreamingInferenceSession: @unchecked Sendable {
             if config.temperature > 0 {
                 lastLogits = lastLogits / config.temperature
             }
-            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
 
+            // Repetition penalty (B): suppress recently-seen tokens in logits
+            if config.repetitionPenalty > 1.0 && !recentTokenIds.isEmpty {
+                let indices = MLXArray(recentTokenIds.map { UInt32($0) })
+                var selected = lastLogits[0..., indices]
+                selected = MLX.where(selected .< 0, selected * config.repetitionPenalty, selected / config.repetitionPenalty)
+                lastLogits[0..., indices] = selected
+            }
+
+            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
             if eosTokenIds.contains(nextToken) { break }
             newTokenIds.append(nextToken)
+
+            recentTokenIds.append(nextToken)
+            if recentTokenIds.count > config.repetitionContextSize {
+                recentTokenIds.removeFirst()
+            }
+
+            // Repetition guard safety net (C): stop if last N tokens are identical
+            if newTokenIds.count >= repetitionThreshold &&
+               newTokenIds.suffix(repetitionThreshold).allSatisfy({ $0 == nextToken }) {
+                newTokenIds.removeLast(repetitionThreshold)
+                break
+            }
 
             let provText = tokenizer.decode(tokens: newTokenIds)
             continuation?.yield(.displayUpdate(
@@ -331,6 +353,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
             if Task.isCancelled { return }
 
             var newTokenIds: [Int] = []
+            var recentTokenIds: [Int] = Array(prefixIds.suffix(config.repetitionContextSize))
             for _ in 0..<config.maxTokensPerPass {
                 if Task.isCancelled { return }
 
@@ -338,10 +361,30 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 if config.temperature > 0 {
                     lastLogits = lastLogits / config.temperature
                 }
-                let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
 
+                // Repetition penalty (B)
+                if config.repetitionPenalty > 1.0 && !recentTokenIds.isEmpty {
+                    let indices = MLXArray(recentTokenIds.map { UInt32($0) })
+                    var selected = lastLogits[0..., indices]
+                    selected = MLX.where(selected .< 0, selected * config.repetitionPenalty, selected / config.repetitionPenalty)
+                    lastLogits[0..., indices] = selected
+                }
+
+                let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
                 if Self.eosTokenIds.contains(nextToken) { break }
                 newTokenIds.append(nextToken)
+
+                recentTokenIds.append(nextToken)
+                if recentTokenIds.count > config.repetitionContextSize {
+                    recentTokenIds.removeFirst()
+                }
+
+                // Repetition guard safety net (C)
+                if newTokenIds.count >= Self.repetitionThreshold &&
+                   newTokenIds.suffix(Self.repetitionThreshold).allSatisfy({ $0 == nextToken }) {
+                    newTokenIds.removeLast(Self.repetitionThreshold)
+                    break
+                }
 
                 let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
                 logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
