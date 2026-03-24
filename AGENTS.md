@@ -10,7 +10,7 @@ Swift 5 / SwiftUI, Xcode project, targeting macOS 14.0+ (Sonoma), ARM64 only.
 brew install cmake libomp rust ruby && gem install xcpretty
 git submodule update --init --recursive
 
-# Full build (Rust dylib + patches + Xcode)
+# Full build (Rust dylib + WeTextProcessing + patches + Xcode)
 ./run.sh build
 
 # Build and run
@@ -19,7 +19,7 @@ git submodule update --init --recursive
 
 ### Fast Incremental Build (~3-5 seconds)
 
-For **Swift-only changes**, skip `run.sh` and run xcodebuild directly — the **preferred build command during development** after an initial `./run.sh build`:
+For **Swift-only changes**, skip `run.sh` — the **preferred build command during development**:
 
 ```bash
 xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
@@ -28,7 +28,9 @@ xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
   -clonedSourcePackagesDirPath SourcePackages CODE_SIGNING_ALLOWED=NO build
 ```
 
-**Fall back to `./run.sh build`** when: first build on fresh clone, after modifying `asian-autocorrect/` (Rust), `patches/*.patch`, SPM dependencies, or if `build/` was deleted.
+**Fall back to `./run.sh build`** when: first build on fresh clone, after modifying `asian-autocorrect/` (Rust), `patches/*.patch`, `WeTextProcessing/` (ITN binary), SPM dependencies, or if `build/` was deleted.
+
+**`VendoredPackages/mlx-audio-swift/`** — edit Swift source directly; changes are picked up by the incremental xcodebuild above (no `./run.sh` needed).
 
 ## Tests
 
@@ -123,6 +125,15 @@ docs/
   import KeyboardShortcuts
   ```
 
+### Comments and Documentation
+
+**Default: no comments.** Code should be self-documenting through clear naming.
+
+- **`///` doc comments**: Only on non-obvious public API properties/methods in `VendoredPackages/` or protocol definitions. Do not add them to app-layer code where the name is self-explanatory.
+- **Inline `//` comments**: Only for complex algorithms, regex, performance-critical math, or non-obvious security decisions. Never to explain *what* the code does — only *why* it does something unexpected.
+- **`// MARK: -`**: Use to organize sections within files (required for files > ~80 lines).
+- **Never** add "memo-style" comments describing what you changed, or restating what the next line does.
+
 ### Naming
 
 - **Types**: `PascalCase` — `TranscriptionService`, `MLXEngine`
@@ -179,13 +190,12 @@ docs/
 
 ### Other Conventions
 
-- `// MARK: -` to organize code sections within files
 - `#if DEBUG ... #endif` for debug-only code (see `DevConfig.swift`)
 - File headers: `// FileName.swift // OpenSuperMLX // Created by ...`
 
 ## CI
 
-GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases.
+GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases and includes a WeTextProcessing build step to produce `processor_main` before the Xcode build.
 
 ## Plan Conventions
 
