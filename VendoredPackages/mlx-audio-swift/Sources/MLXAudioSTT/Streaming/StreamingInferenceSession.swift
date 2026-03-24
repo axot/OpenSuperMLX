@@ -110,7 +110,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
     // MARK: - Decode Pass
 
     private func launchDecodePassLocked() {
-        guard let audioFeatures = encoder.getFullEncoderOutput() else {
+        let startWindow = config.decodeWindowCount > 0
+            ? max(0, encoder.cachedWindowCount - config.decodeWindowCount)
+            : nil
+        guard let audioFeatures = encoder.getFullEncoderOutput(fromWindow: startWindow) else {
             shared.withLock { $0.isDecoding = false }
             return
         }

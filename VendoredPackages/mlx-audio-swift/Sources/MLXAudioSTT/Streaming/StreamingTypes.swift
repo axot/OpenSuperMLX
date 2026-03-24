@@ -38,6 +38,11 @@ public struct StreamingConfig: Sendable {
     public var decodeIntervalSeconds: Double
     /// Maximum number of cached encoder windows (~8s each)
     public var maxCachedWindows: Int
+    /// Maximum number of recent encoder windows used per decode pass.
+    /// Limits the audio context to the most recent `decodeWindowCount` windows,
+    /// keeping each decode pass roughly constant-time instead of O(total_duration²).
+    /// Set to 0 to use all cached windows (original behavior).
+    public var decodeWindowCount: Int
     /// Delay preset controlling provisional → confirmed promotion
     public var delayPreset: DelayPreset
     /// Language for transcription
@@ -52,6 +57,7 @@ public struct StreamingConfig: Sendable {
     public init(
         decodeIntervalSeconds: Double = 1.0,
         maxCachedWindows: Int = 60,
+        decodeWindowCount: Int = 10,
         delayPreset: DelayPreset = .agent,
         language: String = "English",
         temperature: Float = 0.0,
@@ -60,6 +66,7 @@ public struct StreamingConfig: Sendable {
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
         self.maxCachedWindows = maxCachedWindows
+        self.decodeWindowCount = decodeWindowCount
         self.delayPreset = delayPreset
         self.language = language
         self.temperature = temperature

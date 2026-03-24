@@ -75,7 +75,6 @@ public class StreamingEncoder {
             eval(encoded)
 
             cachedWindows.append(encoded)
-            newlyEncodedWindows.append(encoded)
             totalEncodedWindows += 1
             newWindows += 1
 
@@ -174,6 +173,11 @@ public class StreamingEncoder {
         case (let c?, let p?):
             return MLX.concatenated([c, p], axis: 0)
         }
+    }
+
+    /// Number of windows currently held in the cache (post-eviction).
+    public var cachedWindowCount: Int {
+        cachedWindows.count
     }
 
     /// Number of fully encoded windows.
