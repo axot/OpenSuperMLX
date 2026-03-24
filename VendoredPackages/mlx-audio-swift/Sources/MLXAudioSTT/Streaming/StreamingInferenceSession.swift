@@ -166,8 +166,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
             tokenCount: rawDecodedTokenIds.count,
             unfixedTokenNum: config.unfixedTokenNum
         )
-        let prefixIds = Array(rawDecodedTokenIds.prefix(endIdx))
-        let prefixText = prefixIds.isEmpty ? "" : tokenizer.decode(tokens: prefixIds)
+        let (prefixIds, prefixText) = Self.safeDecodePrefix(
+            ids: Array(rawDecodedTokenIds.prefix(endIdx)),
+            tokenizer: tokenizer
+        )
 
         // 2. Build prompt with full audio + prefix
         let inputIds = model.buildPrompt(
@@ -274,6 +276,28 @@ public class StreamingInferenceSession: @unchecked Sendable {
         return max(0, tokenCount - unfixedTokenNum)
     }
 
+    private static let unicodeReplacementCharacter: Character = "\u{FFFD}"
+
+    /// Decode a prefix token array, backing off one token at a time if the result
+    /// contains U+FFFD replacement characters. This handles byte-level BPE tokenizers
+    /// where cutting at a token boundary may split a multi-byte UTF-8 character (e.g.
+    /// Japanese kanji), which would permanently corrupt the re-encoded prompt.
+    static func safeDecodePrefix(ids: [Int], decode: ([Int]) -> String) -> (ids: [Int], text: String) {
+        var safeIds = ids
+        while !safeIds.isEmpty {
+            let text = decode(safeIds)
+            if !text.contains(unicodeReplacementCharacter) {
+                return (safeIds, text)
+            }
+            safeIds = Array(safeIds.dropLast())
+        }
+        return ([], "")
+    }
+
+    static func safeDecodePrefix(ids: [Int], tokenizer: any Tokenizer) -> (ids: [Int], text: String) {
+        safeDecodePrefix(ids: ids) { tokenizer.decode(tokens: $0) }
+    }
+
     // MARK: - Stop
 
     public func stop() {
@@ -325,8 +349,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 tokenCount: snapshot.count,
                 unfixedTokenNum: config.unfixedTokenNum
             )
-            let prefixIds = Array(snapshot.prefix(prefixEndIdx))
-            let prefixText = prefixIds.isEmpty ? "" : tokenizer.decode(tokens: prefixIds)
+            let (prefixIds, prefixText) = Self.safeDecodePrefix(
+                ids: Array(snapshot.prefix(prefixEndIdx)),
+                tokenizer: tokenizer
+            )
 
             let numAudioTokens = audioFeatures.dim(0)
             let inputIds = model.buildPrompt(
