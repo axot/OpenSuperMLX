@@ -47,9 +47,8 @@ class OnboardingViewModel: ObservableObject {
     private var downloadTask: Task<Void, Error>?
 
     init() {
-        let systemLanguage = LanguageUtil.getSystemLanguage()
-        AppPreferences.shared.mlxLanguage = systemLanguage
-        self.selectedLanguage = systemLanguage
+        AppPreferences.shared.mlxLanguage = "auto"
+        self.selectedLanguage = "auto"
         self.useAsianAutocorrect = AppPreferences.shared.useAsianAutocorrect
         
         initializeModels()

@@ -28,13 +28,4 @@ class LanguageUtil {
         "hi": "Hindi",
         "fi": "Finnish",
     ]
-
-    static func getSystemLanguage() -> String {
-        if let preferredLanguage = Locale.preferredLanguages.first {
-            let preferredLanguage = preferredLanguage.prefix(2).lowercased()
-            return availableLanguages.contains(preferredLanguage) ? preferredLanguage : "en"
-        } else {
-            return "eng"
-        }
-    }
 }
