@@ -35,6 +35,11 @@ final class StreamingInferenceTests: XCTestCase {
         XCTAssertEqual(endIdx, 95)
     }
 
+    func testComputePrefixEndIndex_LargeTokenCount() {
+        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 2000, unfixedTokenNum: 5)
+        XCTAssertEqual(endIdx, 1995)
+    }
+
     // MARK: - StreamingConfig Defaults
 
     func testStreamingConfigDefaults() {
@@ -66,5 +71,10 @@ final class StreamingInferenceTests: XCTestCase {
         let config = StreamingConfig()
         _ = config  // suppress unused warning
         XCTAssertTrue(true)
+    }
+
+    func testStreamingConfig_DecodeWindowCount_Default() {
+        let config = StreamingConfig()
+        XCTAssertEqual(config.decodeWindowCount, 10)
     }
 }
