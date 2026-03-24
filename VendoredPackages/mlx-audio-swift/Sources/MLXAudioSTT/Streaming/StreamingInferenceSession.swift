@@ -283,7 +283,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 _ = encoder.feed(melFrames: melFrames)
             }
             _ = encoder.flushPartial()
-            let features = encoder.getFullEncoderOutput()
+            let startWindow = config.decodeWindowCount > 0
+                ? max(0, encoder.cachedWindowCount - config.decodeWindowCount)
+                : nil
+            let features = encoder.getFullEncoderOutput(fromWindow: startWindow)
             let boxed = features.map { UncheckedSendableBox($0) }
             return (boxed, self.continuation)
         }
@@ -293,19 +296,65 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
         let finalText: String
         if let audioFeatures, audioFeatures.dim(0) > 0, let tokenizer = model.tokenizer {
-            // Run one final full-session decode
-            let tokenIds = Self.decodeAllTokenIds(
-                model: model,
-                audioFeatures: audioFeatures,
-                config: config
-            )
-            if Task.isCancelled { return }
-            Memory.clearCache()
+            // Run one final prefix-rollback decode pass
+            let snapshot = shared.withLock { $0.rawDecodedTokenIds }
 
-            shared.withLock { state in
-                state.rawDecodedTokenIds = tokenIds
+            let prefixEndIdx = Self.computePrefixEndIndex(
+                tokenCount: snapshot.count,
+                unfixedTokenNum: config.unfixedTokenNum
+            )
+            let prefixIds = Array(snapshot.prefix(prefixEndIdx))
+            let prefixText = prefixIds.isEmpty ? "" : tokenizer.decode(tokens: prefixIds)
+
+            let numAudioTokens = audioFeatures.dim(0)
+            let inputIds = model.buildPrompt(
+                numAudioTokens: numAudioTokens,
+                language: config.language,
+                prefix: prefixText
+            )
+
+            let embeds = model.model.embedTokens(inputIds)
+            let inputsEmbeds = model.mergeAudioFeatures(
+                inputsEmbeds: embeds,
+                audioFeatures: audioFeatures.asType(embeds.dtype),
+                inputIds: inputIds
+            )
+
+            let cache = model.makeCache()
+            var logits = model.callAsFunction(
+                inputIds: inputIds,
+                inputEmbeddings: inputsEmbeds,
+                cache: cache
+            )
+            eval(logits)
+
+            if Task.isCancelled { return }
+
+            var newTokenIds: [Int] = []
+            for _ in 0..<config.maxTokensPerPass {
+                if Task.isCancelled { return }
+
+                var lastLogits = logits[0..., -1, 0...]
+                if config.temperature > 0 {
+                    lastLogits = lastLogits / config.temperature
+                }
+                let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
+
+                if Self.eosTokenIds.contains(nextToken) { break }
+                newTokenIds.append(nextToken)
+
+                let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
+                logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
+                eval(logits)
             }
-            finalText = tokenizer.decode(tokens: tokenIds)
+
+            let finalIds = prefixIds + newTokenIds
+            shared.withLock { state in
+                state.rawDecodedTokenIds = finalIds
+            }
+            finalText = tokenizer.decode(tokens: finalIds)
+
+            Memory.clearCache()
         } else {
             // No audio features — use whatever we accumulated
             finalText = shared.withLock { state in
