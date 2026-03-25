@@ -4,3 +4,6 @@
 [submodule "WeTextProcessing"]
 	path = WeTextProcessing
 	url = https://github.com/wenet-e2e/WeTextProcessing.git
+[submodule "text-processing-rs"]
+	path = text-processing-rs
+	url = https://github.com/FluidInference/text-processing-rs.git

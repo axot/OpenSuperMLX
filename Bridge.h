@@ -6,3 +6,4 @@
 //
 
 #include "asian-autocorrect/autocorrect-swift/autocorrect_swift.h"
+#include "text-processing-rs/swift/include/nemo_text_processing.h"

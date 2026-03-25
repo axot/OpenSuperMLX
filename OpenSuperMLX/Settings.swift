@@ -62,6 +62,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    @Published var useEnglishITN: Bool {
+        didSet {
+            AppPreferences.shared.useEnglishITN = useEnglishITN
+        }
+    }
+    
     @Published var bedrockEnabled: Bool {
         didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
     }
@@ -111,6 +117,7 @@ class SettingsViewModel: ObservableObject {
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.useChineseITN = prefs.useChineseITN
+        self.useEnglishITN = prefs.useEnglishITN
         self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
@@ -132,6 +139,7 @@ struct Settings {
     var temperature: Double
     var useAsianAutocorrect: Bool
     var useChineseITN: Bool
+    var useEnglishITN: Bool
     var useStreamingTranscription: Bool
     
     var isAsianLanguage: Bool {
@@ -143,7 +151,11 @@ struct Settings {
     }
     
     var shouldApplyChineseITN: Bool {
-        selectedLanguage == "zh" || selectedLanguage == "auto"
+        (selectedLanguage == "zh" || selectedLanguage == "auto") && useChineseITN
+    }
+    
+    var shouldApplyEnglishITN: Bool {
+        (selectedLanguage == "en" || selectedLanguage == "auto") && useEnglishITN
     }
     
     init() {
@@ -154,6 +166,7 @@ struct Settings {
         self.temperature = prefs.temperature
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.useChineseITN = prefs.useChineseITN
+        self.useEnglishITN = prefs.useEnglishITN
         self.useStreamingTranscription = prefs.useStreamingTranscription
     }
 }
@@ -386,6 +399,29 @@ struct SettingsView: View {
                             .padding(.top, 4)
                         }
                         
+                        if Settings.asianLanguages.contains(viewModel.selectedLanguage) || viewModel.selectedLanguage == "auto" {
+                            HStack {
+                                Text("Use Chinese ITN")
+                                    .font(.subheadline)
+                                Spacer()
+                                Toggle("", isOn: $viewModel.useChineseITN)
+                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                    .labelsHidden()
+                            }
+                            .padding(.top, 4)
+                        }
+                        
+                        if viewModel.selectedLanguage == "en" || viewModel.selectedLanguage == "auto" {
+                            HStack {
+                                Text("Use English ITN")
+                                    .font(.subheadline)
+                                Spacer()
+                                Toggle("", isOn: $viewModel.useEnglishITN)
+                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                    .labelsHidden()
+                            }
+                            .padding(.top, 4)
+                        }
 
                     }
                 }

@@ -7,19 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		36EBC0227428844AC8411325 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBC1B35882771B03CCEE49 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBC306D04008635328DAE1 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBC6D475C8352BF3EA9EAF /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBC8F7DA3F51E4D546612A /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBC907DA520E4D7D750096 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCA42DBEDA791E9C785E5 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCB7D2726BE5C80C0338A /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCC92099BD2EC03912BC9 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCD229289171650A4E267 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCD57CC6B8E2D3FC51EF5 /* (null) in Sources */ = {isa = PBXBuildFile; };
-		36EBCE4EA0197EA30ECFA1F7 /* (null) in Sources */ = {isa = PBXBuildFile; };
-
+		36EBC0227428844AC8411325 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBC1B35882771B03CCEE49 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBC306D04008635328DAE1 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBC6D475C8352BF3EA9EAF /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBC8F7DA3F51E4D546612A /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBC907DA520E4D7D750096 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCA42DBEDA791E9C785E5 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCB7D2726BE5C80C0338A /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCC92099BD2EC03912BC9 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCD229289171650A4E267 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCD57CC6B8E2D3FC51EF5 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		36EBCE4EA0197EA30ECFA1F7 /* BuildFile in Sources */ = {isa = PBXBuildFile; };
+		937017DE84013867E255B023 /* libtext_processing_rs.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 37CA8122FF7C8C4A3A637E38 /* libtext_processing_rs.dylib */; };
+		9F78657ABA26EB4669D0962F /* libtext_processing_rs.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = 37CA8122FF7C8C4A3A637E38 /* libtext_processing_rs.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CE0EAD6E2D56ACA80067FDEE /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE0EAD6D2D56ACA80067FDEE /* GRDB */; };
 		CE84DF6E2D55777800C54EA6 /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = CE84DF6D2D55777800C54EA6 /* libc++.tbd */; };
 		CE84DF712D55778000C54EA6 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE84DF6F2D55778000C54EA6 /* Metal.framework */; };
@@ -29,26 +30,12 @@
 		CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; };
 		CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00072D82F40000000000 /* libomp.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		FF00AA11BB22CC33DD450001 /* processor_main in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440001 /* processor_main */; };
-		FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */; };
-		FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */; };
+		FF00AA11BB22CC33DD450001 /* processor_main in Copy Executables */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440001 /* processor_main */; };
+		FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */; };
+		FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		CEAC00052D82F00400000000 /* Copy Files */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				CEAC00042D82F00300000000 /* libautocorrect_swift.dylib in Copy Files */,
-			);
-			name = "Copy Files";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
-	/* Begin PBXContainerItemProxy section */
+/* Begin PBXContainerItemProxy section */
 		CE57B03A2D52C7BC00929AF3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CE57B0202D52C7BB00929AF3 /* Project object */;
@@ -74,6 +61,7 @@
 			files = (
 				CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */,
 				CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */,
+				9F78657ABA26EB4669D0962F /* libtext_processing_rs.dylib in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -83,7 +71,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 6;
 			files = (
-				FF00AA11BB22CC33DD450001 /* processor_main in CopyFiles */,
+				FF00AA11BB22CC33DD450001 /* processor_main in Copy Executables */,
 			);
 			name = "Copy Executables";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -94,16 +82,17 @@
 			dstPath = "";
 			dstSubfolderSpec = 7;
 			files = (
-				FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in CopyFiles */,
-				FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in CopyFiles */,
+				FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in Copy ITN Resources */,
+				FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in Copy ITN Resources */,
 			);
 			name = "Copy ITN Resources";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
-	/* Begin PBXFileReference section */
-	840156592D79EA1A00FB5FFE /* Bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridge.h; sourceTree = "<group>"; };
+/* Begin PBXFileReference section */
+		37CA8122FF7C8C4A3A637E38 /* libtext_processing_rs.dylib */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = "compiled.mach-o.dylib"; name = libtext_processing_rs.dylib; path = build/libtext_processing_rs.dylib; sourceTree = "<group>"; };
+		840156592D79EA1A00FB5FFE /* Bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridge.h; sourceTree = "<group>"; };
 		CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenSuperMLX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE57B0392D52C7BC00929AF3 /* OpenSuperMLXTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenSuperMLXTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE57B0432D52C7BC00929AF3 /* OpenSuperMLXUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenSuperMLXUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -115,8 +104,8 @@
 		CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libautocorrect_swift.dylib; path = build/libautocorrect_swift.dylib; sourceTree = "<group>"; };
 		CEAC00072D82F40000000000 /* libomp.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libomp.dylib; path = build/libomp.dylib; sourceTree = "<group>"; };
 		FF00AA11BB22CC33DD440001 /* processor_main */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = processor_main; path = build/processor_main; sourceTree = "<group>"; };
-		FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_tagger.fst; path = "Resources/ITN/zh_itn_tagger.fst"; sourceTree = "<group>"; };
-		FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_verbalizer.fst; path = "Resources/ITN/zh_itn_verbalizer.fst"; sourceTree = "<group>"; };
+		FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_tagger.fst; path = Resources/ITN/zh_itn_tagger.fst; sourceTree = "<group>"; };
+		FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_verbalizer.fst; path = Resources/ITN/zh_itn_verbalizer.fst; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -140,11 +129,15 @@
 		};
 		CE57B03C2D52C7BC00929AF3 /* OpenSuperMLXTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = OpenSuperMLXTests;
 			sourceTree = "<group>";
 		};
 		CE57B0462D52C7BC00929AF3 /* OpenSuperMLXUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = OpenSuperMLXUITests;
 			sourceTree = "<group>";
 		};
@@ -162,6 +155,7 @@
 				CE84DF6E2D55777800C54EA6 /* libc++.tbd in Frameworks */,
 				CE84E17D2D56550B00C54EA6 /* KeyboardShortcuts in Frameworks */,
 				CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */,
+				937017DE84013867E255B023 /* libtext_processing_rs.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,31 +176,32 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-	CE37B60E2D54F274009D6564 /* Frameworks */ = {
-		isa = PBXGroup;
-		children = (
-			CE84DF752D5577D200C54EA6 /* Accelerate.framework */,
-			CE84DF6F2D55778000C54EA6 /* Metal.framework */,
-			CE84DF702D55778000C54EA6 /* MetalKit.framework */,
-			CE84DF6D2D55777800C54EA6 /* libc++.tbd */,
-		);
-		name = Frameworks;
-		sourceTree = "<group>";
-	};
-	CE57B01F2D52C7BB00929AF3 = {
-		isa = PBXGroup;
-		children = (
-			840156592D79EA1A00FB5FFE /* Bridge.h */,
-			CE57B02A2D52C7BB00929AF3 /* OpenSuperMLX */,
-			CE57B03C2D52C7BC00929AF3 /* OpenSuperMLXTests */,
-			CE57B0462D52C7BC00929AF3 /* OpenSuperMLXUITests */,
-			CE37B60E2D54F274009D6564 /* Frameworks */,
-			CE57B0292D52C7BB00929AF3 /* Products */,
-			CE84DF792D5578BE00C54EA6 /* jfk.wav */,
-			CE9DA5672EA8DA4600EB417E /* Recovered References */,
-		);
-		sourceTree = "<group>";
-	};
+		CE37B60E2D54F274009D6564 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				CE84DF752D5577D200C54EA6 /* Accelerate.framework */,
+				CE84DF6F2D55778000C54EA6 /* Metal.framework */,
+				CE84DF702D55778000C54EA6 /* MetalKit.framework */,
+				CE84DF6D2D55777800C54EA6 /* libc++.tbd */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		CE57B01F2D52C7BB00929AF3 = {
+			isa = PBXGroup;
+			children = (
+				840156592D79EA1A00FB5FFE /* Bridge.h */,
+				CE57B02A2D52C7BB00929AF3 /* OpenSuperMLX */,
+				CE57B03C2D52C7BC00929AF3 /* OpenSuperMLXTests */,
+				CE57B0462D52C7BC00929AF3 /* OpenSuperMLXUITests */,
+				CE37B60E2D54F274009D6564 /* Frameworks */,
+				CE57B0292D52C7BB00929AF3 /* Products */,
+				CE84DF792D5578BE00C54EA6 /* jfk.wav */,
+				CE9DA5672EA8DA4600EB417E /* Recovered References */,
+				37CA8122FF7C8C4A3A637E38 /* libtext_processing_rs.dylib */,
+			);
+			sourceTree = "<group>";
+		};
 		CE57B0292D52C7BB00929AF3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -251,14 +246,14 @@
 				CE57B02A2D52C7BB00929AF3 /* OpenSuperMLX */,
 			);
 			name = OpenSuperMLX;
-		packageProductDependencies = (
-			CE84E17C2D56550B00C54EA6 /* KeyboardShortcuts */,
-			CE0EAD6D2D56ACA80067FDEE /* GRDB */,
-			CEAC000A2D82F60000000000 /* MLXAudioSTT */,
-			CEAC000B2D82F60000000000 /* MLXAudioCore */,
+			packageProductDependencies = (
+				CE84E17C2D56550B00C54EA6 /* KeyboardShortcuts */,
+				CE0EAD6D2D56ACA80067FDEE /* GRDB */,
+				CEAC000A2D82F60000000000 /* MLXAudioSTT */,
+				CEAC000B2D82F60000000000 /* MLXAudioCore */,
 				102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */,
 				845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */,
-		);
+			);
 			productName = OpenSuperMLX;
 			productReference = CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */;
 			productType = "com.apple.product-type.application";
@@ -280,8 +275,6 @@
 				CE57B03C2D52C7BC00929AF3 /* OpenSuperMLXTests */,
 			);
 			name = OpenSuperMLXTests;
-			packageProductDependencies = (
-			);
 			productName = OpenSuperMLXTests;
 			productReference = CE57B0392D52C7BC00929AF3 /* OpenSuperMLXTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -303,8 +296,6 @@
 				CE57B0462D52C7BC00929AF3 /* OpenSuperMLXUITests */,
 			);
 			name = OpenSuperMLXUITests;
-			packageProductDependencies = (
-			);
 			productName = OpenSuperMLXUITests;
 			productReference = CE57B0432D52C7BC00929AF3 /* OpenSuperMLXUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -341,18 +332,16 @@
 			);
 			mainGroup = CE57B01F2D52C7BB00929AF3;
 			minimizedProjectReferenceProxies = 1;
-		packageReferences = (
-			CE84E17B2D56550B00C54EA6 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
-			CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */,
-			CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */,
+			packageReferences = (
+				CE84E17B2D56550B00C54EA6 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
+				CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */,
 				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
-		);
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE57B0292D52C7BB00929AF3 /* Products */;
-		projectDirPath = "";
-		projectReferences = (
-		);
-		projectRoot = "";
+			projectDirPath = "";
+			projectRoot = "";
 			targets = (
 				CE57B0272D52C7BB00929AF3 /* OpenSuperMLX */,
 				CE57B0382D52C7BC00929AF3 /* OpenSuperMLXTests */,
@@ -360,8 +349,6 @@
 			);
 		};
 /* End PBXProject section */
-
-
 
 /* Begin PBXResourcesBuildPhase section */
 		CE57B0262D52C7BB00929AF3 /* Resources */ = {
@@ -392,18 +379,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				36EBC1B35882771B03CCEE49 /* (null) in Sources */,
-				36EBC6D475C8352BF3EA9EAF /* (null) in Sources */,
-				36EBC0227428844AC8411325 /* (null) in Sources */,
-				36EBCD229289171650A4E267 /* (null) in Sources */,
-				36EBC8F7DA3F51E4D546612A /* (null) in Sources */,
-				36EBCB7D2726BE5C80C0338A /* (null) in Sources */,
-				36EBCC92099BD2EC03912BC9 /* (null) in Sources */,
-				36EBCE4EA0197EA30ECFA1F7 /* (null) in Sources */,
-				36EBC306D04008635328DAE1 /* (null) in Sources */,
-				36EBCA42DBEDA791E9C785E5 /* (null) in Sources */,
-				36EBCD57CC6B8E2D3FC51EF5 /* (null) in Sources */,
-				36EBC907DA520E4D7D750096 /* (null) in Sources */,
+				36EBC1B35882771B03CCEE49 /* BuildFile in Sources */,
+				36EBC6D475C8352BF3EA9EAF /* BuildFile in Sources */,
+				36EBC0227428844AC8411325 /* BuildFile in Sources */,
+				36EBCD229289171650A4E267 /* BuildFile in Sources */,
+				36EBC8F7DA3F51E4D546612A /* BuildFile in Sources */,
+				36EBCB7D2726BE5C80C0338A /* BuildFile in Sources */,
+				36EBCC92099BD2EC03912BC9 /* BuildFile in Sources */,
+				36EBCE4EA0197EA30ECFA1F7 /* BuildFile in Sources */,
+				36EBC306D04008635328DAE1 /* BuildFile in Sources */,
+				36EBCA42DBEDA791E9C785E5 /* BuildFile in Sources */,
+				36EBCD57CC6B8E2D3FC51EF5 /* BuildFile in Sources */,
+				36EBC907DA520E4D7D750096 /* BuildFile in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -585,9 +572,7 @@
 					"$(PROJECT_DIR)",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-			HEADER_SEARCH_PATHS = (
-				"$(inherited)",
-			);
+				HEADER_SEARCH_PATHS = "$(inherited)";
 				INFOPLIST_FILE = "OpenSuperMLX/OpenSuperMLX-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX needs accessibility access to provide system-wide functionality.";
@@ -646,9 +631,7 @@
 				);
 				GCC_OPTIMIZATION_LEVEL = s;
 				GENERATE_INFOPLIST_FILE = YES;
-			HEADER_SEARCH_PATHS = (
-				"$(inherited)",
-			);
+				HEADER_SEARCH_PATHS = "$(inherited)";
 				INFOPLIST_FILE = "OpenSuperMLX/OpenSuperMLX-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX needs accessibility access to provide system-wide functionality.";
@@ -692,9 +675,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
-			HEADER_SEARCH_PATHS = (
-				"$(inherited)",
-			);
+				HEADER_SEARCH_PATHS = "$(inherited)";
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLXTests;
@@ -715,9 +696,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
-			HEADER_SEARCH_PATHS = (
-				"$(inherited)",
-			);
+				HEADER_SEARCH_PATHS = "$(inherited)";
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLXTests;
@@ -804,7 +783,22 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "VendoredPackages/mlx-audio-swift";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
+		9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awslabs/aws-sdk-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift.git";
@@ -821,24 +815,19 @@
 				minimumVersion = 2.3.0;
 			};
 		};
-		9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/awslabs/aws-sdk-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = VendoredPackages/mlx-audio-swift;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
+		102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
+			productName = AWSBedrockRuntime;
+		};
+		845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
+			productName = AWSSDKIdentity;
+		};
 		CE0EAD6D2D56ACA80067FDEE /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */;
@@ -849,23 +838,13 @@
 			package = CE84E17B2D56550B00C54EA6 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
 			productName = KeyboardShortcuts;
 		};
-	CEAC000A2D82F60000000000 /* MLXAudioSTT */ = {
-		isa = XCSwiftPackageProductDependency;
-		productName = MLXAudioSTT;
-	};
-	CEAC000B2D82F60000000000 /* MLXAudioCore */ = {
-		isa = XCSwiftPackageProductDependency;
-		productName = MLXAudioCore;
-	};
-		102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */ = {
+		CEAC000A2D82F60000000000 /* MLXAudioSTT */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
-			productName = AWSBedrockRuntime;
+			productName = MLXAudioSTT;
 		};
-		845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */ = {
+		CEAC000B2D82F60000000000 /* MLXAudioCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */;
-			productName = AWSSDKIdentity;
+			productName = MLXAudioCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

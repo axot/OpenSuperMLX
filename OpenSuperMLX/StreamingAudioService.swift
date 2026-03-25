@@ -337,13 +337,17 @@ class StreamingAudioService: ObservableObject {
 
         var text = result.text
         let settings = Settings()
-        if !text.isEmpty && (settings.shouldApplyChineseITN || settings.shouldApplyAsianAutocorrect) {
+        if !text.isEmpty && (settings.shouldApplyChineseITN || settings.shouldApplyEnglishITN || settings.shouldApplyAsianAutocorrect) {
             let applyITN = settings.shouldApplyChineseITN
+            let applyEnglishITN = settings.shouldApplyEnglishITN
             let applyAutocorrect = settings.shouldApplyAsianAutocorrect
             text = await Task.detached(priority: .userInitiated) {
                 var t = text
                 if applyITN {
                     t = ITNProcessor.process(t)
+                }
+                if applyEnglishITN {
+                    t = NemoTextProcessing.normalizeSentence(t)
                 }
                 if applyAutocorrect {
                     t = AutocorrectWrapper.format(t)

@@ -96,6 +96,10 @@ class MLXEngine: TranscriptionEngine {
             processedText = ITNProcessor.process(processedText)
         }
 
+        if settings.shouldApplyEnglishITN && !processedText.isEmpty {
+            processedText = NemoTextProcessing.normalizeSentence(processedText)
+        }
+
         if settings.shouldApplyAsianAutocorrect && !processedText.isEmpty {
             processedText = AutocorrectWrapper.format(processedText)
         }
