@@ -19,6 +19,12 @@ cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.
 install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
 codesign --force --sign "${CODE_SIGN_IDENTITY}" --timestamp ./build/libautocorrect_swift.dylib
 
+echo "Building text-processing-rs..."
+cargo build --release --features ffi --target aarch64-apple-darwin --manifest-path=text-processing-rs/Cargo.toml
+cp ./text-processing-rs/target/aarch64-apple-darwin/release/libtext_processing_rs.dylib ./build/libtext_processing_rs.dylib
+install_name_tool -id "@rpath/libtext_processing_rs.dylib" ./build/libtext_processing_rs.dylib
+codesign --force --sign "${CODE_SIGN_IDENTITY}" --timestamp ./build/libtext_processing_rs.dylib
+
 echo "Copying libomp.dylib..."
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
 install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
