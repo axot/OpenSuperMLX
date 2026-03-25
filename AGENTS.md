@@ -88,17 +88,20 @@ OpenSuperMLX/                    # Main app target
 │   ├── ClipboardUtil.swift      # Paste-via-CGEvent, keyboard layout detection
 │   ├── AutocorrectWrapper.swift # Bridge to Rust autocorrect dylib
 │   ├── ITNProcessor.swift       # Chinese inverse text normalization (WeTextProcessing)
+│   ├── NemoTextProcessing.swift # English inverse text normalization (text-processing-rs)
 │   ├── DevConfig.swift          # #if DEBUG toggles
 │   ├── FocusUtils.swift         # Accessibility API caret/cursor position
 │   ├── LanguageUtil.swift       # Language code ↔ display name mapping
 │   └── NotificationName+App.swift  # Typed Notification.Name extensions
-├── Bridge.h                     # Bridging header for autocorrect C library
+├── Bridge.h                     # Bridging header (autocorrect + text-processing-rs)
 OpenSuperMLXTests/               # Unit tests (XCTest)
 asian-autocorrect/               # Git submodule — Rust autocorrect library
+text-processing-rs/              # Git submodule — Rust English ITN library (NeMo port)
 patches/                         # Patches applied to SPM checkouts by run.sh
 VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
 docs/
+├── learnings.md                 # Past mistakes — native library checklist, release gotchas
 └── logging.md                   # Logger usage guide and log reading commands
 ```
 
@@ -107,7 +110,7 @@ docs/
 - **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
 - **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
-- **Git submodule**: `asian-autocorrect` (Rust → dylib via Cargo, bridged through `Bridge.h`)
+- **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`
 
 ## Code Style
 
@@ -195,7 +198,7 @@ docs/
 
 ## CI
 
-GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases and includes a WeTextProcessing build step to produce `processor_main` before the Xcode build.
+GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases with dedicated build steps for text-processing-rs, WeTextProcessing (`processor_main`), and the Xcode project.
 
 ## Plan Conventions
 
@@ -229,3 +232,5 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 ```bash
 ./make_release.sh <version> "<code_sign_identity>" [github_token]
 ```
+
+**Before any release**, consult [`docs/learnings.md`](docs/learnings.md) — especially the **New Native Library Checklist** if any native libraries were added or modified since the last release.
