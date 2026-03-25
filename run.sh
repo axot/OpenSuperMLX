@@ -16,6 +16,16 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
+echo "Building text-processing-rs..."
+cargo build --release --features ffi --target aarch64-apple-darwin --manifest-path=text-processing-rs/Cargo.toml
+cp ./text-processing-rs/target/aarch64-apple-darwin/release/libtext_processing_rs.dylib ./build/libtext_processing_rs.dylib
+install_name_tool -id "@rpath/libtext_processing_rs.dylib" ./build/libtext_processing_rs.dylib
+codesign --force --sign - ./build/libtext_processing_rs.dylib
+if [[ $? -ne 0 ]]; then
+    echo "text-processing-rs build failed!"
+    exit 1
+fi
+
 echo "Copying libomp.dylib..."
 rm -f ./build/libomp.dylib
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib

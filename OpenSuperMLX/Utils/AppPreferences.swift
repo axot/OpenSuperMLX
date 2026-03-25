@@ -75,6 +75,9 @@ final class AppPreferences {
     @UserDefault(key: "useChineseITN", defaultValue: true)
     var useChineseITN: Bool
     
+    @UserDefault(key: "useEnglishITN", defaultValue: true)
+    var useEnglishITN: Bool
+    
     @OptionalUserDefault(key: "selectedMicrophoneData")
     var selectedMicrophoneData: Data?
     
