@@ -206,6 +206,24 @@ When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
 
 **Execution order**: Oracle review → Code Simplifier (always sequential, never parallel).
 
+### Work Tree Requirement (MANDATORY)
+
+All plan execution MUST happen in a dedicated `git worktree` — never directly in the main working tree.
+
+```bash
+# Create worktree + feature branch for the plan
+git worktree add ../OpenSuperMLX-<plan-name> -b <branch-name>
+
+# All implementation happens inside the worktree
+# After PR merge, clean up
+git worktree remove ../OpenSuperMLX-<plan-name>
+```
+
+- Worktree path: sibling of project root (`../OpenSuperMLX-<plan-name>`)
+- One feature branch per plan, created at worktree add time
+- Main working tree stays clean for reviews, hotfixes, and ad-hoc work
+- Remove worktree after the plan's PR merges
+
 ## Release
 
 ```bash
