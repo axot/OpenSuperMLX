@@ -122,9 +122,15 @@ final class RecordingStoreTests: XCTestCase {
         }
     }
 
-    func testMigrations() throws {
+    func testMigrations() async throws {
         let freshDB = try DatabaseQueue()
         let store = RecordingStore(dbQueue: freshDB)
-        XCTAssertNotNil(store)
+
+        let recording = makeRecording(transcription: "migration test")
+        try await store.addRecordingSync(recording)
+
+        let fetched = try await store.fetchRecordings(limit: 10, offset: 0)
+        XCTAssertEqual(fetched.count, 1, "Should insert and fetch after migrations")
+        XCTAssertEqual(fetched.first?.transcription, "migration test")
     }
 }

@@ -11,6 +11,9 @@ final class MockTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     var transcribeResult = "mock transcription"
     var shouldThrow: Error?
     var transcribeCallCount = 0
+    var lastTranscribeURL: URL?
+    var lastTranscribeSettings: Settings?
+    var cancelCallCount = 0
     var shouldSuspend = false
     private var continuation: CheckedContinuation<Void, Never>?
 
@@ -18,6 +21,8 @@ final class MockTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
 
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
         transcribeCallCount += 1
+        lastTranscribeURL = url
+        lastTranscribeSettings = settings
         if shouldSuspend {
             await withCheckedContinuation { self.continuation = $0 }
         }
@@ -25,7 +30,9 @@ final class MockTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
         return transcribeResult
     }
 
-    func cancelTranscription() {}
+    func cancelTranscription() {
+        cancelCallCount += 1
+    }
 
     func resumeTranscription() {
         continuation?.resume()

@@ -34,6 +34,9 @@ final class TranscriptionServiceTests: XCTestCase {
 
         XCTAssertEqual(result, "hello world")
         XCTAssertEqual(mockEngine.transcribeCallCount, 1)
+        XCTAssertEqual(sut.transcribedText, "hello world")
+        XCTAssertEqual(sut.progress, 1.0, accuracy: 0.01)
+        XCTAssertFalse(sut.isTranscribing)
     }
 
     // MARK: - Error Handling
@@ -46,8 +49,12 @@ final class TranscriptionServiceTests: XCTestCase {
                 url: dummyURL, settings: Settings(), applyCorrection: false
             )
             XCTFail("Expected error to be thrown")
+        } catch let error as TranscriptionError {
+            if case .processingFailed = error {} else {
+                XCTFail("Expected .processingFailed, got \(error)")
+            }
         } catch {
-            XCTAssertTrue(error is TranscriptionError)
+            XCTFail("Expected TranscriptionError.processingFailed, got \(error)")
         }
     }
 
@@ -115,6 +122,7 @@ final class TranscriptionServiceTests: XCTestCase {
 
         sut.cancelTranscription()
         XCTAssertFalse(sut.isTranscribing)
+        XCTAssertEqual(mockEngine.cancelCallCount, 1, "cancelTranscription should propagate to engine")
 
         mockEngine.resumeTranscription()
         _ = try? await task.value
