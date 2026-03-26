@@ -34,3 +34,23 @@ jobs:
         run: chmod +x ./run.sh
       - name: Build with run.sh
         run: ./run.sh build 
+      - name: Run unit tests (hostless)
+        run: |
+          xcodebuild test -scheme OpenSuperMLX \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath SourcePackages \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:OpenSuperMLXUnitTests 2>&1 | xcpretty
+      - name: Run integration tests (hosted)
+        run: |
+          xcodebuild test -scheme OpenSuperMLX \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath SourcePackages \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:OpenSuperMLXTests \
+            -skip-testing:OpenSuperMLXTests/BenchmarkTests \
+            -skip-testing:OpenSuperMLXTests/JapaneseGarblingRegressionTests \
+            -skip-testing:OpenSuperMLXTests/MicrophoneInventoryTests \
+            -skip-testing:OpenSuperMLXTests/KeyboardLayoutProviderTests 2>&1 | xcpretty
