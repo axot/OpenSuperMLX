@@ -27,8 +27,18 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+       shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "NO">
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:OpenSuperMLX.xctestplan"
+            default = "YES">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:OpenSuperMLXBenchmarks.xctestplan"
+            default = "NO">
+         </TestPlanReference>
+      </TestPlans>
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -49,6 +59,17 @@
                BlueprintIdentifier = "CE57B0422D52C7BC00929AF3"
                BuildableName = "OpenSuperMLXUITests.xctest"
                BlueprintName = "OpenSuperMLXUITests"
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AAEE000100000000000A0006"
+               BuildableName = "OpenSuperMLXUnitTests.xctest"
+               BlueprintName = "OpenSuperMLXUnitTests"
                ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </TestableReference>

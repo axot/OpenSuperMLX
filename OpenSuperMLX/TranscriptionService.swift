@@ -27,7 +27,14 @@ class TranscriptionService: ObservableObject {
     private var isCancelled = false
     
     init() {
-        loadEngine()
+        if !ProcessInfo.processInfo.arguments.contains("--skip-model-load") {
+            loadEngine()
+        }
+    }
+    
+    init(engine: TranscriptionEngine?) {
+        self.currentEngine = engine
+        self.isLoading = false
     }
     
     func cancelTranscription() {

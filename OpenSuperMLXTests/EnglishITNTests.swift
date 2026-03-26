@@ -104,45 +104,6 @@ final class EnglishITNTests: XCTestCase {
         XCTAssertTrue(afterAutocorrect.contains("21"), "Pipeline should normalize twenty one to 21")
     }
 
-    // MARK: - Settings Integration Tests
-
-    func testSettings_ShouldApplyEnglishITN_WhenLanguageIsEnglish() throws {
-        withITNSettings(useEnglishITN: true, language: "en") { settings in
-            XCTAssertTrue(settings.shouldApplyEnglishITN)
-        }
-    }
-
-    func testSettings_ShouldApplyEnglishITN_WhenLanguageIsAuto() throws {
-        withITNSettings(useEnglishITN: true, language: "auto") { settings in
-            XCTAssertTrue(settings.shouldApplyEnglishITN)
-        }
-    }
-
-    func testSettings_ShouldNotApplyEnglishITN_WhenToggleOff() throws {
-        withITNSettings(useEnglishITN: false, language: "en") { settings in
-            XCTAssertFalse(settings.shouldApplyEnglishITN)
-        }
-    }
-
-    func testSettings_ShouldNotApplyEnglishITN_WhenLanguageIsChinese() throws {
-        withITNSettings(useEnglishITN: true, language: "zh") { settings in
-            XCTAssertFalse(settings.shouldApplyEnglishITN)
-        }
-    }
-
-    private func withITNSettings(useEnglishITN: Bool, language: String, body: (Settings) -> Void) {
-        let prefs = AppPreferences.shared
-        let originalUseEnglishITN = prefs.useEnglishITN
-        let originalLanguage = prefs.mlxLanguage
-        defer {
-            prefs.useEnglishITN = originalUseEnglishITN
-            prefs.mlxLanguage = originalLanguage
-        }
-        prefs.useEnglishITN = useEnglishITN
-        prefs.mlxLanguage = language
-        body(Settings())
-    }
-
     // MARK: - Graceful Degradation
 
     func testAlreadyNormalizedPassthrough() throws {

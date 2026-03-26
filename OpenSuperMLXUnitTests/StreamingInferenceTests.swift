@@ -77,4 +77,11 @@ final class StreamingInferenceTests: XCTestCase {
         let config = StreamingConfig()
         XCTAssertEqual(config.decodeWindowCount, 10)
     }
+
+    func testStreamingConfigDefaultsUnchanged() throws {
+        let config = StreamingConfig()
+        XCTAssertEqual(config.language, "English")
+        XCTAssertEqual(config.temperature, 0.0)
+        XCTAssertEqual(config.unfixedTokenNum, 5)
+    }
 }

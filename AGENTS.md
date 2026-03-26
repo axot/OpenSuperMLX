@@ -191,6 +191,38 @@ docs/
 - `XCTSkip` for environment-dependent tests (keyboard layouts, hardware)
 - Sections organized with `// MARK: -`; test data: `test_audio.m4a` in test bundle
 
+## Test Requirements (MANDATORY)
+
+### What MUST Be Tested
+
+- Public API behavior: every non-trivial public/internal method that contains logic
+- Edge cases: empty input, nil/optional values, boundary conditions, error paths
+- Regression tests for every bug fix: the test must fail before the fix and pass after
+- Integration seams between modules: e.g., ITNProcessor output fed into transcription pipeline
+
+### What MUST NOT Be Tested
+
+- SwiftUI views: layout, rendering, animations — these are untestable in unit tests
+- Trivial getters and setters with no logic
+- Animations, transitions, and visual states
+- UI layout or view hierarchy
+
+### Test Patterns by Change Type
+
+- **Utility/helper function**: write input/output pair tests covering the happy path and at least one edge case
+- **Service class**: mock all dependencies, test orchestration logic in isolation — never instantiate real singletons
+- **Bug fix**: write a regression test that reproduces the bug before the fix is applied, then verify it passes after
+- **Settings/config**: use the Settings value type directly with an injectable initializer — do not read from live UserDefaults
+
+### Test Rules
+
+1. Every new source file MUST have a corresponding test file in `OpenSuperMLXTests/`
+2. No real model loading in tests — use protocol mocks or `XCTSkip` if a real model is unavoidable
+3. No real audio hardware in unit tests — mock `AVAudioEngine`/`AVAudioRecorder` or use bundled test fixtures
+4. One test file per source file: `FooTests.swift` tests `Foo.swift`, nothing else
+5. 3-8 test methods per test class — focus on core value; do not pad with trivial assertions
+6. All tests MUST pass in CI — no flaky tests; use `XCTSkip` for anything that requires hardware, accessibility permissions, or an active display
+
 ### Other Conventions
 
 - `#if DEBUG ... #endif` for debug-only code (see `DevConfig.swift`)

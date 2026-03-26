@@ -1,0 +1,45 @@
+// MockTranscriptionEngine.swift
+// OpenSuperMLXTests
+
+import Foundation
+
+@testable import OpenSuperMLX
+
+final class MockTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
+    var engineName = "Mock"
+    var isModelLoaded = true
+    var transcribeResult = "mock transcription"
+    var shouldThrow: Error?
+    var transcribeCallCount = 0
+    var lastTranscribeURL: URL?
+    var lastTranscribeSettings: Settings?
+    var cancelCallCount = 0
+    var shouldSuspend = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func initialize() async throws {}
+
+    func transcribeAudio(url: URL, settings: Settings) async throws -> String {
+        transcribeCallCount += 1
+        lastTranscribeURL = url
+        lastTranscribeSettings = settings
+        if shouldSuspend {
+            await withCheckedContinuation { self.continuation = $0 }
+        }
+        if let error = shouldThrow { throw error }
+        return transcribeResult
+    }
+
+    func cancelTranscription() {
+        cancelCallCount += 1
+    }
+
+    func resumeTranscription() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func getSupportedLanguages() -> [String] {
+        ["en", "zh", "ja"]
+    }
+}

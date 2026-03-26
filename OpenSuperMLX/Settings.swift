@@ -134,13 +134,18 @@ struct Settings {
         selectedLanguage == "en" || selectedLanguage == "auto"
     }
     
-    init() {
-        let prefs = AppPreferences.shared
-        self.selectedLanguage = prefs.mlxLanguage
-        self.translateToEnglish = prefs.translateToEnglish
-        self.temperature = prefs.temperature
-        self.useAsianAutocorrect = prefs.useAsianAutocorrect
-        self.useStreamingTranscription = prefs.useStreamingTranscription
+    init(
+        selectedLanguage: String = AppPreferences.shared.mlxLanguage,
+        translateToEnglish: Bool = AppPreferences.shared.translateToEnglish,
+        temperature: Double = AppPreferences.shared.temperature,
+        useAsianAutocorrect: Bool = AppPreferences.shared.useAsianAutocorrect,
+        useStreamingTranscription: Bool = AppPreferences.shared.useStreamingTranscription
+    ) {
+        self.selectedLanguage = selectedLanguage
+        self.translateToEnglish = translateToEnglish
+        self.temperature = temperature
+        self.useAsianAutocorrect = useAsianAutocorrect
+        self.useStreamingTranscription = useStreamingTranscription
     }
 }
 

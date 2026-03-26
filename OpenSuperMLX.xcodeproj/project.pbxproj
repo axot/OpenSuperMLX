@@ -33,6 +33,8 @@
 		FF00AA11BB22CC33DD450001 /* processor_main in Copy Executables */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440001 /* processor_main */; };
 		FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */; };
 		FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */; };
+		FF00BB11CC22DD33EE550002 /* jfk.wav in Resources */ = {isa = PBXBuildFile; fileRef = FF00BB11CC22DD33EE550001 /* jfk.wav */; };
+		AAEE000100000000000A000B /* MLXAudioSTT in Frameworks */ = {isa = PBXBuildFile; productRef = AAEE000100000000000A000A /* MLXAudioSTT */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +108,8 @@
 		FF00AA11BB22CC33DD440001 /* processor_main */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = processor_main; path = build/processor_main; sourceTree = "<group>"; };
 		FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_tagger.fst; path = Resources/ITN/zh_itn_tagger.fst; sourceTree = "<group>"; };
 		FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_verbalizer.fst; path = Resources/ITN/zh_itn_verbalizer.fst; sourceTree = "<group>"; };
+		FF00BB11CC22DD33EE550001 /* jfk.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = jfk.wav; path = OpenSuperMLXTests/Fixtures/jfk.wav; sourceTree = SOURCE_ROOT; };
+		AAEE000100000000000A0001 /* OpenSuperMLXUnitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenSuperMLXUnitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -141,6 +145,13 @@
 			path = OpenSuperMLXUITests;
 			sourceTree = "<group>";
 		};
+		AAEE000100000000000A0002 /* OpenSuperMLXUnitTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			path = OpenSuperMLXUnitTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -173,6 +184,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AAEE000100000000000A0003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AAEE000100000000000A000B /* MLXAudioSTT in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -194,6 +213,7 @@
 				CE57B02A2D52C7BB00929AF3 /* OpenSuperMLX */,
 				CE57B03C2D52C7BC00929AF3 /* OpenSuperMLXTests */,
 				CE57B0462D52C7BC00929AF3 /* OpenSuperMLXUITests */,
+				AAEE000100000000000A0002 /* OpenSuperMLXUnitTests */,
 				CE37B60E2D54F274009D6564 /* Frameworks */,
 				CE57B0292D52C7BB00929AF3 /* Products */,
 				CE84DF792D5578BE00C54EA6 /* jfk.wav */,
@@ -208,6 +228,7 @@
 				CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */,
 				CE57B0392D52C7BC00929AF3 /* OpenSuperMLXTests.xctest */,
 				CE57B0432D52C7BC00929AF3 /* OpenSuperMLXUITests.xctest */,
+				AAEE000100000000000A0001 /* OpenSuperMLXUnitTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -300,6 +321,29 @@
 			productReference = CE57B0432D52C7BC00929AF3 /* OpenSuperMLXUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		AAEE000100000000000A0006 /* OpenSuperMLXUnitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AAEE000100000000000A0009 /* Build configuration list for PBXNativeTarget "OpenSuperMLXUnitTests" */;
+			buildPhases = (
+				AAEE000100000000000A0004 /* Sources */,
+				AAEE000100000000000A0003 /* Frameworks */,
+				AAEE000100000000000A0005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AAEE000100000000000A0002 /* OpenSuperMLXUnitTests */,
+			);
+			name = OpenSuperMLXUnitTests;
+			packageProductDependencies = (
+				AAEE000100000000000A000A /* MLXAudioSTT */,
+			);
+			productName = OpenSuperMLXUnitTests;
+			productReference = AAEE000100000000000A0001 /* OpenSuperMLXUnitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -320,6 +364,9 @@
 					CE57B0422D52C7BC00929AF3 = {
 						CreatedOnToolsVersion = 16.1;
 						TestTargetID = CE57B0272D52C7BB00929AF3;
+					};
+					AAEE000100000000000A0006 = {
+						CreatedOnToolsVersion = 16.1;
 					};
 				};
 			};
@@ -346,6 +393,7 @@
 				CE57B0272D52C7BB00929AF3 /* OpenSuperMLX */,
 				CE57B0382D52C7BC00929AF3 /* OpenSuperMLXTests */,
 				CE57B0422D52C7BC00929AF3 /* OpenSuperMLXUITests */,
+				AAEE000100000000000A0006 /* OpenSuperMLXUnitTests */,
 			);
 		};
 /* End PBXProject section */
@@ -362,10 +410,18 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FF00BB11CC22DD33EE550002 /* jfk.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CE57B0412D52C7BC00929AF3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AAEE000100000000000A0005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -402,6 +458,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CE57B03F2D52C7BC00929AF3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AAEE000100000000000A0004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -742,6 +805,40 @@
 			};
 			name = Release;
 		};
+		AAEE000100000000000A0007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 12;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8LLDD7HWZK;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.0.7;
+				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLXUnitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AAEE000100000000000A0008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 12;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8LLDD7HWZK;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.0.7;
+				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLXUnitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -777,6 +874,15 @@
 			buildConfigurations = (
 				CE57B0542D52C7BC00929AF3 /* Debug */,
 				CE57B0552D52C7BC00929AF3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AAEE000100000000000A0009 /* Build configuration list for PBXNativeTarget "OpenSuperMLXUnitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AAEE000100000000000A0007 /* Debug */,
+				AAEE000100000000000A0008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -845,6 +951,10 @@
 		CEAC000B2D82F60000000000 /* MLXAudioCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MLXAudioCore;
+		};
+		AAEE000100000000000A000A /* MLXAudioSTT */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MLXAudioSTT;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
