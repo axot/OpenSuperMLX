@@ -1,0 +1,14 @@
+{
+  "model": "Qwen3-ASR-1.7B-8bit",
+  "device": "placeholder — run benchmarks locally to establish baseline",
+  "date": "2026-03-26",
+  "audio_fixture": "jfk.wav (11s, 16kHz, mono)",
+  "latency_median_sec": 0.0,
+  "memory_peak_delta_mb": 0.0,
+  "wer_english_jfk": 0.0,
+  "thresholds": {
+    "latency_tolerance": 1.3,
+    "memory_tolerance": 1.2,
+    "wer_tolerance_pp": 0.02
+  }
+}
