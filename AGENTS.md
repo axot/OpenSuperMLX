@@ -209,6 +209,15 @@ When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
 
 **Execution order**: Oracle review → Code Simplifier (always sequential, never parallel).
 
+### TDD Requirement (MANDATORY)
+
+All plans MUST follow **Test-Driven Development (TDD)** — plans that list implementation before corresponding tests are invalid. For every feature or behavior change:
+
+1. **Write tests first** — Add or update tests that describe the expected behavior BEFORE writing implementation code.
+2. **Verify tests fail** — Run the new tests to confirm they fail (red phase). This proves the tests are actually validating new behavior.
+3. **Implement minimally** — Write the minimum production code needed to make the failing tests pass (green phase).
+4. **Refactor** — Clean up implementation while keeping tests green.
+
 ### Work Tree Requirement (MANDATORY)
 
 All plan execution MUST happen in a dedicated `git worktree` — never directly in the main working tree.
