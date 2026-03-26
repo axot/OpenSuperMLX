@@ -3,10 +3,10 @@
 
 import XCTest
 
+import HuggingFace
 import MLX
 import MLXAudioCore
 import MLXAudioSTT
-import HuggingFace
 @testable import OpenSuperMLX
 
 final class BenchmarkTests: XCTestCase {

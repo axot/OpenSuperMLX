@@ -1,8 +1,9 @@
 // MicrophoneServiceTests.swift
 // OpenSuperMLX
 
-import XCTest
 import AVFoundation
+import XCTest
+
 @testable import OpenSuperMLX
 
 final class MicrophoneInventoryTests: XCTestCase {
@@ -11,15 +12,13 @@ final class MicrophoneInventoryTests: XCTestCase {
         let service = MicrophoneService.shared
         service.refreshAvailableMicrophones()
         let available = service.availableMicrophones
-        print("Available microphones count: \(available.count)")
         for device in available {
-            print("Microphone:")
-            print("  name: \(device.name)")
-            print("  id: \(device.id)")
-            print("  manufacturer: \(device.manufacturer ?? "nil")")
-            print("  isBuiltIn: \(device.isBuiltIn)")
-            print("  isContinuity: \(service.isContinuityMicrophone(device))")
-            print("  isBluetooth: \(service.isBluetoothMicrophone(device))")
+            _ = device.name
+            _ = device.id
+            _ = device.manufacturer
+            _ = device.isBuiltIn
+            _ = service.isContinuityMicrophone(device)
+            _ = service.isBluetoothMicrophone(device)
         }
         
         let deviceTypes: [AVCaptureDevice.DeviceType]
@@ -35,17 +34,12 @@ final class MicrophoneInventoryTests: XCTestCase {
             position: .unspecified
         )
         
-        print("AVCaptureDevice count: \(discoverySession.devices.count)")
         for device in discoverySession.devices {
-            print("AVCaptureDevice:")
-            print("  localizedName: \(device.localizedName)")
-            print("  uniqueID: \(device.uniqueID)")
-            print("  manufacturer: \(device.manufacturer)")
-            print("  deviceType: \(device.deviceType.rawValue)")
-            if #available(macOS 13.0, *) {
-                print("  isConnected: \(device.isConnected)")
-            }
-            print("  transportType: \(device.transportType)")
+            _ = device.localizedName
+            _ = device.uniqueID
+            _ = device.manufacturer
+            _ = device.deviceType.rawValue
+            _ = device.transportType
         }
     }
 }

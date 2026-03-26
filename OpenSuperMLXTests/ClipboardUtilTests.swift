@@ -1,8 +1,9 @@
 // ClipboardUtilTests.swift
 // OpenSuperMLX
 
-import XCTest
 import Carbon
+import XCTest
+
 @testable import OpenSuperMLX
 
 // MARK: - Keyboard Layout Tests
@@ -24,13 +25,11 @@ final class ClipboardUtilKeyboardLayoutTests: XCTestCase {
     func testGetAvailableInputSources() throws {
         let sources = ClipboardUtil.getAvailableInputSources()
         XCTAssertFalse(sources.isEmpty, "Should have at least one input source")
-        print("Available input sources: \(sources)")
     }
     
     func testGetCurrentInputSourceID() throws {
         let currentID = ClipboardUtil.getCurrentInputSourceID()
         XCTAssertNotNil(currentID, "Should be able to get current input source ID")
-        print("Current input source: \(currentID ?? "nil")")
     }
     
     func testFindKeycodeForV_USLayout() throws {
@@ -52,7 +51,6 @@ final class ClipboardUtilKeyboardLayoutTests: XCTestCase {
         
         let keycode = ClipboardUtil.findKeycodeForCharacter("v")
         XCTAssertNotNil(keycode, "Should find keycode for 'v' in Dvorak-QWERTY layout")
-        print("Dvorak-QWERTY keycode for 'v': \(keycode ?? 0)")
     }
     
     func testFindKeycodeForV_DvorakLeftHand() throws {
@@ -63,7 +61,6 @@ final class ClipboardUtilKeyboardLayoutTests: XCTestCase {
         
         let keycode = ClipboardUtil.findKeycodeForCharacter("v")
         XCTAssertNotNil(keycode, "Should find keycode for 'v' in Dvorak Left-Handed layout")
-        print("Dvorak Left-Handed keycode for 'v': \(keycode ?? 0)")
     }
     
     func testFindKeycodeForV_DvorakRightHand() throws {
@@ -74,7 +71,6 @@ final class ClipboardUtilKeyboardLayoutTests: XCTestCase {
         
         let keycode = ClipboardUtil.findKeycodeForCharacter("v")
         XCTAssertNotNil(keycode, "Should find keycode for 'v' in Dvorak Right-Handed layout")
-        print("Dvorak Right-Handed keycode for 'v': \(keycode ?? 0)")
     }
     
     func testFindKeycodeForV_RussianLayout() throws {

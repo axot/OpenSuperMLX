@@ -1,8 +1,9 @@
 // KeyboardLayoutProviderTests.swift
 // OpenSuperMLX
 
-import XCTest
 import Carbon
+import XCTest
+
 @testable import OpenSuperMLX
 
 final class KeyboardLayoutProviderTests: XCTestCase {
@@ -24,7 +25,6 @@ final class KeyboardLayoutProviderTests: XCTestCase {
     
     func testDetectPhysicalType_returnsValue() {
         let physicalType = provider.detectPhysicalType()
-        print("Detected physical keyboard type: \(physicalType)")
         XCTAssertTrue([.ansi, .iso, .jis].contains(physicalType))
     }
     
@@ -111,26 +111,11 @@ final class KeyboardLayoutProviderTests: XCTestCase {
     
     func testResolveLabels_allAvailableLayouts() {
         let layouts = ClipboardUtil.getAvailableInputSources()
-        var results: [(layout: String, labelCount: Int, success: Bool)] = []
         
         for layout in layouts {
             let switched = ClipboardUtil.switchToInputSource(withID: layout)
-            guard switched else {
-                results.append((layout, 0, false))
-                continue
-            }
-            
-            let labels = provider.resolveLabels()
-            let count = labels?.count ?? 0
-            let ok = count == KeyboardLayoutProvider.ansiKeycodes.count
-            results.append((layout, count, ok))
+            guard switched else { continue }
+            _ = provider.resolveLabels()
         }
-        
-        print("\n=== Keyboard Layout Provider Results ===")
-        for r in results {
-            let status = r.success ? "OK" : "SKIP"
-            print("[\(status)] \(r.layout): \(r.labelCount) labels")
-        }
-        print("=========================================\n")
     }
 }
