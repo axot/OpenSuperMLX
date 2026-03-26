@@ -32,6 +32,11 @@ class TranscriptionService: ObservableObject {
         }
     }
     
+    init(engine: TranscriptionEngine?) {
+        self.currentEngine = engine
+        self.isLoading = false
+    }
+    
     func cancelTranscription() {
         isCancelled = true
         currentEngine?.cancelTranscription()
