@@ -1,0 +1,32 @@
+{
+  "configurations" : [
+    {
+      "id" : "F49AC05C-E937-4E51-AFB8-966465DEFCB3",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "commandLineArgumentEntries" : [
+      {
+        "argument" : "--skip-model-load"
+      }
+    ]
+  },
+  "testTargets" : [
+    {
+      "selectedTests" : [
+        "BenchmarkTests"
+      ],
+      "target" : {
+        "containerPath" : "container:OpenSuperMLX.xcodeproj",
+        "identifier" : "CE57B0382D52C7BC00929AF3",
+        "name" : "OpenSuperMLXTests"
+      }
+    }
+  ],
+  "version" : 1
+}
