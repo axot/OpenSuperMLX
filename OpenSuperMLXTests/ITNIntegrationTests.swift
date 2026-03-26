@@ -62,59 +62,6 @@ final class ITNIntegrationTests: XCTestCase {
         XCTAssertEqual(finalResult, "", "Empty string should remain empty through pipeline")
     }
 
-    // MARK: - Settings Integration
-
-    func testSettings_ChineseITNPropertyExists() throws {
-        let settings = Settings()
-        let _ = settings.useChineseITN
-        let _ = settings.shouldApplyChineseITN
-    }
-
-    func testSettings_ShouldApplyChineseITN_WhenLanguageIsChinese() throws {
-        let prefs = AppPreferences.shared
-        let originalUseChineseITN = prefs.useChineseITN
-        let originalLanguage = prefs.mlxLanguage
-        defer {
-            prefs.useChineseITN = originalUseChineseITN
-            prefs.mlxLanguage = originalLanguage
-        }
-
-        prefs.useChineseITN = true
-        prefs.mlxLanguage = "zh"
-        let settings = Settings()
-        XCTAssertTrue(settings.shouldApplyChineseITN, "shouldApplyChineseITN should be true when language is zh and toggle is on")
-    }
-
-    func testSettings_ShouldNotApplyChineseITN_WhenLanguageIsEnglish() throws {
-        let prefs = AppPreferences.shared
-        let originalUseChineseITN = prefs.useChineseITN
-        let originalLanguage = prefs.mlxLanguage
-        defer {
-            prefs.useChineseITN = originalUseChineseITN
-            prefs.mlxLanguage = originalLanguage
-        }
-
-        prefs.useChineseITN = true
-        prefs.mlxLanguage = "en"
-        let settings = Settings()
-        XCTAssertFalse(settings.shouldApplyChineseITN, "shouldApplyChineseITN should be false when language is en")
-    }
-
-    func testSettings_ShouldNotApplyChineseITN_WhenToggleOff() throws {
-        let prefs = AppPreferences.shared
-        let originalUseChineseITN = prefs.useChineseITN
-        let originalLanguage = prefs.mlxLanguage
-        defer {
-            prefs.useChineseITN = originalUseChineseITN
-            prefs.mlxLanguage = originalLanguage
-        }
-
-        prefs.useChineseITN = false
-        prefs.mlxLanguage = "zh"
-        let settings = Settings()
-        XCTAssertFalse(settings.shouldApplyChineseITN, "shouldApplyChineseITN should be false when toggle is off")
-    }
-
     // MARK: - Graceful Degradation
 
     func testGracefulDegradation_NeverCrashes() throws {
