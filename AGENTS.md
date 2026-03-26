@@ -204,10 +204,7 @@ GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-la
 
 When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
 
-1. **Oracle Review Task** — Architecture and code review by Oracle agent after all implementation tasks complete.
-2. **Code Simplifier Task** — Code simplification pass AFTER Oracle review (sequential, not parallel).
-
-**Execution order**: Oracle review → Code Simplifier (always sequential, never parallel).
+1. **Code Simplifier Task** — Code simplification.
 
 ### TDD Requirement (MANDATORY)
 
