@@ -42,6 +42,9 @@ final class AppPreferences {
         UserDefaults.standard.removeObject(forKey: "useBeamSearch")
         UserDefaults.standard.removeObject(forKey: "beamSize")
         UserDefaults.standard.removeObject(forKey: "modifierOnlyHotkey")
+        UserDefaults.standard.removeObject(forKey: "suppressBlankAudio")
+        UserDefaults.standard.removeObject(forKey: "useChineseITN")
+        UserDefaults.standard.removeObject(forKey: "useEnglishITN")
     }
     
     @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
@@ -53,9 +56,6 @@ final class AppPreferences {
     // Transcription settings
     @UserDefault(key: "translateToEnglish", defaultValue: false)
     var translateToEnglish: Bool
-    
-    @UserDefault(key: "suppressBlankAudio", defaultValue: true)
-    var suppressBlankAudio: Bool
     
     @UserDefault(key: "temperature", defaultValue: 0.0)
     var temperature: Double
@@ -71,12 +71,6 @@ final class AppPreferences {
     
     @UserDefault(key: "useAsianAutocorrect", defaultValue: true)
     var useAsianAutocorrect: Bool
-    
-    @UserDefault(key: "useChineseITN", defaultValue: true)
-    var useChineseITN: Bool
-    
-    @UserDefault(key: "useEnglishITN", defaultValue: true)
-    var useEnglishITN: Bool
     
     @OptionalUserDefault(key: "selectedMicrophoneData")
     var selectedMicrophoneData: Data?

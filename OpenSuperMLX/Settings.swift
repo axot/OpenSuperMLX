@@ -26,12 +26,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
-    @Published var suppressBlankAudio: Bool {
-        didSet {
-            AppPreferences.shared.suppressBlankAudio = suppressBlankAudio
-        }
-    }
-
     @Published var temperature: Double {
         didSet {
             AppPreferences.shared.temperature = temperature
@@ -53,18 +47,6 @@ class SettingsViewModel: ObservableObject {
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
-        }
-    }
-    
-    @Published var useChineseITN: Bool {
-        didSet {
-            AppPreferences.shared.useChineseITN = useChineseITN
-        }
-    }
-    
-    @Published var useEnglishITN: Bool {
-        didSet {
-            AppPreferences.shared.useEnglishITN = useEnglishITN
         }
     }
     
@@ -111,13 +93,10 @@ class SettingsViewModel: ObservableObject {
         self.selectedMLXModel = prefs.selectedMLXModel
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
-        self.suppressBlankAudio = prefs.suppressBlankAudio
         self.temperature = prefs.temperature
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
-        self.useChineseITN = prefs.useChineseITN
-        self.useEnglishITN = prefs.useEnglishITN
         self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
@@ -135,11 +114,8 @@ struct Settings {
     
     var selectedLanguage: String
     var translateToEnglish: Bool
-    var suppressBlankAudio: Bool
     var temperature: Double
     var useAsianAutocorrect: Bool
-    var useChineseITN: Bool
-    var useEnglishITN: Bool
     var useStreamingTranscription: Bool
     
     var isAsianLanguage: Bool {
@@ -151,22 +127,19 @@ struct Settings {
     }
     
     var shouldApplyChineseITN: Bool {
-        (selectedLanguage == "zh" || selectedLanguage == "auto") && useChineseITN
+        selectedLanguage == "zh" || selectedLanguage == "auto"
     }
     
     var shouldApplyEnglishITN: Bool {
-        (selectedLanguage == "en" || selectedLanguage == "auto") && useEnglishITN
+        selectedLanguage == "en" || selectedLanguage == "auto"
     }
     
     init() {
         let prefs = AppPreferences.shared
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
-        self.suppressBlankAudio = prefs.suppressBlankAudio
         self.temperature = prefs.temperature
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
-        self.useChineseITN = prefs.useChineseITN
-        self.useEnglishITN = prefs.useEnglishITN
         self.useStreamingTranscription = prefs.useStreamingTranscription
     }
 }
@@ -398,53 +371,7 @@ struct SettingsView: View {
                             }
                             .padding(.top, 4)
                         }
-                        
-                        if Settings.asianLanguages.contains(viewModel.selectedLanguage) || viewModel.selectedLanguage == "auto" {
-                            HStack {
-                                Text("Use Chinese ITN")
-                                    .font(.subheadline)
-                                Spacer()
-                                Toggle("", isOn: $viewModel.useChineseITN)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                    .labelsHidden()
-                            }
-                            .padding(.top, 4)
-                        }
-                        
-                        if viewModel.selectedLanguage == "en" || viewModel.selectedLanguage == "auto" {
-                            HStack {
-                                Text("Use English ITN")
-                                    .font(.subheadline)
-                                Spacer()
-                                Toggle("", isOn: $viewModel.useEnglishITN)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                    .labelsHidden()
-                            }
-                            .padding(.top, 4)
-                        }
 
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.controlBackgroundColor).opacity(0.3))
-                .cornerRadius(12)
-                
-                // Output Options
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Output Options")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Suppress Blank Audio")
-                                .font(.subheadline)
-                            Spacer()
-                            Toggle("", isOn: $viewModel.suppressBlankAudio)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                                .labelsHidden()
-                        }
                     }
                 }
                 .padding()
