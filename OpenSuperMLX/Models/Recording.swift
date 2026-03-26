@@ -77,6 +77,11 @@ class RecordingStore: ObservableObject {
     private let dbQueue: DatabaseQueue
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "RecordingStore")
 
+    init(dbQueue: DatabaseQueue) {
+        self.dbQueue = dbQueue
+        try? Self.runMigrations(on: dbQueue)
+    }
+
     private init() {
         let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -90,13 +95,13 @@ class RecordingStore: ObservableObject {
             try FileManager.default.createDirectory(
                 at: appDirectory, withIntermediateDirectories: true)
             dbQueue = try DatabaseQueue(path: dbPath.path)
-            try setupDatabase()
+            try Self.runMigrations(on: dbQueue)
         } catch {
             fatalError("Failed to setup database: \(error)")
         }
     }
 
-    private nonisolated func setupDatabase() throws {
+    private nonisolated static func runMigrations(on dbQueue: DatabaseQueue) throws {
         var migrator = DatabaseMigrator()
         
         migrator.registerMigration("v1") { db in

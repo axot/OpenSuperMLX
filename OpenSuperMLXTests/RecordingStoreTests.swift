@@ -80,7 +80,7 @@ final class RecordingStoreTests: XCTestCase {
     }
 
     func testDelete() async throws {
-        let recording = makeRecording(status: .completed, transcription: "to delete")
+        let recording = makeRecording(transcription: "to delete")
         try await sut.addRecordingSync(recording)
 
         let notificationExpectation = expectation(
