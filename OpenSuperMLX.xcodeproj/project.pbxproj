@@ -33,6 +33,7 @@
 		FF00AA11BB22CC33DD450001 /* processor_main in Copy Executables */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440001 /* processor_main */; };
 		FF00AA11BB22CC33DD450002 /* zh_itn_tagger.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */; };
 		FF00AA11BB22CC33DD450003 /* zh_itn_verbalizer.fst in Copy ITN Resources */ = {isa = PBXBuildFile; fileRef = FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */; };
+		FF00BB11CC22DD33EE550002 /* jfk.wav in Resources */ = {isa = PBXBuildFile; fileRef = FF00BB11CC22DD33EE550001 /* jfk.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +107,7 @@
 		FF00AA11BB22CC33DD440001 /* processor_main */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = processor_main; path = build/processor_main; sourceTree = "<group>"; };
 		FF00AA11BB22CC33DD440002 /* zh_itn_tagger.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_tagger.fst; path = Resources/ITN/zh_itn_tagger.fst; sourceTree = "<group>"; };
 		FF00AA11BB22CC33DD440003 /* zh_itn_verbalizer.fst */ = {isa = PBXFileReference; lastKnownFileType = file; name = zh_itn_verbalizer.fst; path = Resources/ITN/zh_itn_verbalizer.fst; sourceTree = "<group>"; };
+		FF00BB11CC22DD33EE550001 /* jfk.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = jfk.wav; path = OpenSuperMLXTests/Fixtures/jfk.wav; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -362,6 +364,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FF00BB11CC22DD33EE550002 /* jfk.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
