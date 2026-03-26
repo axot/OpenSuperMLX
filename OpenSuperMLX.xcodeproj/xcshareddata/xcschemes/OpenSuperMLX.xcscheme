@@ -62,6 +62,17 @@
                ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AAEE000100000000000A0006"
+               BuildableName = "OpenSuperMLXUnitTests.xctest"
+               BlueprintName = "OpenSuperMLXUnitTests"
+               ReferencedContainer = "container:OpenSuperMLX.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
 
       </Testables>
    </TestAction>

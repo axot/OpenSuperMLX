@@ -29,6 +29,13 @@
         "identifier" : "CE57B0382D52C7BC00929AF3",
         "name" : "OpenSuperMLXTests"
       }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:OpenSuperMLX.xcodeproj",
+        "identifier" : "AAEE000100000000000A0006",
+        "name" : "OpenSuperMLXUnitTests"
+      }
     }
   ],
   "version" : 1
