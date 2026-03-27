@@ -1,5 +1,5 @@
 {
-  "originHash" : "b5245867ec676f83ca1fe457d45c802b6cb5a27b9ab06c74efbb62768a18e0ea",
+  "originHash" : "878b17edc1c75446d64d9377e01e29af1882208b8000842064d98979d79f5557",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "7e19e09027923d89ac47dd087d9627f610e5a91a",
         "version" : "2.30.6"
+      }
+    },
+    {
+      "identity" : "silero-vad-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/paean-ai/silero-vad-swift.git",
+      "state" : {
+        "revision" : "60bbe344f72845a4dbd0543ed02917147016709a",
+        "version" : "1.0.0"
       }
     },
     {

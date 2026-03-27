@@ -22,6 +22,7 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var confirmedText = ""
     @Published private(set) var provisionalText = ""
     @Published private(set) var isStreaming = false
+    @Published private(set) var isSpeechDetected = false
 
     // MARK: - Private State
 
@@ -83,15 +84,13 @@ class StreamingAudioService: ObservableObject {
         let settings = Settings()
         let language = Self.mapLanguageCode(settings.selectedLanguage)
         let config = StreamingConfig(
-            decodeIntervalSeconds: 1.0,
-            delayPreset: .subtitle,
             language: language,
             temperature: Float(settings.temperature)
         )
         let session = StreamingInferenceSession(model: model, config: config)
         streamingSession = session
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public), decodeInterval=\(config.decodeIntervalSeconds, privacy: .public)s")
+            logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public)")
         }
 
         if let activeMic = MicrophoneService.shared.activateForRecording() {
@@ -206,6 +205,11 @@ class StreamingAudioService: ObservableObject {
                     } catch {
                         logger.error("Failed to write WAV chunk: \(error, privacy: .public)")
                     }
+                }
+
+                let speechActive = session.isSpeechActive
+                await MainActor.run { [weak self] in
+                    self?.isSpeechDetected = speechActive
                 }
 
                 try? await Task.sleep(for: .milliseconds(100))
@@ -400,9 +404,10 @@ class StreamingAudioService: ObservableObject {
             }
 
         case .ended(let fullText):
-            confirmedText = fullText
+            let cleaned = RepetitionCleaner.clean(fullText)
+            confirmedText = cleaned
             provisionalText = ""
-            logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public)")
+            logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public) → cleaned: \(cleaned.count, privacy: .public)")
         }
     }
 
@@ -425,6 +430,7 @@ class StreamingAudioService: ObservableObject {
     private func clearState() {
         confirmedText = ""
         provisionalText = ""
+        isSpeechDetected = false
         recordingStartTime = nil
     }
 

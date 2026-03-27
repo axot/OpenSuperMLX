@@ -8,43 +8,10 @@ import XCTest
 
 final class StreamingInferenceTests: XCTestCase {
 
-    // MARK: - Prefix Rollback Index Tests
-
-    func testPrefixRollback_Normal() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 7, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 2)
-    }
-
-    func testPrefixRollback_FewerTokensThanUnfixed() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 3, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 0)
-    }
-
-    func testPrefixRollback_EmptyTokens() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 0, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 0)
-    }
-
-    func testPrefixRollback_ExactlyUnfixed() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 5, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 0)
-    }
-
-    func testPrefixRollback_LargeTokenCount() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 100, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 95)
-    }
-
-    func testComputePrefixEndIndex_LargeTokenCount() {
-        let endIdx = StreamingInferenceSession.computePrefixEndIndex(tokenCount: 2000, unfixedTokenNum: 5)
-        XCTAssertEqual(endIdx, 1995)
-    }
-
     // MARK: - StreamingConfig Defaults
 
     func testStreamingConfigDefaults() {
         let config = StreamingConfig()
-        XCTAssertEqual(config.unfixedTokenNum, 5)
         XCTAssertEqual(config.decodeIntervalSeconds, 1.0)
         XCTAssertEqual(config.maxCachedWindows, 60)
         XCTAssertEqual(config.temperature, 0.0)
@@ -56,10 +23,8 @@ final class StreamingInferenceTests: XCTestCase {
             decodeIntervalSeconds: 0.5,
             maxCachedWindows: 30,
             language: "Chinese",
-            temperature: 0.3,
-            unfixedTokenNum: 10
+            temperature: 0.3
         )
-        XCTAssertEqual(config.unfixedTokenNum, 10)
         XCTAssertEqual(config.decodeIntervalSeconds, 0.5)
         XCTAssertEqual(config.maxCachedWindows, 30)
         XCTAssertEqual(config.language, "Chinese")
@@ -71,10 +36,5 @@ final class StreamingInferenceTests: XCTestCase {
         let config = StreamingConfig()
         _ = config  // suppress unused warning
         XCTAssertTrue(true)
-    }
-
-    func testStreamingConfig_DecodeWindowCount_Default() {
-        let config = StreamingConfig()
-        XCTAssertEqual(config.decodeWindowCount, 10)
     }
 }

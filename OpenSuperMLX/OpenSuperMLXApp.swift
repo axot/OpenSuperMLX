@@ -11,7 +11,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-@main
 struct OpenSuperMLXApp: App {
     @StateObject private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -80,7 +79,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var microphoneObserver: AnyCancellable?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        
         setupStatusBarItem()
         
         if let window = NSApplication.shared.windows.first {

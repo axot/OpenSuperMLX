@@ -14,6 +14,5 @@ final class FillerWordPromptTests: XCTestCase {
         let config = StreamingConfig()
         XCTAssertEqual(config.language, "English")
         XCTAssertEqual(config.temperature, 0.0)
-        XCTAssertEqual(config.unfixedTokenNum, 5)
     }
 }

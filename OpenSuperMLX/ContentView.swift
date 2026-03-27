@@ -28,6 +28,7 @@ class ContentViewModel: ObservableObject {
     @Published var shouldClearSearch = false
     @Published var streamingConfirmedText = ""
     @Published var streamingProvisionalText = ""
+    @Published var isSpeechDetected = false
     @Published private(set) var isStreamingMode = false
     
     private let streamingService = StreamingAudioService.shared
@@ -82,6 +83,13 @@ class ContentViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] text in
                 self?.streamingProvisionalText = text
+            }
+            .store(in: &cancellables)
+        
+        streamingService.$isSpeechDetected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] detected in
+                self?.isSpeechDetected = detected
             }
             .store(in: &cancellables)
     }
@@ -558,14 +566,25 @@ struct ContentView: View {
                     if viewModel.isStreamingMode && viewModel.state == .recording {
                         ScrollViewReader { proxy in
                             ScrollView {
-                                (Text(viewModel.streamingConfirmedText)
-                                    .foregroundColor(.primary)
-                                + Text(viewModel.streamingProvisionalText)
-                                    .foregroundColor(.primary.opacity(0.5)))
-                                    .font(.body)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(12)
-                                    .id("streamingTextBottom")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if viewModel.streamingConfirmedText.isEmpty && !viewModel.isSpeechDetected {
+                                        Text("Listening...")
+                                            .foregroundColor(.secondary.opacity(0.5))
+                                            .font(.body)
+                                    } else {
+                                        Text(viewModel.streamingConfirmedText)
+                                            .foregroundColor(.primary)
+                                            .font(.body)
+                                    }
+
+                                    if viewModel.isSpeechDetected {
+                                        SpeechActivityIndicator()
+                                            .padding(.top, 2)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .id("streamingTextBottom")
                             }
                             .frame(maxHeight: 120)
                             .background(ThemePalette.panelSurface(colorScheme))
@@ -580,7 +599,7 @@ struct ContentView: View {
                                     proxy.scrollTo("streamingTextBottom", anchor: .bottom)
                                 }
                             }
-                            .onChange(of: viewModel.streamingProvisionalText) { _, _ in
+                            .onChange(of: viewModel.isSpeechDetected) { _, _ in
                                 withAnimation {
                                     proxy.scrollTo("streamingTextBottom", anchor: .bottom)
                                 }
@@ -1380,6 +1399,28 @@ struct MainRecordButton: View {
             }
             .scaleEffect(isRecording ? 0.9 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isRecording)
+    }
+}
+
+private struct SpeechActivityIndicator: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.secondary.opacity(0.5))
+                    .frame(width: 5, height: 5)
+                    .offset(y: isAnimating ? -3 : 0)
+                    .animation(
+                        .easeInOut(duration: 0.4)
+                        .repeatForever(autoreverses: true)
+                        .delay(Double(i) * 0.15),
+                        value: isAnimating
+                    )
+            }
+        }
+        .onAppear { isAnimating = true }
     }
 }
 
