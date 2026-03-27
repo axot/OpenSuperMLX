@@ -100,9 +100,7 @@ text-processing-rs/              # Git submodule — Rust English ITN library (N
 patches/                         # Patches applied to SPM checkouts by run.sh
 VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
-docs/
-├── learnings.md                 # Past mistakes — native library checklist, release gotchas
-└── logging.md                   # Logger usage guide and log reading commands
+docs/                            # See [Reference Docs](#reference-docs) for when to consult each
 ```
 
 ## Dependencies
@@ -163,10 +161,11 @@ docs/
 ### Error Handling
 
 - Custom error enums: `enum TranscriptionError: Error { case ... }`
-- `Logger(subsystem: "OpenSuperMLX", category: "...")` for structured logging — see [`docs/logging.md`](docs/logging.md)
+- `Logger(subsystem: "OpenSuperMLX", category: "...")` for structured logging
 - Never use `print()` — it doesn't appear in unified logs for GUI apps
 - `fatalError()` only for truly unrecoverable failures
 - `try?` for optional file operations; `guard let ... else { return }` for early exits
+- For debugging methodology and Logger usage details, see [Reference Docs](#reference-docs) below
 
 ### Access Control
 
@@ -265,10 +264,18 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 - Main working tree stays clean for reviews, hotfixes, and ad-hoc work
 - Remove worktree after the plan's PR merges
 
+## Reference Docs
+
+| File | When to consult |
+|---|---|
+| [`docs/debugging.md`](docs/debugging.md) | **Investigating any bug or unexpected behavior.** Read before proposing fixes — covers CLI-first repro strategy and Logger-based tracing. |
+| [`docs/logging.md`](docs/logging.md) | **Adding or reading Logger statements.** Covers `os.Logger` setup, privacy annotations, and `log stream` / `log show` commands. |
+| [`docs/learnings.md`](docs/learnings.md) | **Before any release, or when touching native libraries.** Past mistakes and the New Native Library Checklist. |
+
 ## Release
 
 ```bash
 ./make_release.sh <version> "<code_sign_identity>" [github_token]
 ```
 
-**Before any release**, consult [`docs/learnings.md`](docs/learnings.md) — especially the **New Native Library Checklist** if any native libraries were added or modified since the last release.
+**Before any release**, consult [`docs/learnings.md`](docs/learnings.md) — especially the **New Native Library Checklist** if any native libraries were added or modified since the last release. See [Reference Docs](#reference-docs).
