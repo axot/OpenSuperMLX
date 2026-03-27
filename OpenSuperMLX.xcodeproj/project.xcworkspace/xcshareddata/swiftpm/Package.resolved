@@ -1,5 +1,5 @@
 {
-  "originHash" : "32e9668ac11c6f46991dfc9b3959224b4188f0982aedf67c36954ab7186ece5a",
+  "originHash" : "1c2aa2320de96cbe758914bac3d79bfb5c5da8425490bba905597de2b1ca72d5",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -71,6 +71,15 @@
       "state" : {
         "revision" : "7e19e09027923d89ac47dd087d9627f610e5a91a",
         "version" : "2.30.6"
+      }
+    },
+    {
+      "identity" : "silero-vad-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/paean-ai/silero-vad-swift.git",
+      "state" : {
+        "revision" : "60bbe344f72845a4dbd0543ed02917147016709a",
+        "version" : "1.0.0"
       }
     },
     {
@@ -195,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-jinja.git",
       "state" : {
-        "revision" : "f731f03bf746481d4fda07f817c3774390c4d5b9",
-        "version" : "2.3.2"
+        "revision" : "2039e9760ba1694f9962ccd2c616403983d46895",
+        "version" : "2.3.3"
       }
     },
     {
