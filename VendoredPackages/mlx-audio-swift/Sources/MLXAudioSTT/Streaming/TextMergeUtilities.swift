@@ -104,6 +104,8 @@ enum TextMergeUtilities {
         return "\(curr)\(joiner)\(add)"
     }
 
+    private static let cjkTerminalPunctuation: Set<Character> = ["。", "！", "？", "…"]
+
     /// Merge text from consecutive VAD segments — suffix dedup + overlap detection only.
     /// Unlike `appendChunkText`, does NOT perform prefix replacement.
     static func mergeChunkText(
@@ -118,9 +120,17 @@ enum TextMergeUtilities {
         if curr == add || curr.hasSuffix(add) { return curr }
 
         let lang = language.trimmingCharacters(in: .whitespaces).lowercased()
-        let joiner = cjkLanguageAliases.contains(lang) ? "" : " "
+        let isCJK = cjkLanguageAliases.contains(lang) || looksLikeCJK(curr + add)
+        let joiner = isCJK ? "" : " "
 
-        let currUnits = splitIntoUnits(curr, joiner: joiner)
+        var currCleaned = curr
+        if isCJK {
+            while let last = currCleaned.last, cjkTerminalPunctuation.contains(last) {
+                currCleaned = String(currCleaned.dropLast())
+            }
+        }
+
+        let currUnits = splitIntoUnits(currCleaned, joiner: joiner)
         let addUnits = splitIntoUnits(add, joiner: joiner)
 
         let maxOverlap = min(currUnits.count, addUnits.count)
@@ -131,7 +141,7 @@ enum TextMergeUtilities {
             }
         }
 
-        return "\(curr)\(joiner)\(add)"
+        return "\(currCleaned)\(joiner)\(add)"
     }
 
     static func normalizeForDedup(_ text: String) -> String {

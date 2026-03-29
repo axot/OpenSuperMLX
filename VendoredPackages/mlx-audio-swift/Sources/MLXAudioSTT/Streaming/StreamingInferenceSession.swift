@@ -42,6 +42,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var isActive: Bool = false
     private var totalSamplesFed: Int = 0
 
+    private let shouldAbort = OSAllocatedUnfairLock(initialState: false)
+
     private var continuation: AsyncStream<TranscriptionEvent>.Continuation?
     private var stopTask: Task<Void, Never>?
 
@@ -66,6 +68,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.events = AsyncStream { continuation = $0 }
         self.continuation = continuation
         self.isActive = true
+        self.shouldAbort.withLock { $0 = false }
     }
 
     /// Whether VAD loaded successfully.
@@ -215,7 +218,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
         var recentTokenIds = Array(recentContext.suffix(config.repetitionContextSize))
 
         for _ in 0..<maxTokens {
-            if Task.isCancelled { return newTokenIds }
+            if shouldAbort.withLock({ $0 }) {
+                Self.logger.warning("generateTokens aborted after \(newTokenIds.count) tokens")
+                return newTokenIds
+            }
 
             var lastLogits = logits[0..., -1, 0...]
             if config.temperature > 0 {
@@ -272,7 +278,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         sessionLock.withLock { _ in
-            if let remaining = vadSegmenter.flush() {
+            if let remaining = vadSegmenter.flush(force: true) {
                 processCompletedSegment(remaining)
             }
         }
@@ -304,6 +310,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
     // MARK: - Cancel
 
     public func cancel() {
+        shouldAbort.withLock { $0 = true }
         sessionLock.withLock { _ in
             isActive = false
             stopTask?.cancel()

@@ -40,6 +40,8 @@ class StreamingAudioService: ObservableObject {
     /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
 
+    private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
+
     // MARK: - Init
 
     private init() {
@@ -70,6 +72,7 @@ class StreamingAudioService: ObservableObject {
         }
 
         ringBuffer.withLock { $0.removeAll() }
+        shouldStopFeeding.withLock { $0 = false }
         confirmedText = ""
         provisionalText = ""
 
@@ -168,8 +171,8 @@ class StreamingAudioService: ObservableObject {
             }
         }
 
-        playNotificationSound()
         try engine.start()
+        playNotificationSound()
         audioEngine = engine
         isStreaming = true
         recordingStartTime = Date()
@@ -188,8 +191,9 @@ class StreamingAudioService: ObservableObject {
         }
 
         let ringBufferRef = self.ringBuffer
+        let shouldStopRef = self.shouldStopFeeding
         feedTask = Task.detached {
-            while !Task.isCancelled {
+            while !shouldStopRef.withLock({ $0 }) {
                 let samples = ringBufferRef.withLock { buffer -> [Float] in
                     guard !buffer.isEmpty else { return [] }
                     let drained = buffer
@@ -227,21 +231,20 @@ class StreamingAudioService: ObservableObject {
 
         defer { isStreaming = false }
 
-        feedTask?.cancel()
-        feedTask = nil
-
-        // Stop audio capture FIRST — prevents new samples from leaking into ring buffer
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
 
-        // Now drain safely — buffer contains only legitimate samples from this session
+        shouldStopFeeding.withLock { $0 = true }
+        feedTask?.cancel()
+        if let feedTask {
+            _ = await feedTask.value
+        }
+        feedTask = nil
+
         let remainingSamples = ringBuffer.withLock { buffer -> [Float] in
             let drained = buffer
             buffer.removeAll()
             return drained
-        }
-        if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Stop streaming: remainingSamples=\(remainingSamples.count, privacy: .public), confirmedTextLength=\(self.confirmedText.count, privacy: .public)")
         }
 
         if let session = streamingSession, !remainingSamples.isEmpty {
