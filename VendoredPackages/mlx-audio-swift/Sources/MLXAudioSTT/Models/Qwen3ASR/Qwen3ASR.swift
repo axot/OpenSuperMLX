@@ -1032,51 +1032,11 @@ public class Qwen3ASRModel: Module {
         return MLXArray(tokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
     }
 
-    static func buildFollowUpPromptString(
-        numAudioTokens: Int,
-        language: String,
-        supportedLanguages: [String]
-    ) -> String {
-        var assistantSuffix = ""
-        let langLower = language.trimmingCharacters(in: .whitespaces).lowercased()
-        if !langLower.isEmpty && langLower != "auto" {
-            let supportedLower = Dictionary(uniqueKeysWithValues: supportedLanguages.map { ($0.lowercased(), $0) })
-            let langName = supportedLower[langLower] ?? language
-            assistantSuffix = "language \(langName)<asr_text>"
-        }
-        return "<|im_end|>\n"
-            + "<|im_start|>user\n<|audio_start|>"
-            + String(repeating: "<|audio_pad|>", count: numAudioTokens)
-            + "<|audio_end|><|im_end|>\n"
-            + "<|im_start|>assistant\n"
-            + assistantSuffix
-    }
-
-    /// Builds the multi-turn follow-up token sequence for subsequent audio chunks in streaming decode.
-    public func buildFollowUpPrompt(numAudioTokens: Int, language: String = "English") -> MLXArray {
-        guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
-        }
-        let prompt = Qwen3ASRModel.buildFollowUpPromptString(
-            numAudioTokens: numAudioTokens,
-            language: language,
-            supportedLanguages: config.supportLanguages
-        )
-        let tokenIds = tokenizer.encode(text: prompt)
-        return MLXArray(tokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
-    }
-
     // MARK: - Cache Creation
 
     public func makeCache() -> [KVCache] {
         return (0..<config.textConfig.numHiddenLayers).map { _ in
             KVCacheSimple()
-        }
-    }
-
-    public func makeCache(maxKVSize: Int, keepTokens: Int = 4) -> [KVCache] {
-        return (0..<config.textConfig.numHiddenLayers).map { _ in
-            RotatingKVCache(maxSize: maxKVSize, keep: keepTokens)
         }
     }
 

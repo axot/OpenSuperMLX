@@ -22,24 +22,19 @@ public struct StreamingConfig: Sendable {
     public var repetitionPenalty: Float
     /// Number of recent tokens considered for repetition penalty.
     public var repetitionContextSize: Int
-    /// Maximum KV cache size in tokens. RotatingKVCache evicts oldest tokens when full.
-    /// 1024 tokens holds ~15 segments of context (~60 tokens per segment).
-    public var maxKVSize: Int
 
     public init(
         language: String = "English",
         temperature: Float = 0.0,
         maxNewTokensPerChunk: Int = 200,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32,
-        maxKVSize: Int = 1024
+        repetitionContextSize: Int = 32
     ) {
         self.language = language
         self.temperature = temperature
         self.maxNewTokensPerChunk = maxNewTokensPerChunk
         self.repetitionPenalty = repetitionPenalty
         self.repetitionContextSize = repetitionContextSize
-        self.maxKVSize = maxKVSize
     }
 }
 

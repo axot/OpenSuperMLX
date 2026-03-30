@@ -121,7 +121,11 @@ public class StreamingInferenceSession: @unchecked Sendable {
         eval(audioFeatures)
         Memory.clearCache()
 
+        let isFirstSegment = shared.withLock { $0.chunkCount == 0 }
         let (logits, _) = forwardAudioFeatures(audioFeatures)
+        if isFirstSegment {
+            Self.logger.info("[DIAG:KV] first segment — new KV cache created")
+        }
         let recentContext = shared.withLock { $0.committedTokenIds }
         let tokens = generateTokens(
             initialLogits: logits,
@@ -141,11 +145,16 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 state.detectedLanguage = parsed.language
             }
 
+            let beforeMerge = state.mergedCommittedText
             state.mergedCommittedText = TextMergeUtilities.mergeChunkText(
                 accumulated: state.mergedCommittedText,
                 newChunk: segmentText,
                 language: lang
             )
+            let afterMerge = state.mergedCommittedText
+            if beforeMerge == afterMerge && !segmentText.isEmpty {
+                Self.logger.warning("[DIAG:MERGE_DROP] segment text DROPPED by merge: '\(segmentText.prefix(30), privacy: .public)' — accumulated unchanged at '\(afterMerge.suffix(20), privacy: .public)'")
+            }
             return state.mergedCommittedText
         }
 
@@ -175,20 +184,22 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     private func forwardAudioFeatures(_ audioFeatures: MLXArray) -> (logits: MLXArray, inputIds: MLXArray) {
         let lang = effectiveLanguage
-        let inputIds: MLXArray
-        if decoderCache == nil {
-            decoderCache = model.makeCache(maxKVSize: config.maxKVSize)
-            inputIds = model.buildPrompt(
-                numAudioTokens: audioFeatures.dim(0),
-                language: lang,
-                prefix: ""
-            )
-        } else {
-            inputIds = model.buildFollowUpPrompt(
-                numAudioTokens: audioFeatures.dim(0),
-                language: lang
-            )
+
+        decoderCache = model.makeCache()
+
+        let context = shared.withLock { state -> String in
+            let text = state.mergedCommittedText
+            if text.count > 500 {
+                return String(text.suffix(500))
+            }
+            return text
         }
+
+        let inputIds = model.buildPrompt(
+            numAudioTokens: audioFeatures.dim(0),
+            language: lang,
+            context: context
+        )
         let embeds = model.model.embedTokens(inputIds)
         let inputsEmbeds = model.mergeAudioFeatures(
             inputsEmbeds: embeds,
@@ -236,7 +247,12 @@ public class StreamingInferenceSession: @unchecked Sendable {
             }
 
             let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
-            if Self.eosTokenIds.contains(nextToken) { break }
+            if Self.eosTokenIds.contains(nextToken) {
+                if newTokenIds.count < 3 {
+                    Self.logger.warning("[DIAG:EARLY_EOS] EOS after only \(newTokenIds.count) tokens — model may have ignored audio")
+                }
+                break
+            }
             newTokenIds.append(nextToken)
 
             recentTokenIds.append(nextToken)
@@ -246,7 +262,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
             if RepetitionDetector.detectTokenRepetition(newTokenIds) {
                 let removeCount = min(newTokenIds.count, 20)
-                Self.logger.warning("RepetitionDetector: removing last \(removeCount) of \(newTokenIds.count) tokens")
+                Self.logger.warning("[DIAG:REP_DETECT] RepetitionDetector removing last \(removeCount) of \(newTokenIds.count) tokens")
                 newTokenIds.removeLast(removeCount)
                 break
             }

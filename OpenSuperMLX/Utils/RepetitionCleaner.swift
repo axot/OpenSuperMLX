@@ -2,6 +2,9 @@
 // OpenSuperMLX
 
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "RepetitionCleaner")
 
 enum RepetitionCleaner {
     static func fixCharRepeats(_ text: String, threshold: Int) -> String {
@@ -64,7 +67,11 @@ enum RepetitionCleaner {
     static func clean(_ text: String, threshold: Int = 20, maxLen: Int = 20) -> String {
         let step1 = fixCharRepeats(text, threshold: threshold)
         let step2 = fixPatternRepeats(step1, threshold: threshold, maxLen: maxLen)
-        return deduplicateSentences(step2)
+        let step3 = deduplicateSentences(step2)
+        if step3.count < text.count {
+            logger.warning("[DIAG:CLEANER] RepetitionCleaner removed \(text.count - step3.count) chars: '\(text.suffix(30), privacy: .public)' → '\(step3.suffix(30), privacy: .public)'")
+        }
+        return step3
     }
 
     // MARK: - Sentence-Level Dedup
