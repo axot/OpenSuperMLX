@@ -123,14 +123,14 @@ enum TextMergeUtilities {
         let isCJK = cjkLanguageAliases.contains(lang) || looksLikeCJK(curr + add)
         let joiner = isCJK ? "" : " "
 
-        var currCleaned = curr
+        var currStripped = curr
         if isCJK {
-            while let last = currCleaned.last, cjkTerminalPunctuation.contains(last) {
-                currCleaned = String(currCleaned.dropLast())
+            while let last = currStripped.last, cjkTerminalPunctuation.contains(last) {
+                currStripped = String(currStripped.dropLast())
             }
         }
 
-        let currUnits = splitIntoUnits(currCleaned, joiner: joiner)
+        let currUnits = splitIntoUnits(currStripped, joiner: joiner)
         let addUnits = splitIntoUnits(add, joiner: joiner)
 
         let maxOverlap = min(currUnits.count, addUnits.count)
@@ -141,7 +141,11 @@ enum TextMergeUtilities {
             }
         }
 
-        return "\(currCleaned)\(joiner)\(add)"
+        if isCJK && currStripped != curr {
+            return "\(currStripped)，\(add)"
+        }
+
+        return "\(currStripped)\(joiner)\(add)"
     }
 
     static func normalizeForDedup(_ text: String) -> String {

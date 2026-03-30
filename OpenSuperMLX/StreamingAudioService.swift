@@ -236,16 +236,19 @@ class StreamingAudioService: ObservableObject {
 
         shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
+        logger.info("stopStreaming: awaiting feedTask completion")
         if let feedTask {
             _ = await feedTask.value
         }
         feedTask = nil
+        logger.info("stopStreaming: feedTask done, draining ring buffer")
 
         let remainingSamples = ringBuffer.withLock { buffer -> [Float] in
             let drained = buffer
             buffer.removeAll()
             return drained
         }
+        logger.info("stopStreaming: drained \(remainingSamples.count) remaining samples")
 
         if let session = streamingSession, !remainingSamples.isEmpty {
             session.feedAudio(samples: remainingSamples)

@@ -72,7 +72,7 @@ final class StreamingTruncationTests: XCTestCase {
             newChunk: "我想出去走走。",
             language: "Chinese"
         )
-        XCTAssertEqual(result, "今天天气很好我想出去走走。")
+        XCTAssertEqual(result, "今天天气很好，我想出去走走。")
     }
 
     func testMergeChunkTextStripsTrailingChineseQuestionMark() {
@@ -81,7 +81,7 @@ final class StreamingTruncationTests: XCTestCase {
             newChunk: "我觉得还不错。",
             language: "Chinese"
         )
-        XCTAssertEqual(result, "你觉得怎么样我觉得还不错。")
+        XCTAssertEqual(result, "你觉得怎么样，我觉得还不错。")
     }
 
     func testMergeChunkTextStripsTrailingExclamationMark() {
@@ -90,7 +90,7 @@ final class StreamingTruncationTests: XCTestCase {
             newChunk: "我们走吧。",
             language: "Chinese"
         )
-        XCTAssertEqual(result, "太好了我们走吧。")
+        XCTAssertEqual(result, "太好了，我们走吧。")
     }
 
     func testMergeChunkTextPreservesNonTerminalAccumulated() {

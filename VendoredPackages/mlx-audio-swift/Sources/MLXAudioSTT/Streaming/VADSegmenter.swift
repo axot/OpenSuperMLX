@@ -45,6 +45,8 @@ public final class VADSegmenter {
     /// Current VAD state for UI display.
     public private(set) var isSpeechActive: Bool = false
 
+    public var speechBufferCount: Int { speechBuffer.count }
+
     public init(
         minSilenceDuration: Float = 0.65,
         minSpeechDuration: Float = 0.5,
