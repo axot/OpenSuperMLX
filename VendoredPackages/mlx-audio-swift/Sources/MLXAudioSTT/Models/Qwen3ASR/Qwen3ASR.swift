@@ -1139,8 +1139,9 @@ public class Qwen3ASRModel: Module {
             }
         }
 
-        let text = tokenizer.decode(tokens: generatedTokens)
-        return (text.trimmingCharacters(in: .whitespacesAndNewlines), promptTokenCount, generatedTokens.count)
+        let rawText = tokenizer.decode(tokens: generatedTokens)
+        let parsed = TextMergeUtilities.parseASROutput(rawText)
+        return (parsed.text.trimmingCharacters(in: .whitespacesAndNewlines), promptTokenCount, generatedTokens.count)
     }
 
     // MARK: - Generation
@@ -1332,9 +1333,10 @@ public class Qwen3ASRModel: Module {
                     continuation.yield(.info(info))
 
                     // Emit final result
-                    let text = tokenizer.decode(tokens: allGeneratedTokens)
+                    let rawText = tokenizer.decode(tokens: allGeneratedTokens)
+                    let parsed = TextMergeUtilities.parseASROutput(rawText)
                     let output = STTOutput(
-                        text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        text: parsed.text.trimmingCharacters(in: .whitespacesAndNewlines),
                         promptTokens: totalPromptTokens,
                         generationTokens: totalGenerationTokens,
                         totalTokens: totalPromptTokens + totalGenerationTokens,

@@ -175,7 +175,7 @@ enum TextMergeUtilities {
 
         cleaned = stripTrailingSpecialTokens(cleaned)
         cleaned = cleaned.replacingOccurrences(
-            of: "(language\\s*\\w*\\s*)+",
+            of: "^(language\\s*\\w*\\s*)+",
             with: "",
             options: .regularExpression
         ).trimmingCharacters(in: .whitespaces)
