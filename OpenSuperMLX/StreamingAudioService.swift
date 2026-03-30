@@ -42,6 +42,10 @@ class StreamingAudioService: ObservableObject {
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
+    /// When not recording, cap ring buffer at 500ms (8000 samples at 16kHz) as pre-buffer.
+    private let preBufferCapacity = 8000
+    private var isEngineWarmed = false
+
     // MARK: - Init
 
     private init() {
@@ -51,61 +55,30 @@ class StreamingAudioService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isStreaming else { return }
-                self.cancelStreaming()
-                logger.info("Streaming cancelled due to microphone change")
+                guard let self else { return }
+                if self.isStreaming {
+                    self.cancelStreaming()
+                    logger.info("Streaming cancelled due to microphone change")
+                } else if self.isEngineWarmed {
+                    self.coolDown()
+                    self.warmUp()
+                }
             }
         }
     }
 
-    // MARK: - Start Streaming
+    // MARK: - Engine Pre-Warm
 
-    func startStreaming() throws {
-        guard !isStreaming else {
-            logger.warning("Already streaming, ignoring startStreaming()")
-            return
-        }
-
-        guard let model = TranscriptionService.shared.streamingModel else {
-            logger.error("No model available for streaming")
-            throw StreamingAudioError.modelNotLoaded
-        }
-
-        ringBuffer.withLock { $0.removeAll() }
-        shouldStopFeeding.withLock { $0 = false }
-        confirmedText = ""
-        provisionalText = ""
-
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let wavURL = tempDir.appendingPathComponent("\(timestamp)_streaming.wav")
-        currentWAVURL = wavURL
-        let writer = try StreamingWAVWriter(url: wavURL, sampleRate: 16000)
-        wavWriter = writer
-
-        let settings = Settings()
-        let language = Self.mapLanguageCode(settings.selectedLanguage)
-        let config = StreamingConfig(
-            language: language,
-            temperature: Float(settings.temperature)
-        )
-        let session = StreamingInferenceSession(model: model, config: config)
-        streamingSession = session
-        if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public)")
-        }
+    func warmUp() {
+        guard !isEngineWarmed, audioEngine == nil else { return }
 
         if let activeMic = MicrophoneService.shared.activateForRecording() {
-            logger.info("Set system default input to: \(activeMic.displayName, privacy: .public)")
+            logger.info("Warm-up: set input to \(activeMic.displayName, privacy: .public)")
         }
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Audio input: sampleRate=\(nativeFormat.sampleRate, privacy: .public)Hz, channels=\(nativeFormat.channelCount, privacy: .public), bufferSize=4096")
-        }
 
         let targetSampleRate: Double = 16000
         guard let targetFormat = AVAudioFormat(
@@ -114,24 +87,24 @@ class StreamingAudioService: ObservableObject {
             channels: 1,
             interleaved: false
         ) else {
-            throw StreamingAudioError.audioFormatCreationFailed
+            logger.error("Warm-up: failed to create target format")
+            return
         }
 
         let converter: AVAudioConverter?
         if nativeFormat.sampleRate != targetSampleRate || nativeFormat.channelCount != 1 {
             converter = AVAudioConverter(from: nativeFormat, to: targetFormat)
-            logger.info("Audio converter: \(nativeFormat.sampleRate, privacy: .public)Hz/\(nativeFormat.channelCount, privacy: .public)ch → 16kHz/1ch")
         } else {
             converter = nil
-            logger.info("Native format already 16kHz mono")
         }
         audioConverter = converter
 
         let nativeSampleRate = nativeFormat.sampleRate
         let ringBufferLock = self.ringBuffer
+        let preCapacity = self.preBufferCapacity
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) {
-            buffer, _ in
+            [weak self] buffer, _ in
 
             let floats: [Float]
             if let converter {
@@ -166,17 +139,85 @@ class StreamingAudioService: ObservableObject {
                 ))
             }
 
-            ringBufferLock.withLock { buffer in
-                buffer.append(contentsOf: floats)
+            ringBufferLock.withLock { buf in
+                buf.append(contentsOf: floats)
+                let isCurrentlyStreaming = self?.isStreaming ?? false
+                if !isCurrentlyStreaming && buf.count > preCapacity {
+                    buf.removeFirst(buf.count - preCapacity)
+                }
             }
         }
 
-        try engine.start()
-        playNotificationSound()
-        audioEngine = engine
+        do {
+            try engine.start()
+            audioEngine = engine
+            isEngineWarmed = true
+            logger.info("Audio engine warmed up")
+        } catch {
+            logger.error("Warm-up failed: \(error, privacy: .public)")
+        }
+    }
+
+    func coolDown() {
+        guard isEngineWarmed else { return }
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        audioConverter = nil
+        isEngineWarmed = false
+        ringBuffer.withLock { $0.removeAll() }
+        logger.info("Audio engine cooled down")
+    }
+
+    // MARK: - Start Streaming
+
+    func startStreaming() throws {
+        guard !isStreaming else {
+            logger.warning("Already streaming, ignoring startStreaming()")
+            return
+        }
+
+        guard let model = TranscriptionService.shared.streamingModel else {
+            logger.error("No model available for streaming")
+            throw StreamingAudioError.modelNotLoaded
+        }
+
+        if !isEngineWarmed {
+            warmUp()
+        }
+
+        guard audioEngine != nil else {
+            throw StreamingAudioError.audioFormatCreationFailed
+        }
+
+        shouldStopFeeding.withLock { $0 = false }
+        confirmedText = ""
+        provisionalText = ""
+
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let wavURL = tempDir.appendingPathComponent("\(timestamp)_streaming.wav")
+        currentWAVURL = wavURL
+        let writer = try StreamingWAVWriter(url: wavURL, sampleRate: 16000)
+        wavWriter = writer
+
+        let settings = Settings()
+        let language = Self.mapLanguageCode(settings.selectedLanguage)
+        let config = StreamingConfig(
+            language: language,
+            temperature: Float(settings.temperature)
+        )
+        let session = StreamingInferenceSession(model: model, config: config)
+        streamingSession = session
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public)")
+        }
+
         isStreaming = true
         recordingStartTime = Date()
-        logger.info("Streaming started")
+        playNotificationSound()
+        logger.info("Streaming started (engine pre-warmed, pre-buffer available)")
 
         eventTask = Task.detached { [weak self] in
             for await event in session.events {
@@ -231,9 +272,6 @@ class StreamingAudioService: ObservableObject {
 
         defer { isStreaming = false }
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-
         shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
         if let feedTask {
@@ -267,9 +305,6 @@ class StreamingAudioService: ObservableObject {
             }
         }
         eventTask = nil
-
-        audioEngine = nil
-        audioConverter = nil
 
         let finalURL = wavWriter?.finalize()
         wavWriter = nil
@@ -314,11 +349,6 @@ class StreamingAudioService: ObservableObject {
 
         streamingSession?.cancel()
         streamingSession = nil
-
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
-        audioConverter = nil
 
         wavWriter = nil
         if let url = currentWAVURL {
