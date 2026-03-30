@@ -128,14 +128,25 @@ public final class VADSegmenter {
     /// Force-emit any buffered speech (call at end of recording).
     /// When `force` is true, emits regardless of `minSpeechDuration`.
     public func flush(force: Bool = false) -> SpeechSegment? {
+        if force && speechBuffer.isEmpty && !preSpeechBuffer.isEmpty {
+            for chunk in preSpeechBuffer {
+                speechBuffer.append(contentsOf: chunk)
+            }
+            preSpeechBuffer.removeAll()
+        }
+
         guard !carryBuffer.isEmpty, let vad else { return emitIfValid(force: force) }
 
         var padded = carryBuffer
         if padded.count < SileroVAD.chunkSize {
             padded += [Float](repeating: 0, count: SileroVAD.chunkSize - padded.count)
         }
-        if let probability = try? vad.process(Array(padded.prefix(SileroVAD.chunkSize))),
-           probability > threshold || isSpeechActive {
+        if isSpeechActive {
+            speechBuffer.append(contentsOf: carryBuffer)
+        } else if let probability = try? vad.process(Array(padded.prefix(SileroVAD.chunkSize))),
+                  probability > threshold {
+            speechBuffer.append(contentsOf: carryBuffer)
+        } else if force {
             speechBuffer.append(contentsOf: carryBuffer)
         }
         carryBuffer = []

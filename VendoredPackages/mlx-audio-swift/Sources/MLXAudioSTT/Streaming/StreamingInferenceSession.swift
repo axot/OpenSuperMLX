@@ -129,6 +129,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
             maxTokens: config.maxNewTokensPerChunk,
             recentContext: recentContext
         )
+        if tokens.count <= 10 {
+            Self.logger.info("tokenIds=\(tokens, privacy: .public)")
+        }
         let lang = effectiveLanguage
         let parsed = TextMergeUtilities.parseASROutput(tokenizer.decode(tokens: tokens))
         let segmentText = parsed.text
@@ -141,17 +144,22 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 state.detectedLanguage = parsed.language
             }
 
+            let beforeMerge = state.mergedCommittedText
             state.mergedCommittedText = TextMergeUtilities.mergeChunkText(
                 accumulated: state.mergedCommittedText,
                 newChunk: segmentText,
                 language: lang
             )
+            let afterMerge = state.mergedCommittedText
+            if !segmentText.isEmpty {
+                Self.logger.info("merge: before(last20)='\(beforeMerge.suffix(20), privacy: .public)' + chunk='\(segmentText.prefix(30), privacy: .public)' → after(last30)='\(afterMerge.suffix(30), privacy: .public)'")
+            }
             return state.mergedCommittedText
         }
 
         let decodeTime = Date().timeIntervalSince(startTime)
         let totalTokens = shared.withLock { $0.committedTokenIds.count }
-        Self.logger.info("segment: duration=\(String(format: "%.1f", segment.durationSeconds))s tokens=\(tokens.count) total=\(totalTokens) time=\(String(format: "%.2f", decodeTime))s text='\(segmentText.prefix(40), privacy: .public)'")
+        Self.logger.info("segment: duration=\(String(format: "%.1f", segment.durationSeconds), privacy: .public)s samples=\(segment.samples.count, privacy: .public) tokens=\(tokens.count) total=\(totalTokens) time=\(String(format: "%.2f", decodeTime), privacy: .public)s text='\(segmentText.prefix(40), privacy: .public)'")
 
         continuation?.yield(.displayUpdate(confirmedText: displayText, provisionalText: ""))
 
@@ -246,6 +254,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
             if RepetitionDetector.detectTokenRepetition(newTokenIds) {
                 let removeCount = min(newTokenIds.count, 20)
+                Self.logger.warning("RepetitionDetector: removing last \(removeCount) of \(newTokenIds.count) tokens")
                 newTokenIds.removeLast(removeCount)
                 break
             }

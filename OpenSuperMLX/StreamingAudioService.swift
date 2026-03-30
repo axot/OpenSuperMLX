@@ -273,7 +273,6 @@ class StreamingAudioService: ObservableObject {
         defer { isStreaming = false }
 
         shouldStopFeeding.withLock { $0 = true }
-        feedTask?.cancel()
         if let feedTask {
             _ = await feedTask.value
         }
