@@ -35,6 +35,10 @@ public final class VADSegmenter {
     private var speechBuffer: [Float] = []
     private var silenceFrameCount: Int = 0
 
+    /// Rolling buffer of recent VAD frames for pre-speech lookback (288ms = 8 × 36ms frames).
+    private var preSpeechBuffer: [[Float]] = []
+    private let maxLookbackFrames: Int = 8
+
     /// Whether VAD loaded successfully and is ready for use.
     public var isAvailable: Bool { vad != nil }
 
@@ -42,7 +46,7 @@ public final class VADSegmenter {
     public private(set) var isSpeechActive: Bool = false
 
     public init(
-        minSilenceDuration: Float = 0.25,
+        minSilenceDuration: Float = 0.65,
         minSpeechDuration: Float = 0.5,
         maxSpeechDuration: Float = 30.0,
         threshold: Float = 0.5
@@ -77,6 +81,12 @@ public final class VADSegmenter {
             guard let probability = try? vad.process(chunk) else { continue }
 
             if probability > threshold {
+                if !isSpeechActive {
+                    for bufferedChunk in preSpeechBuffer {
+                        speechBuffer.append(contentsOf: bufferedChunk)
+                    }
+                    preSpeechBuffer.removeAll()
+                }
                 isSpeechActive = true
                 speechBuffer.append(contentsOf: chunk)
                 silenceFrameCount = 0
@@ -84,6 +94,11 @@ public final class VADSegmenter {
                 silenceFrameCount += 1
                 if isSpeechActive {
                     speechBuffer.append(contentsOf: chunk)
+                } else {
+                    preSpeechBuffer.append(chunk)
+                    if preSpeechBuffer.count > maxLookbackFrames {
+                        preSpeechBuffer.removeFirst()
+                    }
                 }
 
                 let silenceDuration = Float(silenceFrameCount * SileroVAD.chunkSize) / Float(SileroVAD.sampleRate)
@@ -111,25 +126,36 @@ public final class VADSegmenter {
     }
 
     /// Force-emit any buffered speech (call at end of recording).
-    public func flush() -> SpeechSegment? {
-        guard !carryBuffer.isEmpty, let vad else { return emitIfValid() }
+    /// When `force` is true, emits regardless of `minSpeechDuration`.
+    public func flush(force: Bool = false) -> SpeechSegment? {
+        if force && speechBuffer.isEmpty && !preSpeechBuffer.isEmpty {
+            speechBuffer = preSpeechBuffer.flatMap { $0 }
+            preSpeechBuffer.removeAll()
+        }
+
+        guard !carryBuffer.isEmpty, let vad else { return emitIfValid(force: force) }
 
         var padded = carryBuffer
         if padded.count < SileroVAD.chunkSize {
             padded += [Float](repeating: 0, count: SileroVAD.chunkSize - padded.count)
         }
-        if let probability = try? vad.process(Array(padded.prefix(SileroVAD.chunkSize))),
-           probability > threshold || isSpeechActive {
+        if isSpeechActive {
+            speechBuffer.append(contentsOf: carryBuffer)
+        } else if let probability = try? vad.process(Array(padded.prefix(SileroVAD.chunkSize))),
+                  probability > threshold {
+            speechBuffer.append(contentsOf: carryBuffer)
+        } else if force {
             speechBuffer.append(contentsOf: carryBuffer)
         }
         carryBuffer = []
-        return emitIfValid()
+        return emitIfValid(force: force)
     }
 
     /// Reset all state for a new session.
     public func reset() {
         carryBuffer = []
         speechBuffer = []
+        preSpeechBuffer = []
         silenceFrameCount = 0
         isSpeechActive = false
         vad?.reset()
@@ -137,17 +163,16 @@ public final class VADSegmenter {
 
     // MARK: - Private Helpers
 
-    private func emitIfValid() -> SpeechSegment? {
+    private func emitIfValid(force: Bool = false) -> SpeechSegment? {
         let duration = Float(speechBuffer.count) / Float(SileroVAD.sampleRate)
         defer {
             speechBuffer = []
             silenceFrameCount = 0
             isSpeechActive = false
         }
-        guard duration >= minSpeechDuration else {
-            if !speechBuffer.isEmpty {
-                Self.logger.info("discarded short segment: \(String(format: "%.2f", duration))s")
-            }
+        guard !speechBuffer.isEmpty else { return nil }
+        guard force || duration >= minSpeechDuration else {
+            Self.logger.info("discarded short segment: \(String(format: "%.2f", duration))s")
             return nil
         }
         return SpeechSegment(samples: speechBuffer)

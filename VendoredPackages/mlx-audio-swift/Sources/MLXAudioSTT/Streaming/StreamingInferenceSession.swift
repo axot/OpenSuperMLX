@@ -42,6 +42,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var isActive: Bool = false
     private var totalSamplesFed: Int = 0
 
+    private let shouldAbort = OSAllocatedUnfairLock(initialState: false)
+
     private var continuation: AsyncStream<TranscriptionEvent>.Continuation?
     private var stopTask: Task<Void, Never>?
 
@@ -66,6 +68,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.events = AsyncStream { continuation = $0 }
         self.continuation = continuation
         self.isActive = true
+        self.shouldAbort.withLock { $0 = false }
     }
 
     /// Whether VAD loaded successfully.
@@ -148,7 +151,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
         let decodeTime = Date().timeIntervalSince(startTime)
         let totalTokens = shared.withLock { $0.committedTokenIds.count }
-        Self.logger.info("segment: duration=\(String(format: "%.1f", segment.durationSeconds))s tokens=\(tokens.count) total=\(totalTokens) time=\(String(format: "%.2f", decodeTime))s text='\(segmentText.prefix(40), privacy: .public)'")
+        Self.logger.info("segment: duration=\(String(format: "%.1f", segment.durationSeconds), privacy: .public)s tokens=\(tokens.count) total=\(totalTokens) time=\(String(format: "%.2f", decodeTime), privacy: .public)s text='\(segmentText.prefix(40), privacy: .public)'")
 
         continuation?.yield(.displayUpdate(confirmedText: displayText, provisionalText: ""))
 
@@ -215,7 +218,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
         var recentTokenIds = Array(recentContext.suffix(config.repetitionContextSize))
 
         for _ in 0..<maxTokens {
-            if Task.isCancelled { return newTokenIds }
+            if shouldAbort.withLock({ $0 }) {
+                Self.logger.warning("generateTokens aborted after \(newTokenIds.count) tokens")
+                return newTokenIds
+            }
 
             var lastLogits = logits[0..., -1, 0...]
             if config.temperature > 0 {
@@ -240,6 +246,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
             if RepetitionDetector.detectTokenRepetition(newTokenIds) {
                 let removeCount = min(newTokenIds.count, 20)
+                Self.logger.warning("RepetitionDetector: removing last \(removeCount) of \(newTokenIds.count) tokens")
                 newTokenIds.removeLast(removeCount)
                 break
             }
@@ -272,7 +279,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         sessionLock.withLock { _ in
-            if let remaining = vadSegmenter.flush() {
+            if let remaining = vadSegmenter.flush(force: true) {
                 processCompletedSegment(remaining)
             }
         }
@@ -304,6 +311,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
     // MARK: - Cancel
 
     public func cancel() {
+        shouldAbort.withLock { $0 = true }
         sessionLock.withLock { _ in
             isActive = false
             stopTask?.cancel()
