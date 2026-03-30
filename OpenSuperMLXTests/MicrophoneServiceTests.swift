@@ -113,14 +113,16 @@ final class MicrophoneServiceBluetoothTests: XCTestCase {
         XCTAssertTrue(MicrophoneService.shared.isBluetoothMicrophone(device))
     }
     
-    func testBluetoothDetection_MACAddress() {
+    func testBluetoothDetection_MACAddressAloneIsInsufficient() {
         let device = MicrophoneService.AudioDevice(
-            id: "00-22-BB-71-21-0A:input",
-            name: "Amiron wireless",
-            manufacturer: "Apple",
+            id: "AA-BB-CC-DD-EE-FF:input",
+            name: "Wireless Headset",
+            manufacturer: "Acme",
             isBuiltIn: false
         )
-        XCTAssertTrue(MicrophoneService.shared.isBluetoothMicrophone(device))
+        // MAC address format triggers CoreAudio transport type check;
+        // fake device has no CoreAudio entry, so detection returns false
+        XCTAssertFalse(MicrophoneService.shared.isBluetoothMicrophone(device))
     }
     
     func testBluetoothDetection_NotBluetooth() {
@@ -140,8 +142,8 @@ final class MicrophoneServiceRequiresConnectionTests: XCTestCase {
     
     func testRequiresConnection_iPhone() {
         let device = MicrophoneService.AudioDevice(
-            id: "B95EA61C-AC67-43B3-8AB4-8AE800000003",
-            name: "Микрофон (iPhone nagibator)",
+            id: "DEADBEEF-1234-5678-ABCD-000000000001",
+            name: "iPhone Microphone",
             manufacturer: "Apple Inc.",
             isBuiltIn: false
         )
@@ -149,14 +151,14 @@ final class MicrophoneServiceRequiresConnectionTests: XCTestCase {
         XCTAssertTrue(MicrophoneService.shared.isBluetoothMicrophone(device) || MicrophoneService.shared.isContinuityMicrophone(device))
     }
     
-    func testRequiresConnection_Bluetooth() {
+    func testRequiresConnection_MACAddressWithoutCoreAudio() {
         let device = MicrophoneService.AudioDevice(
-            id: "00-22-BB-71-21-0A:input",
-            name: "Amiron wireless",
-            manufacturer: "Apple",
+            id: "AA-BB-CC-DD-EE-FF:input",
+            name: "Wireless Headset",
+            manufacturer: "Acme",
             isBuiltIn: false
         )
-        XCTAssertTrue(MicrophoneService.shared.isBluetoothMicrophone(device))
+        XCTAssertFalse(MicrophoneService.shared.isBluetoothMicrophone(device))
     }
     
     func testRequiresConnection_BuiltIn() {
