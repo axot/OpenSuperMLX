@@ -16,15 +16,15 @@ import UniformTypeIdentifiers
 class ContentViewModel: ObservableObject {
     @Published var state: RecordingState = .idle
     @Published var isBlinking = false
-    @Published var recorder: AudioRecorder = .shared
-    @Published var transcriptionService = TranscriptionService.shared
-    @Published var transcriptionQueue = TranscriptionQueue.shared
-    @Published var recordingStore = RecordingStore.shared
+    let recorder: AudioRecorder = .shared
+    let transcriptionService = TranscriptionService.shared
+    let transcriptionQueue = TranscriptionQueue.shared
+    let recordingStore = RecordingStore.shared
     @Published var recordings: [Recording] = []
     @Published var isLoadingMore = false
     @Published var canLoadMore = true
     @Published var recordingDuration: TimeInterval = 0
-    @Published var microphoneService = MicrophoneService.shared
+    let microphoneService = MicrophoneService.shared
     @Published var shouldClearSearch = false
     @Published var streamingConfirmedText = ""
     @Published var streamingProvisionalText = ""
@@ -740,9 +740,7 @@ struct ContentView: View {
                 isRegeneration: isRegeneration
             )
         }
-        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
-            viewModel.loadInitialData()
-        }
+        
         .overlay {
             let isPermissionsGranted = permissionsManager.isMicrophonePermissionGranted
                 && permissionsManager.isAccessibilityPermissionGranted
