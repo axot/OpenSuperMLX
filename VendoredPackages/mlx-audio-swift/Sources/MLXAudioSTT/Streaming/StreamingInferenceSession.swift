@@ -81,10 +81,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     public func feedAudio(samples: [Float]) {
         sessionLock.withLock { _ in
-            guard isActive else {
-                Self.logger.warning("feedAudio: isActive=false, dropping \(samples.count) samples")
-                return
-            }
+            guard isActive else { return }
             totalSamplesFed += samples.count
 
             let segments = vadSegmenter.feedSamples(samples)
@@ -281,13 +278,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         sessionLock.withLock { _ in
-            let speechBufferCount = vadSegmenter.speechBufferCount
-            Self.logger.info("finishStop: speechBufferCount=\(speechBufferCount) before flush")
             if let remaining = vadSegmenter.flush(force: true) {
-                Self.logger.info("finishStop: flush emitted \(remaining.samples.count) samples (\(String(format: "%.2f", remaining.durationSeconds))s)")
                 processCompletedSegment(remaining)
-            } else {
-                Self.logger.info("finishStop: flush returned nil")
             }
         }
 
