@@ -274,6 +274,8 @@
 				CEAC000B2D82F60000000000 /* MLXAudioCore */,
 				102EC9F7001810BABD5A5C44 /* AWSBedrockRuntime */,
 				845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */,
+				AADD00012DA0B00000000002 /* DTLNAecCoreML */,
+				AADD00012DA0B00000000003 /* DTLNAec256 */,
 			);
 			productName = OpenSuperMLX;
 			productReference = CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */;
@@ -384,6 +386,7 @@
 				CE0EAD6C2D56ACA80067FDEE /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */,
 				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
+				AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE57B0292D52C7BB00929AF3 /* Products */;
@@ -921,6 +924,14 @@
 				minimumVersion = 2.3.0;
 			};
 		};
+		AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MimicScribe/dtln-aec-coreml";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -951,6 +962,16 @@
 		CEAC000B2D82F60000000000 /* MLXAudioCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MLXAudioCore;
+		};
+		AADD00012DA0B00000000002 /* DTLNAecCoreML */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */;
+			productName = DTLNAecCoreML;
+		};
+		AADD00012DA0B00000000003 /* DTLNAec256 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */;
+			productName = DTLNAec256;
 		};
 		AAEE000100000000000A000A /* MLXAudioSTT */ = {
 			isa = XCSwiftPackageProductDependency;

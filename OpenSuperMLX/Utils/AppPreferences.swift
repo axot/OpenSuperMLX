@@ -166,4 +166,9 @@ final class AppPreferences {
 
     @UserDefault(key: "openAICustomHeaders", defaultValue: "")
     var openAICustomHeaders: String
+
+    // MARK: - Audio Source
+
+    @UserDefault(key: "audioSourceMode", defaultValue: "auto")
+    var audioSourceMode: String
 }

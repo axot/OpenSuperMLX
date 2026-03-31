@@ -23,6 +23,7 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var provisionalText = ""
     @Published private(set) var isStreaming = false
     @Published private(set) var isSpeechDetected = false
+    @Published private(set) var isDualTrackMode = false
 
     // MARK: - Private State
 
@@ -31,6 +32,7 @@ class StreamingAudioService: ObservableObject {
     private var streamingSession: StreamingInferenceSession?
     private var wavWriter: StreamingWAVWriter?
     private var currentWAVURL: URL?
+    private var currentSystemAudioURL: URL?
 
     private var feedTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
@@ -270,7 +272,10 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
 
-        defer { isStreaming = false }
+        defer {
+            isStreaming = false
+            isDualTrackMode = false
+        }
 
         shouldStopFeeding.withLock { $0 = true }
         if let feedTask {
@@ -340,6 +345,7 @@ class StreamingAudioService: ObservableObject {
         guard isStreaming else { return }
 
         isStreaming = false
+        isDualTrackMode = false
 
         feedTask?.cancel()
         feedTask = nil
@@ -359,6 +365,29 @@ class StreamingAudioService: ObservableObject {
         ringBuffer.withLock { $0.removeAll() }
 
         clearState()
+    }
+
+    // MARK: - Dual-Track Capture
+
+    func startDualTrackCapture(bundleID: String?) async throws {
+        do {
+            try await SystemAudioService.shared.startCapture(bundleID: bundleID)
+        } catch {
+            logger.warning("System audio capture failed, falling back to mic-only: \(error, privacy: .public)")
+        }
+
+        try startStreaming()
+        isDualTrackMode = true
+    }
+
+    func stopDualTrackCapture() async -> (micAudioURL: URL?, systemAudioURL: URL?) {
+        let systemURL = await SystemAudioService.shared.stopCapture()
+        currentSystemAudioURL = systemURL
+
+        let micResult = await stopStreaming()
+        isDualTrackMode = false
+
+        return (micAudioURL: micResult?.url, systemAudioURL: systemURL)
     }
 
     // MARK: - Finalize Recording
