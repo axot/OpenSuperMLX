@@ -158,7 +158,7 @@ class TranscriptionService: ObservableObject {
             try Task.checkCancellation()
             let correctedResult: String
             if applyCorrection {
-                correctedResult = await BedrockService.shared.correctTranscription(result, forceEnabled: forceLLM)
+                correctedResult = await LLMCorrectionService.shared.correctTranscription(result, forceEnabled: forceLLM)
             } else {
                 correctedResult = result
             }

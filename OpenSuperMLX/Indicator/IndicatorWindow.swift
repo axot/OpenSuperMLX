@@ -218,14 +218,14 @@ class IndicatorViewModel: ObservableObject {
     
     /// Returns corrected text, the original text if correction is disabled, or `nil` if cancelled.
     private func runLLMCorrectionIfNeeded(on text: String) async -> String? {
-        guard AppPreferences.shared.bedrockEnabled || forceLLMCorrection else {
+        guard AppPreferences.shared.llmCorrectionEnabled || forceLLMCorrection else {
             return text
         }
         
         state = .correcting
         var correctedText = text
         correctionTask = Task {
-            let result = await BedrockService.shared.correctTranscription(text, forceEnabled: self.forceLLMCorrection)
+            let result = await LLMCorrectionService.shared.correctTranscription(text, forceEnabled: self.forceLLMCorrection)
             guard !Task.isCancelled else { return }
             correctedText = result
         }

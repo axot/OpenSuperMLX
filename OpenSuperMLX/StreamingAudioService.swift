@@ -394,7 +394,7 @@ class StreamingAudioService: ObservableObject {
 
         // Apply Bedrock LLM correction (conditional — caller controls this for indicator state)
         if applyCorrection {
-            text = await BedrockService.shared.correctTranscription(text, forceEnabled: forceLLM)
+            text = await LLMCorrectionService.shared.correctTranscription(text, forceEnabled: forceLLM)
         }
 
         let timestamp = Date()
