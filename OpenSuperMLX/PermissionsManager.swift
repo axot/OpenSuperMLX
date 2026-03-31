@@ -1,22 +1,28 @@
 import AVFoundation
 import AppKit
+import CoreGraphics
 import Foundation
+import os
 
 enum Permission {
     case microphone
     case accessibility
+    case screenRecording
 }
 
 class PermissionsManager: ObservableObject {
     @Published var isMicrophonePermissionGranted = false
     @Published var isAccessibilityPermissionGranted = false
+    @Published var isScreenRecordingPermissionGranted = false
 
+    private static let logger = Logger(subsystem: "OpenSuperMLX", category: "PermissionsManager")
     private var permissionCheckTimer: Timer?
     private var windowObservers: [NSObjectProtocol] = []
 
     init() {
         checkMicrophonePermission()
         checkAccessibilityPermission()
+        checkScreenRecordingPermission()
 
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -73,6 +79,7 @@ class PermissionsManager: ObservableObject {
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.checkMicrophonePermission()
             self?.checkAccessibilityPermission()
+            self?.checkScreenRecordingPermission()
         }
     }
 
@@ -127,6 +134,61 @@ class PermissionsManager: ObservableObject {
         checkAccessibilityPermission()
     }
 
+    // MARK: - Screen Recording
+
+    func checkScreenRecordingPermission() {
+        let granted = CGPreflightScreenCaptureAccess()
+        DispatchQueue.main.async { [weak self] in
+            self?.isScreenRecordingPermissionGranted = granted
+        }
+    }
+
+    func requestScreenRecordingPermission() {
+        let granted = CGRequestScreenCaptureAccess()
+        if granted {
+            DispatchQueue.main.async { [weak self] in
+                self?.isScreenRecordingPermissionGranted = true
+            }
+        } else {
+            showScreenRecordingRestartAlert()
+        }
+    }
+
+    func showScreenRecordingRestartAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screen Recording Permission Required"
+            alert.informativeText =
+                "Please grant Screen Recording permission in System Settings, then restart the app for changes to take effect."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Restart Now")
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Later")
+
+            let response = alert.runModal()
+            switch response {
+            case .alertFirstButtonReturn:
+                Self.restartApp()
+            case .alertSecondButtonReturn:
+                self.openSystemPreferences(for: .screenRecording)
+            default:
+                break
+            }
+        }
+    }
+
+    private static func restartApp() {
+        let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
+        let path = url.deletingLastPathComponent().deletingLastPathComponent().absoluteString
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = [path]
+        task.launch()
+        NSApp.terminate(nil)
+    }
+
+    // MARK: - System Preferences
+
     func openSystemPreferences(for permission: Permission) {
         let urlString: String
         switch permission {
@@ -135,6 +197,9 @@ class PermissionsManager: ObservableObject {
         case .accessibility:
             urlString =
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        case .screenRecording:
+            urlString =
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         }
 
         if let url = URL(string: urlString) {
