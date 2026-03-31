@@ -295,8 +295,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Custom Model
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Custom Model")
                         .font(.headline)
@@ -325,8 +324,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Models Directory
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Models Directory")
                         .font(.headline)
@@ -375,7 +373,6 @@ struct SettingsView: View {
     private var transcriptionSettings: some View {
         Form {
             VStack(spacing: 20) {
-                // Language Settings
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Language Settings")
                         .font(.headline)
@@ -426,8 +423,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Streaming
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Streaming")
                         .font(.headline)
@@ -453,8 +449,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Transcriptions Directory
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Transcriptions Directory")
                         .font(.headline)
@@ -497,10 +492,8 @@ struct SettingsView: View {
     private var advancedSettings: some View {
         Form {
             VStack(spacing: 20) {
-                // Permissions
                 PermissionsStatusView()
 
-                // Model Parameters
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Model Parameters")
                         .font(.headline)
@@ -526,8 +519,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Debug Options
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Debug Options")
                         .font(.headline)
@@ -557,7 +549,6 @@ struct SettingsView: View {
     private var llmSettings: some View {
         Form {
             VStack(spacing: 20) {
-                // Enable + Provider Picker
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -585,10 +576,8 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Provider-Specific Configuration
+
                 if LLMProviderType(rawValue: viewModel.llmProvider) == .bedrock {
-                        // Bedrock Authentication
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Authentication")
                                 .font(.headline)
@@ -632,8 +621,7 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.controlBackgroundColor).opacity(0.3))
                         .cornerRadius(12)
-                        
-                        // Bedrock Configuration
+
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Configuration")
                                 .font(.headline)
@@ -663,7 +651,6 @@ struct SettingsView: View {
                         .cornerRadius(12)
                         
                     } else if LLMProviderType(rawValue: viewModel.llmProvider) == .openai {
-                        // OpenAI-Compatible Configuration
                         VStack(alignment: .leading, spacing: 16) {
                             Text("OpenAI Configuration")
                                 .font(.headline)
@@ -705,8 +692,7 @@ struct SettingsView: View {
                         .background(Color(.controlBackgroundColor).opacity(0.3))
                         .cornerRadius(12)
                     }
-                    
-                    // Correction Prompt
+
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Correction Prompt")
                             .font(.headline)
@@ -776,7 +762,6 @@ struct SettingsView: View {
     private var shortcutSettings: some View {
         Form {
             VStack(spacing: 20) {
-                // Recording Trigger
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Recording Trigger")
                         .font(.headline)
@@ -818,8 +803,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
-                // Recording Behavior
+
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Recording Behavior")
                         .font(.headline)

@@ -1,7 +1,5 @@
-//
-//  ErrorToastManager.swift
-//  OpenSuperMLX
-//
+// ErrorToastManager.swift
+// OpenSuperMLX
 
 import AppKit
 import SwiftUI
