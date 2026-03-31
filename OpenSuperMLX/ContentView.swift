@@ -740,7 +740,9 @@ struct ContentView: View {
                 isRegeneration: isRegeneration
             )
         }
-        
+        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
+            viewModel.loadInitialData()
+        }
         .overlay {
             let isPermissionsGranted = permissionsManager.isMicrophonePermissionGranted
                 && permissionsManager.isAccessibilityPermissionGranted
