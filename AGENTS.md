@@ -237,6 +237,15 @@ When creating work plans (`.sisyphus/plans/*.md`), every plan MUST include:
 
 1. **Code Simplifier Task** — Code simplification.
 
+### Build Verification Strategy
+
+Individual tasks within a plan MUST NOT run full project builds (`xcodebuild build` / `./run.sh build`) for verification — builds are expensive and time-consuming. Instead:
+
+- **During task execution**: Use `lsp_diagnostics` to catch compile errors in changed files. Run only the relevant unit tests (`-only-testing:`) for the code being modified.
+- **After all tasks complete**: Run a single full build and full test suite as the final verification step of the plan.
+
+Plans MUST include a dedicated final task for this end-to-end build and test verification.
+
 ### TDD Requirement (MANDATORY)
 
 All plans MUST follow **Test-Driven Development (TDD)** — plans that list implementation before corresponding tests are invalid. For every feature or behavior change:
