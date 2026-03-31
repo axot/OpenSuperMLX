@@ -1,6 +1,7 @@
 // SystemAudioService.swift
 // OpenSuperMLX
 
+import AVFoundation
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -10,11 +11,14 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "SystemAudioSer
 
 // MARK: - SystemAudioService
 
-final class SystemAudioService: NSObject {
+@MainActor
+final class SystemAudioService: NSObject, ObservableObject {
     static let shared = SystemAudioService()
 
-    private(set) var isCapturing = false
+    @Published private(set) var isCapturing = false
+
     private var stream: SCStream?
+    private let accumulatedSamples = OSAllocatedUnfairLock(initialState: [Float]())
 
     private override init() {
         super.init()
@@ -37,41 +41,111 @@ final class SystemAudioService: NSObject {
         return config
     }
 
-    // MARK: - Capture Lifecycle
+    // MARK: - Content Filter
 
-    func startCapture() async throws {
-        guard !isCapturing else { return }
-
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+    func makeContentFilter(bundleID: String?, content: SCShareableContent) throws -> SCContentFilter {
         guard let display = content.displays.first else {
-            logger.error("No display available for system audio capture")
             throw SystemAudioCaptureError.noDisplayAvailable
         }
 
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        if let bundleID {
+            guard let app = content.applications.first(where: { $0.bundleIdentifier == bundleID }) else {
+                throw SystemAudioCaptureError.applicationNotFound(bundleID)
+            }
+            return SCContentFilter(display: display, including: [app], exceptingWindows: [])
+        }
+
+        return SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+    }
+
+    // MARK: - Capture Lifecycle
+
+    func startCapture(bundleID: String? = nil) async throws {
+        guard !isCapturing else { return }
+
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let filter = try makeContentFilter(bundleID: bundleID, content: content)
         let config = makeStreamConfiguration()
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInitiated))
-        try await stream.startCapture()
 
+        accumulatedSamples.withLock { $0.removeAll() }
+
+        try await stream.startCapture()
         self.stream = stream
         isCapturing = true
-        logger.info("System audio capture started")
+        logger.info("System audio capture started (bundleID: \(bundleID ?? "all", privacy: .public))")
     }
 
-    func stopCapture() async throws {
-        guard isCapturing, let stream else { return }
+    func stopCapture() async -> URL? {
+        guard isCapturing, let stream else { return nil }
 
-        try await stream.stopCapture()
+        do {
+            try await stream.stopCapture()
+        } catch {
+            logger.error("Failed to stop system audio stream: \(error.localizedDescription, privacy: .public)")
+        }
+
         self.stream = nil
         isCapturing = false
-        logger.info("System audio capture stopped")
+
+        let samples = accumulatedSamples.withLock { buf -> [Float] in
+            let result = buf
+            buf.removeAll()
+            return result
+        }
+
+        guard !samples.isEmpty else {
+            logger.info("System audio capture stopped — no samples captured")
+            return nil
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("system_audio_\(Date().timeIntervalSince1970).wav")
+
+        do {
+            try writeSamplesToWAV(samples, url: url)
+            logger.info("System audio capture stopped, WAV at: \(url.lastPathComponent, privacy: .public)")
+            return url
+        } catch {
+            logger.error("Failed to write system audio WAV: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    // MARK: - WAV Writing
+
+    private func writeSamplesToWAV(_ samples: [Float], url: URL) throws {
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw SystemAudioCaptureError.audioFileWriteFailed
+        }
+
+        let audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
+
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ) else {
+            throw SystemAudioCaptureError.audioFileWriteFailed
+        }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            buffer.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
+        }
+
+        try audioFile.write(from: buffer)
     }
 
     // MARK: - Sample Conversion
 
-    func extractFloatSamples(from sampleBuffer: CMSampleBuffer?) -> [Float] {
+    nonisolated func extractFloatSamples(from sampleBuffer: CMSampleBuffer?) -> [Float] {
         guard let sampleBuffer else { return [] }
 
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
@@ -81,7 +155,10 @@ final class SystemAudioService: NSObject {
 
         var length = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
-        let status = CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
+        let status = CMBlockBufferGetDataPointer(
+            blockBuffer, atOffset: 0, lengthAtOffsetOut: nil,
+            totalLengthOut: &length, dataPointerOut: &dataPointer
+        )
 
         guard status == kCMBlockBufferNoErr, let dataPointer else {
             logger.warning("Failed to get data pointer from block buffer: \(status)")
@@ -90,18 +167,15 @@ final class SystemAudioService: NSObject {
 
         let floatCount = length / MemoryLayout<Float>.size
         let floatPointer = UnsafeRawPointer(dataPointer).bindMemory(to: Float.self, capacity: floatCount)
-        let samples = Array(UnsafeBufferPointer(start: floatPointer, count: floatCount))
-
-        logger.debug("Extracted \(samples.count) float samples from system audio buffer")
-        return samples
+        return Array(UnsafeBufferPointer(start: floatPointer, count: floatCount))
     }
 }
 
 // MARK: - SCStreamDelegate
 
 extension SystemAudioService: SCStreamDelegate {
-    func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        logger.error("System audio stream stopped with error: \(error.localizedDescription)")
+    nonisolated func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        logger.error("System audio stream stopped with error: \(error.localizedDescription, privacy: .public)")
         Task { @MainActor in
             self.isCapturing = false
             self.stream = nil
@@ -112,12 +186,16 @@ extension SystemAudioService: SCStreamDelegate {
 // MARK: - SCStreamOutput
 
 extension SystemAudioService: SCStreamOutput {
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    nonisolated func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of type: SCStreamOutputType
+    ) {
         guard type == .audio else { return }
 
         let samples = extractFloatSamples(from: sampleBuffer)
         if !samples.isEmpty {
-            logger.debug("Received system audio buffer: \(samples.count) samples")
+            accumulatedSamples.withLock { $0.append(contentsOf: samples) }
         }
     }
 }
@@ -127,4 +205,6 @@ extension SystemAudioService: SCStreamOutput {
 enum SystemAudioCaptureError: Error {
     case noDisplayAvailable
     case captureNotSupported
+    case applicationNotFound(String)
+    case audioFileWriteFailed
 }
