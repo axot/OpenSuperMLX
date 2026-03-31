@@ -27,7 +27,7 @@ final class AppPreferences {
         migrateOldPreferences()
     }
     
-    private func migrateOldPreferences() {
+    func migrateOldPreferences() {
         if let oldLanguage = UserDefaults.standard.string(forKey: "whisperLanguage"),
            UserDefaults.standard.string(forKey: "mlxLanguage") == nil {
             UserDefaults.standard.set(oldLanguage, forKey: "mlxLanguage")
@@ -45,6 +45,23 @@ final class AppPreferences {
         UserDefaults.standard.removeObject(forKey: "suppressBlankAudio")
         UserDefaults.standard.removeObject(forKey: "useChineseITN")
         UserDefaults.standard.removeObject(forKey: "useEnglishITN")
+
+        if !UserDefaults.standard.bool(forKey: "llmMigrationCompleted") {
+            if UserDefaults.standard.object(forKey: "bedrockEnabled") != nil {
+                let wasEnabled = UserDefaults.standard.bool(forKey: "bedrockEnabled")
+                if UserDefaults.standard.object(forKey: "llmCorrectionEnabled") == nil {
+                    UserDefaults.standard.set(wasEnabled, forKey: "llmCorrectionEnabled")
+                }
+                if wasEnabled, UserDefaults.standard.string(forKey: "llmProvider") == nil {
+                    UserDefaults.standard.set("bedrock", forKey: "llmProvider")
+                }
+            }
+            if let oldPrompt = UserDefaults.standard.string(forKey: "bedrockCorrectionPrompt"),
+               UserDefaults.standard.string(forKey: "llmCorrectionPrompt") == nil {
+                UserDefaults.standard.set(oldPrompt, forKey: "llmCorrectionPrompt")
+            }
+            UserDefaults.standard.set(true, forKey: "llmMigrationCompleted")
+        }
     }
     
     @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
@@ -103,4 +120,29 @@ final class AppPreferences {
 
     @UserDefault(key: "useStreamingTranscription", defaultValue: true)
     var useStreamingTranscription: Bool
+
+    // MARK: - LLM Provider Selection
+
+    @UserDefault(key: "llmProvider", defaultValue: "bedrock")
+    var llmProvider: String
+
+    @UserDefault(key: "llmCorrectionEnabled", defaultValue: false)
+    var llmCorrectionEnabled: Bool
+
+    @UserDefault(key: "llmCorrectionPrompt", defaultValue: BedrockService.defaultCorrectionPrompt)
+    var llmCorrectionPrompt: String
+
+    // MARK: - OpenAI-Compatible LLM
+
+    @UserDefault(key: "openAIBaseURL", defaultValue: "https://api.openai.com/v1")
+    var openAIBaseURL: String
+
+    @UserDefault(key: "openAIAPIKey", defaultValue: "")
+    var openAIAPIKey: String
+
+    @UserDefault(key: "openAIModel", defaultValue: "gpt-4o-mini")
+    var openAIModel: String
+
+    @UserDefault(key: "openAICustomHeaders", defaultValue: "")
+    var openAICustomHeaders: String
 }
