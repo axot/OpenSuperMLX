@@ -454,6 +454,9 @@ struct SettingsView: View {
     private var advancedSettings: some View {
         Form {
             VStack(spacing: 20) {
+                // Permissions
+                PermissionsStatusView()
+
                 // Model Parameters
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Model Parameters")
@@ -782,6 +785,64 @@ struct MLXModelPickerItemView: View {
                 onSelect()
             }
         }
+    }
+}
+
+struct PermissionsStatusView: View {
+    @StateObject private var permissionsManager = PermissionsManager()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Permissions")
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: permissionsManager.isMicrophonePermissionGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(permissionsManager.isMicrophonePermissionGranted ? .green : .red)
+                    Text("Microphone")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(permissionsManager.isMicrophonePermissionGranted ? "Granted" : "Not Granted")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Image(systemName: permissionsManager.isAccessibilityPermissionGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(permissionsManager.isAccessibilityPermissionGranted ? .green : .red)
+                    Text("Accessibility")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(permissionsManager.isAccessibilityPermissionGranted ? "Granted" : "Not Granted")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Image(systemName: permissionsManager.isScreenRecordingPermissionGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(permissionsManager.isScreenRecordingPermissionGranted ? .green : .red)
+                    Text("Screen Recording")
+                        .font(.subheadline)
+                    Spacer()
+                    if !permissionsManager.isScreenRecordingPermissionGranted {
+                        Button("Open System Settings") {
+                            permissionsManager.openSystemPreferences(for: .screenRecording)
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                    }
+                    Text(permissionsManager.isScreenRecordingPermissionGranted ? "Granted" : "Not Granted")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.controlBackgroundColor).opacity(0.3))
+        .cornerRadius(12)
     }
 }
 

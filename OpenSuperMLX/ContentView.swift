@@ -663,6 +663,11 @@ struct ContentView: View {
 
                             HStack(spacing: 12) {
                                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
+
+                                if viewModel.isRecording && viewModel.microphoneService.audioSourceMode == .auto {
+                                    DualTrackBadge()
+                                        .transition(.opacity.combined(with: .scale))
+                                }
                                 
                                 if !viewModel.recordings.isEmpty {
                                     Button(action: {
@@ -1269,8 +1274,13 @@ struct TranscriptionView: View {
 
 struct MicrophonePickerIconView: View {
     @ObservedObject var microphoneService: MicrophoneService
+    @StateObject private var permissionsManager = PermissionsManager()
     @State private var showMenu = false
     @Environment(\.colorScheme) private var colorScheme
+    
+    private var isAutoMode: Bool {
+        microphoneService.audioSourceMode == .auto
+    }
     
     private var builtInMicrophones: [MicrophoneService.AudioDevice] {
         microphoneService.availableMicrophones.filter { $0.isBuiltIn }
@@ -1296,9 +1306,39 @@ struct MicrophonePickerIconView: View {
                 .cornerRadius(8)
         }
         .buttonStyle(.plain)
-        .help(microphoneService.currentMicrophone?.displayName ?? "Select microphone")
+        .help(isAutoMode ? "Auto (Microphone + System Audio)" : (microphoneService.currentMicrophone?.displayName ?? "Select microphone"))
         .popover(isPresented: $showMenu, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 0) {
+                // MARK: - Auto option
+                Button(action: {
+                    microphoneService.audioSourceMode = .auto
+                    if !permissionsManager.isScreenRecordingPermissionGranted {
+                        permissionsManager.requestScreenRecordingPermission()
+                    }
+                    showMenu = false
+                }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto (Microphone + System Audio)")
+                            Text("Records meeting audio when a call is detected")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if isAutoMode {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Records both your microphone and meeting audio when a call is detected")
+
+                Divider()
+                    .padding(.vertical, 4)
+
                 if microphoneService.availableMicrophones.isEmpty {
                     Text("No microphones available")
                         .foregroundColor(.secondary)
@@ -1306,13 +1346,15 @@ struct MicrophonePickerIconView: View {
                 } else {
                     ForEach(builtInMicrophones) { microphone in
                         Button(action: {
+                            microphoneService.audioSourceMode = .microphoneOnly
                             microphoneService.selectMicrophone(microphone)
                             showMenu = false
                         }) {
                             HStack {
                                 Text(microphone.displayName)
                                 Spacer()
-                                if let current = microphoneService.currentMicrophone,
+                                if !isAutoMode,
+                                   let current = microphoneService.currentMicrophone,
                                    current.id == microphone.id {
                                     Image(systemName: "checkmark")
                                 }
@@ -1331,13 +1373,15 @@ struct MicrophonePickerIconView: View {
                     
                     ForEach(externalMicrophones) { microphone in
                         Button(action: {
+                            microphoneService.audioSourceMode = .microphoneOnly
                             microphoneService.selectMicrophone(microphone)
                             showMenu = false
                         }) {
                             HStack {
                                 Text(microphone.displayName)
                                 Spacer()
-                                if let current = microphoneService.currentMicrophone,
+                                if !isAutoMode,
+                                   let current = microphoneService.currentMicrophone,
                                    current.id == microphone.id {
                                     Image(systemName: "checkmark")
                                 }
@@ -1350,9 +1394,31 @@ struct MicrophonePickerIconView: View {
                     }
                 }
             }
-            .frame(minWidth: 200)
+            .frame(minWidth: 240)
             .padding(.vertical, 8)
         }
+    }
+}
+
+struct DualTrackBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "person.and.background.dotted")
+                .imageScale(.small)
+            Text("Mic + System Audio")
+                .font(.caption2)
+        }
+        .foregroundColor(ThemePalette.iconAccent(colorScheme))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(ThemePalette.panelSurface(colorScheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
+        )
+        .cornerRadius(6)
     }
 }
 
