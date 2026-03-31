@@ -272,7 +272,10 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
 
-        defer { isStreaming = false }
+        defer {
+            isStreaming = false
+            isDualTrackMode = false
+        }
 
         shouldStopFeeding.withLock { $0 = true }
         if let feedTask {
@@ -342,6 +345,7 @@ class StreamingAudioService: ObservableObject {
         guard isStreaming else { return }
 
         isStreaming = false
+        isDualTrackMode = false
 
         feedTask?.cancel()
         feedTask = nil
