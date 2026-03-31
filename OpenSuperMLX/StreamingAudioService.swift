@@ -74,8 +74,12 @@ class StreamingAudioService: ObservableObject {
     func warmUp() {
         guard !isEngineWarmed, audioEngine == nil else { return }
 
-        if let activeMic = MicrophoneService.shared.activateForRecording() {
-            logger.info("Warm-up: set input to \(activeMic.displayName, privacy: .public)")
+        if MicrophoneService.shared.audioSourceMode == .microphoneOnly {
+            if let activeMic = MicrophoneService.shared.activateForRecording() {
+                logger.info("Warm-up: set input to \(activeMic.displayName, privacy: .public)")
+            }
+        } else {
+            logger.info("Warm-up: auto mode, using system default input device")
         }
 
         let engine = AVAudioEngine()

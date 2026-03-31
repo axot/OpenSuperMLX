@@ -97,6 +97,7 @@ final class MicrophoneService: ObservableObject {
                 bundleID: nil
             )
         case .auto:
+            activateSystemDefaultMicrophone()
             let callResult = CallDetectionService.shared.detectActiveCall()
             if callResult.isCallActive {
                 return ResolvedAudioSource(
@@ -273,6 +274,18 @@ final class MicrophoneService: ObservableObject {
         return fallback
     }
     
+    func activateSystemDefaultMicrophone() {
+        guard let defaultDeviceID = getCurrentSystemDefaultInputDevice() else {
+            logger.warning("activateSystemDefaultMicrophone: could not read system default input device")
+            return
+        }
+        let matched = availableMicrophones.first { getCoreAudioDeviceID(for: $0) == defaultDeviceID }
+        if let matched {
+            currentMicrophone = matched
+            logger.info("Auto mode: tracking system default mic \(matched.name, privacy: .public)")
+        }
+    }
+
     func isActiveMicrophoneBluetooth() -> Bool {
         guard let device = getActiveMicrophone() else { return false }
         return isBluetoothMicrophone(device)

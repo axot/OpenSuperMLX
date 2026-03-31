@@ -65,4 +65,17 @@ final class MicrophoneServiceAutoModeTests: XCTestCase {
         XCTAssertNil(resolved.callingApp)
         XCTAssertNil(resolved.bundleID)
     }
+
+    // MARK: - activateSystemDefaultMicrophone
+
+    func testActivateSystemDefaultMicrophoneDoesNotCrash() {
+        MicrophoneService.shared.activateSystemDefaultMicrophone()
+    }
+
+    func testActivateSystemDefaultMicrophoneDoesNotChangeSystemDefault() {
+        let before = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
+        MicrophoneService.shared.activateSystemDefaultMicrophone()
+        let after = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
+        XCTAssertEqual(before, after)
+    }
 }
