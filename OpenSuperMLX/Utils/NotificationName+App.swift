@@ -4,4 +4,5 @@ extension Notification.Name {
     static let appPreferencesLanguageChanged = Notification.Name("AppPreferencesLanguageChanged")
     static let indicatorWindowDidHide = Notification.Name("IndicatorWindowDidHide")
     static let bedrockCorrectionFailed = Notification.Name("BedrockCorrectionFailed")
+    static let llmCorrectionFailed = Notification.Name("LLMCorrectionFailed")
 }

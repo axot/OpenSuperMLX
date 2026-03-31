@@ -129,7 +129,7 @@ final class AppPreferences {
     @UserDefault(key: "llmCorrectionEnabled", defaultValue: false)
     var llmCorrectionEnabled: Bool
 
-    @UserDefault(key: "llmCorrectionPrompt", defaultValue: BedrockService.defaultCorrectionPrompt)
+    @UserDefault(key: "llmCorrectionPrompt", defaultValue: LLMCorrectionService.defaultCorrectionPrompt)
     var llmCorrectionPrompt: String
 
     // MARK: - OpenAI-Compatible LLM
