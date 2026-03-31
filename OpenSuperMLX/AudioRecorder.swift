@@ -129,11 +129,13 @@ class AudioRecorder: NSObject, ObservableObject {
         print("start record file to \(fileURL)")
         
         #if os(macOS)
-        if let activeMic = MicrophoneService.shared.activateForRecording() {
-            print("Set system default input to: \(activeMic.displayName)")
-            
-            if let deviceID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
-                recordingDeviceID = deviceID
+        if MicrophoneService.shared.audioSourceMode == .microphoneOnly {
+            if let activeMic = MicrophoneService.shared.activateForRecording() {
+                print("Set system default input to: \(activeMic.displayName)")
+                
+                if let deviceID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
+                    recordingDeviceID = deviceID
+                }
             }
         }
         #endif

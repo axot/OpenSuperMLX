@@ -283,6 +283,8 @@ final class MicrophoneService: ObservableObject {
         if let matched {
             currentMicrophone = matched
             logger.info("Auto mode: tracking system default mic \(matched.name, privacy: .public)")
+        } else {
+            logger.warning("activateSystemDefaultMicrophone: system default device \(defaultDeviceID, privacy: .public) not found in availableMicrophones")
         }
     }
 
