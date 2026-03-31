@@ -25,7 +25,7 @@ struct ResolvedAudioSource {
 
 // MARK: - MicrophoneService
 
-class MicrophoneService: ObservableObject {
+final class MicrophoneService: ObservableObject {
     static let shared = MicrophoneService()
     
     @Published var availableMicrophones: [AudioDevice] = []
@@ -255,9 +255,6 @@ class MicrophoneService: ObservableObject {
         return currentMicrophone
     }
     
-    /// Activates the current microphone as the system default input for recording.
-    /// Falls back to the default microphone if the selected device cannot be set (e.g. a virtual
-    /// device whose host app isn't running), updating selection state accordingly.
     func activateForRecording() -> AudioDevice? {
         guard let device = getActiveMicrophone() else { return nil }
         if AppPreferences.shared.debugMode {

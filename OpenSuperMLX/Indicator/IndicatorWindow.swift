@@ -278,7 +278,6 @@ class IndicatorViewModel: ObservableObject {
     
     // MARK: - LLM Correction
     
-    /// Returns corrected text, the original text if correction is disabled, or `nil` if cancelled.
     private func runLLMCorrectionIfNeeded(on text: String) async -> String? {
         guard AppPreferences.shared.bedrockEnabled || forceLLMCorrection else {
             return text
@@ -310,7 +309,6 @@ class IndicatorViewModel: ObservableObject {
     private func startBlinking() {
         blinkTimer?.invalidate()
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            // Update UI on the main thread
             Task { @MainActor in
                 guard let self = self else { return }
                 self.isBlinking.toggle()
@@ -493,7 +491,6 @@ struct IndicatorWindow: View {
 struct IndicatorWindowPreview: View {
     @StateObject private var recordingVM = {
         let vm = IndicatorViewModel()
-//        vm.startRecording()
         return vm
     }()
     

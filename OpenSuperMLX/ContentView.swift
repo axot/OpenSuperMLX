@@ -7,10 +7,11 @@
 
 import AVFoundation
 import Combine
-import KeyboardShortcuts
 import os
 import SwiftUI
 import UniformTypeIdentifiers
+
+import KeyboardShortcuts
 
 @MainActor
 class ContentViewModel: ObservableObject {
@@ -106,7 +107,6 @@ class ContentViewModel: ObservableObject {
         guard !isLoadingMore && canLoadMore else { return }
         isLoadingMore = true
         
-        // Capture current state for async task
         let page = currentPage
         let limit = pageSize
         let query = currentSearchQuery
@@ -128,8 +128,8 @@ class ContentViewModel: ObservableObject {
                 }
                 
                 // Ensure we are still consistent with the request (basic check)
-                guard self.currentSearchQuery == query else { 
-                    return 
+                guard self.currentSearchQuery == query else {
+                    return
                 }
                 
                 if page == 0 {
@@ -266,7 +266,7 @@ class ContentViewModel: ObservableObject {
                 }
                 self.recordings.insert(result.recording, at: 0)
 
-                print("Transcription result: \(result.text)")
+                logger.info("Transcription result: \(result.text.prefix(100), privacy: .public)")
 
                 self.state = .idle
                 self.recordingDuration = 0
@@ -277,7 +277,6 @@ class ContentViewModel: ObservableObject {
                 guard let self = self else { return }
 
                 do {
-                    print("start decoding...")
                     let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
 
                     let timestamp = Date()
@@ -297,7 +296,7 @@ class ContentViewModel: ObservableObject {
                     }
                     self.recordings.insert(recording, at: 0)
 
-                    print("Transcription result: \(text)")
+                    logger.info("Transcription result: \(text.prefix(100), privacy: .public)")
                 } catch {
                     logger.error("Error transcribing audio: \(error, privacy: .public)")
                     try? FileManager.default.removeItem(at: tempURL)
@@ -450,7 +449,6 @@ struct ContentView: View {
                         if viewModel.recordings.isEmpty {
                             VStack(spacing: 16) {
                                 if !debouncedSearchText.isEmpty {
-                                    // Show "no results" for search
                                     Image(systemName: "magnifyingglass")
                                         .font(.system(size: 40))
                                         .foregroundColor(.secondary)
@@ -466,7 +464,6 @@ struct ContentView: View {
                                         .multilineTextAlignment(.center)
                                         .padding(.horizontal)
                                 } else {
-                                    // Show "start recording" tip
                                     Image(systemName: "arrow.down.circle")
                                         .font(.system(size: 40))
                                         .foregroundColor(.secondary)
@@ -633,10 +630,8 @@ struct ContentView: View {
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isRecording)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.state)
 
-                        // Нижняя панель с подсказкой и кнопками управления
                         HStack(alignment: .bottom) {
                             VStack(alignment: .leading, spacing: 8) {
-                                // Подсказка о шорткате
                                 HStack(spacing: 6) {
                                     Text(currentShortcutDescription)
                                         .font(.caption)
@@ -647,7 +642,6 @@ struct ContentView: View {
                                 }
                                 .padding(.leading, 4)
 
-                                // Подсказка о drag-n-drop
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.down.doc.fill")
                                         .foregroundColor(.secondary)

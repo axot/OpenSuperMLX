@@ -4,8 +4,8 @@
 import AVFoundation
 import CoreMedia
 import Foundation
-import ScreenCaptureKit
 import os.log
+import ScreenCaptureKit
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "SystemAudioService")
 

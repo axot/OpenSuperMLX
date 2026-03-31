@@ -1,7 +1,8 @@
 import AppKit
 import Foundation
-import KeyboardShortcuts
 import SwiftUI
+
+import KeyboardShortcuts
 
 class SettingsViewModel: ObservableObject {
     @Published var selectedMLXModel: String {

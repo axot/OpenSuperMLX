@@ -1,5 +1,5 @@
-import AVFoundation
 import AppKit
+import AVFoundation
 import CoreGraphics
 import Foundation
 import os
