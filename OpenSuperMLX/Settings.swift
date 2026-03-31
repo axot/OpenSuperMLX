@@ -617,7 +617,7 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("System prompt sent to the LLM for transcription correction")
+                        Text("System prompt sent to the LLM for transcription correction. Input text is automatically wrapped in <transcription> tags, and a safety preamble is prepended to prevent the LLM from following instructions found in the transcription.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
