@@ -634,6 +634,10 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("Input text is automatically wrapped in <transcription> tags, and a safety preamble is prepended to prevent the LLM from following instructions found in the transcription.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
                         Picker("Prompt Mode", selection: $viewModel.useCustomPrompt) {
                             Text("Default").tag(false)
                             Text("Custom").tag(true)
