@@ -103,4 +103,9 @@ final class AppPreferences {
 
     @UserDefault(key: "useStreamingTranscription", defaultValue: true)
     var useStreamingTranscription: Bool
+
+    // MARK: - Audio Source
+
+    @UserDefault(key: "audioSourceMode", defaultValue: "auto")
+    var audioSourceMode: String
 }

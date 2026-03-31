@@ -1,8 +1,29 @@
 import AVFoundation
-import Foundation
 import Combine
 import CoreAudio
+import Foundation
 import os
+
+// MARK: - Audio Source Types
+
+enum AudioSourceMode: String, Codable {
+    case auto
+    case microphoneOnly
+}
+
+enum CaptureMode {
+    case micOnly
+    case dualTrack
+}
+
+struct ResolvedAudioSource {
+    let mode: CaptureMode
+    let outputType: OutputType
+    let callingApp: String?
+    let bundleID: String?
+}
+
+// MARK: - MicrophoneService
 
 class MicrophoneService: ObservableObject {
     static let shared = MicrophoneService()
@@ -10,7 +31,9 @@ class MicrophoneService: ObservableObject {
     @Published var availableMicrophones: [AudioDevice] = []
     @Published var selectedMicrophone: AudioDevice?
     @Published var currentMicrophone: AudioDevice?
+    @Published var audioSourceMode: AudioSourceMode = .auto
     
+    private var audioSourceModeCancellable: AnyCancellable?
     private var deviceChangeObserver: Any?
     private var timer: Timer?
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "MicrophoneService")
@@ -32,16 +55,64 @@ class MicrophoneService: ObservableObject {
     
     private init() {
         loadSavedMicrophone()
+        loadAudioSourceMode()
         refreshAvailableMicrophones()
         setupDeviceMonitoring()
         updateCurrentMicrophone()
+        setupAudioSourceModeSync()
     }
     
     deinit {
+        audioSourceModeCancellable?.cancel()
         if let observer = deviceChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         timer?.invalidate()
+    }
+
+    // MARK: - Audio Source Mode
+
+    private func loadAudioSourceMode() {
+        let raw = AppPreferences.shared.audioSourceMode
+        audioSourceMode = AudioSourceMode(rawValue: raw) ?? .auto
+    }
+
+    private func setupAudioSourceModeSync() {
+        audioSourceModeCancellable = $audioSourceMode
+            .dropFirst()
+            .sink { newMode in
+                AppPreferences.shared.audioSourceMode = newMode.rawValue
+            }
+    }
+
+    func resolveAudioSource() -> ResolvedAudioSource {
+        let outputType = OutputDeviceDetector.detectOutputType()
+
+        switch audioSourceMode {
+        case .microphoneOnly:
+            return ResolvedAudioSource(
+                mode: .micOnly,
+                outputType: outputType,
+                callingApp: nil,
+                bundleID: nil
+            )
+        case .auto:
+            let callResult = CallDetectionService.shared.detectActiveCall()
+            if callResult.isCallActive {
+                return ResolvedAudioSource(
+                    mode: .dualTrack,
+                    outputType: outputType,
+                    callingApp: callResult.callingApp,
+                    bundleID: callResult.bundleID
+                )
+            }
+            return ResolvedAudioSource(
+                mode: .micOnly,
+                outputType: outputType,
+                callingApp: nil,
+                bundleID: nil
+            )
+        }
     }
     
     private func setupDeviceMonitoring() {
