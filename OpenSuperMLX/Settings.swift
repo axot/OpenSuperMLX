@@ -78,8 +78,21 @@ class SettingsViewModel: ObservableObject {
         didSet { AppPreferences.shared.bedrockModelId = bedrockModelId }
     }
     
-    @Published var bedrockCorrectionPrompt: String {
-        didSet { AppPreferences.shared.bedrockCorrectionPrompt = bedrockCorrectionPrompt }
+    @Published var useCustomPrompt: Bool {
+        didSet {
+            guard !isInitializing else { return }
+            AppPreferences.shared.useCustomCorrectionPrompt = useCustomPrompt
+            if useCustomPrompt && customPromptText.isEmpty {
+                customPromptText = BedrockService.defaultCorrectionPrompt
+            }
+        }
+    }
+    
+    @Published var customPromptText: String {
+        didSet {
+            guard !isInitializing else { return }
+            AppPreferences.shared.customCorrectionPrompt = customPromptText
+        }
     }
 
     @Published var useStreamingTranscription: Bool {
@@ -87,6 +100,8 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.useStreamingTranscription = useStreamingTranscription
         }
     }
+    
+    private var isInitializing = true
     
     init() {
         let prefs = AppPreferences.shared
@@ -104,8 +119,10 @@ class SettingsViewModel: ObservableObject {
         self.bedrockSecretKey = prefs.bedrockSecretKey
         self.bedrockRegion = prefs.bedrockRegion
         self.bedrockModelId = prefs.bedrockModelId
-        self.bedrockCorrectionPrompt = prefs.bedrockCorrectionPrompt
+        self.useCustomPrompt = prefs.useCustomCorrectionPrompt
+        self.customPromptText = prefs.customCorrectionPrompt ?? BedrockService.defaultCorrectionPrompt
         self.useStreamingTranscription = prefs.useStreamingTranscription
+        isInitializing = false
     }
 }
 
@@ -617,24 +634,38 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("System prompt sent to the LLM for transcription correction")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Picker("Prompt Mode", selection: $viewModel.useCustomPrompt) {
+                            Text("Default").tag(false)
+                            Text("Custom").tag(true)
+                        }
+                        .pickerStyle(.segmented)
                         
-                        TextEditor(text: $viewModel.bedrockCorrectionPrompt)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 80)
-                            .padding(4)
-                            .background(Color(.textBackgroundColor).opacity(0.5))
-                            .cornerRadius(6)
-                        
-                        HStack {
-                            Spacer()
-                            Button("Reset to Default") {
-                                viewModel.bedrockCorrectionPrompt = BedrockService.defaultCorrectionPrompt
+                        if viewModel.useCustomPrompt {
+                            Text("Custom prompt preserved across app updates")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            TextEditor(text: $viewModel.customPromptText)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(minHeight: 80)
+                                .padding(4)
+                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .cornerRadius(6)
+                        } else {
+                            Text("Uses the built-in prompt, automatically updated with new app versions")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            ScrollView {
+                                Text(BedrockService.defaultCorrectionPrompt)
+                                    .font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
+                            .frame(minHeight: 80, maxHeight: 200)
+                            .padding(4)
+                            .background(Color(.textBackgroundColor).opacity(0.3))
+                            .cornerRadius(6)
                         }
                     }
                 }

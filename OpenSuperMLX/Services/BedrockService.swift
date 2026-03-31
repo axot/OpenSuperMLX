@@ -162,7 +162,7 @@ final class BedrockService {
                 inferenceConfig: inferenceConfig,
                 messages: [message],
                 modelId: prefs.bedrockModelId,
-                system: [.text(prefs.bedrockCorrectionPrompt)]
+                system: [.text(prefs.effectiveCorrectionPrompt)]
             )
 
             let response = try await withThrowingTaskGroup(of: ConverseOutput.self) { group in

@@ -28,23 +28,39 @@ final class AppPreferences {
     }
     
     private func migrateOldPreferences() {
-        if let oldLanguage = UserDefaults.standard.string(forKey: "whisperLanguage"),
-           UserDefaults.standard.string(forKey: "mlxLanguage") == nil {
-            UserDefaults.standard.set(oldLanguage, forKey: "mlxLanguage")
+        Self.migrateOldPreferences(defaults: .standard)
+    }
+    
+    static func migrateOldPreferences(defaults: UserDefaults) {
+        if let oldLanguage = defaults.string(forKey: "whisperLanguage"),
+           defaults.string(forKey: "mlxLanguage") == nil {
+            defaults.set(oldLanguage, forKey: "mlxLanguage")
         }
         
-        UserDefaults.standard.removeObject(forKey: "selectedEngine")
-        UserDefaults.standard.removeObject(forKey: "selectedWhisperModelPath")
-        UserDefaults.standard.removeObject(forKey: "fluidAudioModelVersion")
-        UserDefaults.standard.removeObject(forKey: "whisperLanguage")
-        UserDefaults.standard.removeObject(forKey: "noSpeechThreshold")
-        UserDefaults.standard.removeObject(forKey: "initialPrompt")
-        UserDefaults.standard.removeObject(forKey: "useBeamSearch")
-        UserDefaults.standard.removeObject(forKey: "beamSize")
-        UserDefaults.standard.removeObject(forKey: "modifierOnlyHotkey")
-        UserDefaults.standard.removeObject(forKey: "suppressBlankAudio")
-        UserDefaults.standard.removeObject(forKey: "useChineseITN")
-        UserDefaults.standard.removeObject(forKey: "useEnglishITN")
+        migrateCorrectionPrompt(defaults: defaults)
+        
+        defaults.removeObject(forKey: "selectedEngine")
+        defaults.removeObject(forKey: "selectedWhisperModelPath")
+        defaults.removeObject(forKey: "fluidAudioModelVersion")
+        defaults.removeObject(forKey: "whisperLanguage")
+        defaults.removeObject(forKey: "noSpeechThreshold")
+        defaults.removeObject(forKey: "initialPrompt")
+        defaults.removeObject(forKey: "useBeamSearch")
+        defaults.removeObject(forKey: "beamSize")
+        defaults.removeObject(forKey: "modifierOnlyHotkey")
+        defaults.removeObject(forKey: "suppressBlankAudio")
+        defaults.removeObject(forKey: "useChineseITN")
+        defaults.removeObject(forKey: "useEnglishITN")
+    }
+    
+    static func migrateCorrectionPrompt(defaults: UserDefaults) {
+        if let oldPrompt = defaults.string(forKey: "bedrockCorrectionPrompt") {
+            if oldPrompt != BedrockService.defaultCorrectionPrompt {
+                defaults.set(oldPrompt, forKey: "customCorrectionPrompt")
+                defaults.set(true, forKey: "useCustomCorrectionPrompt")
+            }
+            defaults.removeObject(forKey: "bedrockCorrectionPrompt")
+        }
     }
     
     @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
@@ -98,8 +114,18 @@ final class AppPreferences {
     @UserDefault(key: "bedrockModelId", defaultValue: "anthropic.claude-3-haiku-20240307-v1:0")
     var bedrockModelId: String
     
-    @UserDefault(key: "bedrockCorrectionPrompt", defaultValue: BedrockService.defaultCorrectionPrompt)
-    var bedrockCorrectionPrompt: String
+    @UserDefault(key: "useCustomCorrectionPrompt", defaultValue: false)
+    var useCustomCorrectionPrompt: Bool
+    
+    @OptionalUserDefault(key: "customCorrectionPrompt")
+    var customCorrectionPrompt: String?
+    
+    var effectiveCorrectionPrompt: String {
+        if useCustomCorrectionPrompt, let custom = customCorrectionPrompt, !custom.isEmpty {
+            return custom
+        }
+        return BedrockService.defaultCorrectionPrompt
+    }
 
     @UserDefault(key: "useStreamingTranscription", defaultValue: true)
     var useStreamingTranscription: Bool
