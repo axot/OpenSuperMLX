@@ -137,8 +137,7 @@ final class LLMCorrectionService {
             return trimmedResult
 
         } catch {
-            let errorDetail = String(describing: error)
-            logger.error("LLM correction failed: \(errorDetail, privacy: .public)")
+            logger.error("LLM correction failed: \(error, privacy: .public)")
             NotificationCenter.default.post(
                 name: .llmCorrectionFailed,
                 object: nil,

@@ -147,7 +147,6 @@ class IndicatorViewModel: ObservableObject {
                     return
                 }
                 
-                // Update recording in DB if correction changed the text
                 if finalText != result.text {
                     var updatedRecording = result.recording
                     updatedRecording.transcription = finalText
@@ -155,7 +154,7 @@ class IndicatorViewModel: ObservableObject {
                 }
                 
                 self.insertText(finalText)
-                print("Transcription result: \(finalText)")
+                logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
                 
                 self.isStreamingMode = false
                 self.delegate?.didFinishDecoding()
@@ -173,9 +172,8 @@ class IndicatorViewModel: ObservableObject {
                 decodingTask = Task { [weak self] in
                     guard let self = self else { return }
                     
-                    do {
-                        print("start decoding...")
-                        let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
+                        do {
+                            let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
                         
                         guard let finalText = await self.runLLMCorrectionIfNeeded(on: rawText) else {
                             self.delegate?.didFinishDecoding()
@@ -194,7 +192,7 @@ class IndicatorViewModel: ObservableObject {
                         self.recordingStore.addRecording(recording)
                         
                         self.insertText(finalText)
-                        print("Transcription result: \(finalText)")
+                        logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
                     } catch {
                         logger.error("Error transcribing audio: \(error, privacy: .public)")
                         try? FileManager.default.removeItem(at: tempURL)
@@ -216,7 +214,6 @@ class IndicatorViewModel: ObservableObject {
     
     // MARK: - LLM Correction
     
-    /// Returns corrected text, the original text if correction is disabled, or `nil` if cancelled.
     private func runLLMCorrectionIfNeeded(on text: String) async -> String? {
         guard AppPreferences.shared.llmCorrectionEnabled || forceLLMCorrection else {
             return text
@@ -248,7 +245,6 @@ class IndicatorViewModel: ObservableObject {
     private func startBlinking() {
         blinkTimer?.invalidate()
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            // Update UI on the main thread
             Task { @MainActor in
                 guard let self = self else { return }
                 self.isBlinking.toggle()

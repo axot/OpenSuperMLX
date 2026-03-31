@@ -40,7 +40,7 @@ struct OpenSuperMLXApp: App {
     init() {
         _ = ShortcutManager.shared
         _ = MicrophoneService.shared
-        BedrockService.requestNotificationPermission()
+        LLMCorrectionService.requestNotificationPermission()
         // MLX models are downloaded on-demand via MLXEngine
     }
 }

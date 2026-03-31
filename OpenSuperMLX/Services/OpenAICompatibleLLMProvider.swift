@@ -2,7 +2,7 @@
 // OpenSuperMLX
 
 import Foundation
-import os
+import os.log
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "OpenAICompatibleLLMProvider")
 

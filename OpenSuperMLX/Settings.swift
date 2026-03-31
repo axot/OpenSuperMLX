@@ -50,10 +50,6 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    @Published var bedrockEnabled: Bool {
-        didSet { AppPreferences.shared.bedrockEnabled = bedrockEnabled }
-    }
-    
     @Published var bedrockAuthMode: String {
         didSet { AppPreferences.shared.bedrockAuthMode = bedrockAuthMode }
     }
@@ -76,10 +72,6 @@ class SettingsViewModel: ObservableObject {
     
     @Published var bedrockModelId: String {
         didSet { AppPreferences.shared.bedrockModelId = bedrockModelId }
-    }
-    
-    @Published var bedrockCorrectionPrompt: String {
-        didSet { AppPreferences.shared.bedrockCorrectionPrompt = bedrockCorrectionPrompt }
     }
     
     @Published var llmProvider: String {
@@ -125,14 +117,12 @@ class SettingsViewModel: ObservableObject {
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
-        self.bedrockEnabled = prefs.bedrockEnabled
         self.bedrockAuthMode = prefs.bedrockAuthMode
         self.bedrockProfileName = prefs.bedrockProfileName
         self.bedrockAccessKey = prefs.bedrockAccessKey
         self.bedrockSecretKey = prefs.bedrockSecretKey
         self.bedrockRegion = prefs.bedrockRegion
         self.bedrockModelId = prefs.bedrockModelId
-        self.bedrockCorrectionPrompt = prefs.bedrockCorrectionPrompt
         self.llmProvider = prefs.llmProvider
         self.llmCorrectionEnabled = prefs.llmCorrectionEnabled
         self.llmCorrectionPrompt = prefs.llmCorrectionPrompt
