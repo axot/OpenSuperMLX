@@ -8,6 +8,13 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "OpenAICompatib
 
 final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 
+    private var llmURLSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForResource = 60
+        return URLSession(configuration: config)
+    }()
+
     let displayName = "OpenAI Compatible"
 
     var isConfigured: Bool {
@@ -54,7 +61,7 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 
         request.httpBody = try JSONEncoder.snakeCase.encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await sendWithRetry(request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LLMProviderError.networkError(underlying: URLError(.badServerResponse))
@@ -94,6 +101,46 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    private func sendWithRetry(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var lastError: Error?
+
+        for attempt in 1...3 {
+            try Task.checkCancellation()
+            do {
+                return try await sendWithConnectTimeout(request, timeout: 2.0)
+            } catch {
+                let isConnectionError = (error as? URLError).map {
+                    $0.code == .timedOut || $0.code == .networkConnectionLost || $0.code == .cannotConnectToHost
+                } ?? false
+
+                guard isConnectionError else { throw error }
+
+                lastError = error
+                logger.warning("Connection attempt \(attempt, privacy: .public)/3 failed: \(error.localizedDescription, privacy: .public)")
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+        }
+
+        try Task.checkCancellation()
+
+        logger.warning("All fast retries failed (\(lastError?.localizedDescription ?? "unknown", privacy: .public)), resetting session")
+        llmURLSession.invalidateAndCancel()
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForResource = 60
+        llmURLSession = URLSession(configuration: config)
+
+        return try await llmURLSession.data(for: request)
+    }
+
+    private func sendWithConnectTimeout(_ request: URLRequest, timeout: TimeInterval) async throws -> (Data, URLResponse) {
+        var timedRequest = request
+        timedRequest.timeoutInterval = timeout
+        return try await llmURLSession.data(for: timedRequest)
+    }
 
     private func parseCustomHeaders(_ json: String) -> [String: String] {
         guard !json.isEmpty,

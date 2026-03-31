@@ -5,10 +5,10 @@
 //  Created by user on 05.02.2025.
 //
 
-import AVFoundation
-import SwiftUI
 import AppKit
+import AVFoundation
 import Combine
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct OpenSuperMLXApp: App {
@@ -40,8 +40,6 @@ struct OpenSuperMLXApp: App {
     init() {
         _ = ShortcutManager.shared
         _ = MicrophoneService.shared
-        LLMCorrectionService.requestNotificationPermission()
-        // MLX models are downloaded on-demand via MLXEngine
     }
 }
 
@@ -165,12 +163,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateStatusBarMenu() {
         let menu = NSMenu()
         
-         menu.addItem(NSMenuItem(title: "OpenSuperMLX", action: #selector(openApp), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: "OpenSuperMLX", action: #selector(openApp), keyEquivalent: "o"))
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()
         
-        // Add language options
         for languageCode in LanguageUtil.availableLanguages {
             let languageName = LanguageUtil.languageNames[languageCode] ?? languageCode
             let languageItem = NSMenuItem(title: languageName, action: #selector(selectLanguage(_:)), keyEquivalent: "")
@@ -182,8 +179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         transcriptionLanguageItem.submenu = languageSubmenu
         menu.addItem(transcriptionLanguageItem)
-        
-        // Listen for language preference changes
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(languagePreferenceChanged),
@@ -273,11 +269,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     
     @objc private func selectLanguage(_ sender: NSMenuItem) {
         guard let languageCode = sender.representedObject as? String else { return }
-        
-        // Update preferences
+
         AppPreferences.shared.mlxLanguage = languageCode
-        
-        // Update menu item states
+
         if let submenu = sender.menu {
             for item in submenu.items {
                 item.state = .off

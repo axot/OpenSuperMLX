@@ -574,14 +574,12 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
                     
-                    if viewModel.llmCorrectionEnabled {
-                        Picker("Provider", selection: $viewModel.llmProvider) {
-                            ForEach(LLMProviderType.allCases, id: \.rawValue) { type in
-                                Text(type.displayName).tag(type.rawValue)
-                            }
+                    Picker("Provider", selection: $viewModel.llmProvider) {
+                        ForEach(LLMProviderType.allCases, id: \.rawValue) { type in
+                            Text(type.displayName).tag(type.rawValue)
                         }
-                        .pickerStyle(.segmented)
                     }
+                    .pickerStyle(.segmented)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -589,8 +587,7 @@ struct SettingsView: View {
                 .cornerRadius(12)
                 
                 // Provider-Specific Configuration
-                if viewModel.llmCorrectionEnabled {
-                    if LLMProviderType(rawValue: viewModel.llmProvider) == .bedrock {
+                if LLMProviderType(rawValue: viewModel.llmProvider) == .bedrock {
                         // Bedrock Authentication
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Authentication")
@@ -759,7 +756,6 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(.controlBackgroundColor).opacity(0.3))
                     .cornerRadius(12)
-                }
             }
             .padding()
         }

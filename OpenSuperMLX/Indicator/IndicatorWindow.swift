@@ -1,6 +1,6 @@
 import Cocoa
 import Combine
-import os
+import os.log
 import SwiftUI
 
 enum RecordingState {
@@ -22,7 +22,7 @@ protocol IndicatorViewDelegate: AnyObject {
 class IndicatorViewModel: ObservableObject {
     @Published var state: RecordingState = .idle
     @Published var isBlinking = false
-    @Published var recorder: AudioRecorder = .shared
+    let recorder: AudioRecorder = .shared
     @Published var isVisible = false
     @Published private(set) var isStreamingMode = false
     var forceLLMCorrection: Bool = false
@@ -123,7 +123,7 @@ class IndicatorViewModel: ObservableObject {
                     }
                 }
             } else {
-                if !useDualTrack && resolved.mode == .dualTrack {
+                if resolved.mode == .dualTrack {
                     logger.warning("Screen Recording permission not granted, falling back to mic-only")
                 }
 
@@ -218,7 +218,7 @@ class IndicatorViewModel: ObservableObject {
                             )
                         }
                     } else {
-                        self.logger.info("Skipping system audio transcription (duration=\(recordingStart.map { Date().timeIntervalSince($0) } ?? 0, format: .fixed(precision: 1), privacy: .public)s, hasURL=\(systemAudioURL != nil, privacy: .public))")
+                        self.logger.info("Skipping system audio transcription (duration=\(duration, format: .fixed(precision: 1), privacy: .public)s, hasURL=\(systemAudioURL != nil, privacy: .public))")
                     }
                 }
                 
@@ -266,7 +266,6 @@ class IndicatorViewModel: ObservableObject {
                     self.delegate?.didFinishDecoding()
                 }
             } else {
-                
                 logger.warning("No recording URL found after stopping recorder")
                 self.delegate?.didFinishDecoding()
             }
@@ -295,6 +294,11 @@ class IndicatorViewModel: ObservableObject {
         correctionTask = nil
         
         guard !Task.isCancelled else { return nil }
+
+        if let error = LLMCorrectionService.shared.lastErrorMessage {
+            ErrorToastManager.shared.show(error)
+        }
+
         return correctedText
     }
     
@@ -490,11 +494,8 @@ struct IndicatorWindow: View {
 }
 
 struct IndicatorWindowPreview: View {
-    @StateObject private var recordingVM = {
-        let vm = IndicatorViewModel()
-        return vm
-    }()
-    
+    @StateObject private var recordingVM = IndicatorViewModel()
+
     @StateObject private var decodingVM = {
         let vm = IndicatorViewModel()
         vm.startDecoding()

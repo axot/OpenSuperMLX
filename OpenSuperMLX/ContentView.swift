@@ -111,8 +111,7 @@ class ContentViewModel: ObservableObject {
         let limit = pageSize
         let query = currentSearchQuery
         let offset = page * limit
-        
-        
+
         Task {
             let newRecordings: [Recording]
             if query.isEmpty {
@@ -120,14 +119,12 @@ class ContentViewModel: ObservableObject {
             } else {
                 newRecordings = await recordingStore.searchRecordingsAsync(query: query, limit: limit, offset: offset)
             }
-            
-            
+
             await MainActor.run {
                 defer {
                     self.isLoadingMore = false
                 }
-                
-                // Ensure we are still consistent with the request (basic check)
+
                 guard self.currentSearchQuery == query else {
                     return
                 }
@@ -266,6 +263,10 @@ class ContentViewModel: ObservableObject {
                 }
                 self.recordings.insert(result.recording, at: 0)
 
+                if let error = LLMCorrectionService.shared.lastErrorMessage {
+                    ErrorToastManager.shared.show(error)
+                }
+
                 logger.info("Transcription result: \(result.text.prefix(100), privacy: .public)")
 
                 self.state = .idle
@@ -295,6 +296,10 @@ class ContentViewModel: ObservableObject {
                         self.currentSearchQuery = ""
                     }
                     self.recordings.insert(recording, at: 0)
+
+                    if let error = LLMCorrectionService.shared.lastErrorMessage {
+                        ErrorToastManager.shared.show(error)
+                    }
 
                     logger.info("Transcription result: \(text.prefix(100), privacy: .public)")
                 } catch {
@@ -338,10 +343,10 @@ class ContentViewModel: ObservableObject {
         }
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            let startTime = Date()
+            let now = Date()
             Task { @MainActor in
                 if let recordingStartTime = self.recordingStartTime {
-                    self.recordingDuration = startTime.timeIntervalSince(recordingStartTime)
+                    self.recordingDuration = now.timeIntervalSince(recordingStartTime)
                 }
             }
         }
@@ -411,7 +416,6 @@ struct ContentView: View {
                 PermissionsView(permissionsManager: permissionsManager)
             } else {
                 VStack(spacing: 0) {
-                    // Search bar
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)

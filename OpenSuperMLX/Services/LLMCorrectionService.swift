@@ -2,7 +2,6 @@
 // OpenSuperMLX
 
 import Foundation
-import UserNotifications
 import os.log
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "LLMCorrectionService")
@@ -11,6 +10,8 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "LLMCorrectionS
 final class LLMCorrectionService {
 
     static let shared = LLMCorrectionService(providerFactory: { resolveProvider() })
+
+    private(set) var lastErrorMessage: String?
 
     static let correctionPreamble = """
         The user message contains raw speech-to-text output wrapped in <transcription> tags. \
@@ -119,15 +120,10 @@ final class LLMCorrectionService {
         correctionPreamble + "\n\n" + userPrompt
     }
 
-    // MARK: - Notification Permission
-
-    static func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
     // MARK: - Public API
 
     func correctTranscription(_ text: String, forceEnabled: Bool = false) async -> String {
+        lastErrorMessage = nil
         let prefs = AppPreferences.shared
 
         guard forceEnabled || prefs.llmCorrectionEnabled else {
@@ -178,23 +174,16 @@ final class LLMCorrectionService {
 
         } catch {
             logger.error("LLM correction failed: \(error, privacy: .public)")
-            NotificationCenter.default.post(
-                name: .llmCorrectionFailed,
-                object: nil,
-                userInfo: ["error": error]
-            )
 
-            let content = UNMutableNotificationContent()
-            content.title = "LLM Correction Failed"
-            content.body = error.localizedDescription
-            content.sound = .default
+            if case .cancelled = error as? LLMProviderError {
+                return text
+            }
 
-            let request = UNNotificationRequest(
-                identifier: UUID().uuidString,
-                content: content,
-                trigger: nil
-            )
-            try? await UNUserNotificationCenter.current().add(request)
+            if let providerError = error as? LLMProviderError {
+                lastErrorMessage = providerError.userFacingMessage
+            } else {
+                lastErrorMessage = "LLM correction failed. Check Settings → LLM."
+            }
 
             return text
         }
