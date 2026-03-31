@@ -6,26 +6,18 @@ import XCTest
 
 final class LLMPreferencesMigrationTests: XCTestCase {
 
-    private let defaults = UserDefaults.standard
+    private var defaults: UserDefaults!
 
-    override func setUp() async throws {
-        try await super.setUp()
-        for key in ["bedrockEnabled", "bedrockCorrectionPrompt",
-                     "llmCorrectionEnabled", "llmProvider", "llmCorrectionPrompt",
-                     "llmMigrationCompleted",
-                     "openAIBaseURL", "openAIAPIKey", "openAIModel", "openAICustomHeaders"] {
-            defaults.removeObject(forKey: key)
-        }
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "LLMPreferencesMigrationTests")!
+        defaults.removePersistentDomain(forName: "LLMPreferencesMigrationTests")
     }
 
-    override func tearDown() async throws {
-        for key in ["bedrockEnabled", "bedrockCorrectionPrompt",
-                     "llmCorrectionEnabled", "llmProvider", "llmCorrectionPrompt",
-                     "llmMigrationCompleted",
-                     "openAIBaseURL", "openAIAPIKey", "openAIModel", "openAICustomHeaders"] {
-            defaults.removeObject(forKey: key)
-        }
-        try await super.tearDown()
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "LLMPreferencesMigrationTests")
+        defaults = nil
+        super.tearDown()
     }
 
     // MARK: - Migration Tests
@@ -33,7 +25,7 @@ final class LLMPreferencesMigrationTests: XCTestCase {
     func testMigration_BedrockEnabledTrue_MigratesCorrectly() {
         defaults.set(true, forKey: "bedrockEnabled")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
         XCTAssertTrue(defaults.bool(forKey: "llmCorrectionEnabled"))
         XCTAssertEqual(defaults.string(forKey: "llmProvider"), "bedrock")
@@ -43,28 +35,40 @@ final class LLMPreferencesMigrationTests: XCTestCase {
     func testMigration_BedrockEnabledFalse_MigratesCorrectly() {
         defaults.set(false, forKey: "bedrockEnabled")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
         XCTAssertFalse(defaults.bool(forKey: "llmCorrectionEnabled"))
         XCTAssertTrue(defaults.bool(forKey: "llmMigrationCompleted"))
     }
 
-    func testMigration_CustomPrompt_Preserved() {
+    func testMigration_CustomPrompt_MigratedToCustomMode() {
         defaults.set("My custom prompt", forKey: "bedrockCorrectionPrompt")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
-        XCTAssertEqual(defaults.string(forKey: "llmCorrectionPrompt"), "My custom prompt")
+        XCTAssertEqual(defaults.string(forKey: "customCorrectionPrompt"), "My custom prompt")
+        XCTAssertTrue(defaults.bool(forKey: "useCustomCorrectionPrompt"))
+        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
+    }
+
+    func testMigration_DefaultPrompt_NotMigratedToCustom() {
+        defaults.set(LLMCorrectionService.defaultCorrectionPrompt, forKey: "bedrockCorrectionPrompt")
+
+        AppPreferences.migrateOldPreferences(defaults: defaults)
+
+        XCTAssertNil(defaults.object(forKey: "customCorrectionPrompt"))
+        XCTAssertFalse(defaults.bool(forKey: "useCustomCorrectionPrompt"))
+        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
     }
 
     func testMigration_Idempotent() {
         defaults.set(true, forKey: "bedrockEnabled")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
         defaults.set(false, forKey: "llmCorrectionEnabled")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
         XCTAssertFalse(defaults.bool(forKey: "llmCorrectionEnabled"),
                         "Second migration should not overwrite existing value")
@@ -73,8 +77,9 @@ final class LLMPreferencesMigrationTests: XCTestCase {
     func testMigration_AlreadyMigrated_SkipsGracefully() {
         defaults.set(true, forKey: "llmCorrectionEnabled")
         defaults.set("openai", forKey: "llmProvider")
+        defaults.set(true, forKey: "llmMigrationCompleted")
 
-        AppPreferences.shared.migrateOldPreferences()
+        AppPreferences.migrateOldPreferences(defaults: defaults)
 
         XCTAssertTrue(defaults.bool(forKey: "llmCorrectionEnabled"))
         XCTAssertEqual(defaults.string(forKey: "llmProvider"), "openai",

@@ -82,10 +82,6 @@ class SettingsViewModel: ObservableObject {
         didSet { AppPreferences.shared.llmCorrectionEnabled = llmCorrectionEnabled }
     }
     
-    @Published var llmCorrectionPrompt: String {
-        didSet { AppPreferences.shared.llmCorrectionPrompt = llmCorrectionPrompt }
-    }
-    
     @Published var openAIBaseURL: String {
         didSet { AppPreferences.shared.openAIBaseURL = openAIBaseURL }
     }
@@ -101,12 +97,31 @@ class SettingsViewModel: ObservableObject {
     @Published var openAICustomHeaders: String {
         didSet { AppPreferences.shared.openAICustomHeaders = openAICustomHeaders }
     }
+    
+    @Published var useCustomPrompt: Bool {
+        didSet {
+            guard !isInitializing else { return }
+            AppPreferences.shared.useCustomCorrectionPrompt = useCustomPrompt
+            if useCustomPrompt && customPromptText.isEmpty {
+                customPromptText = LLMCorrectionService.defaultCorrectionPrompt
+            }
+        }
+    }
+    
+    @Published var customPromptText: String {
+        didSet {
+            guard !isInitializing else { return }
+            AppPreferences.shared.customCorrectionPrompt = customPromptText
+        }
+    }
 
     @Published var useStreamingTranscription: Bool {
         didSet {
             AppPreferences.shared.useStreamingTranscription = useStreamingTranscription
         }
     }
+    
+    private var isInitializing = true
     
     init() {
         let prefs = AppPreferences.shared
@@ -125,12 +140,14 @@ class SettingsViewModel: ObservableObject {
         self.bedrockModelId = prefs.bedrockModelId
         self.llmProvider = prefs.llmProvider
         self.llmCorrectionEnabled = prefs.llmCorrectionEnabled
-        self.llmCorrectionPrompt = prefs.llmCorrectionPrompt
         self.openAIBaseURL = prefs.openAIBaseURL
         self.openAIAPIKey = prefs.openAIAPIKey
         self.openAIModel = prefs.openAIModel
         self.openAICustomHeaders = prefs.openAICustomHeaders
+        self.useCustomPrompt = prefs.useCustomCorrectionPrompt
+        self.customPromptText = prefs.customCorrectionPrompt ?? LLMCorrectionService.defaultCorrectionPrompt
         self.useStreamingTranscription = prefs.useStreamingTranscription
+        isInitializing = false
     }
 }
 
@@ -688,31 +705,50 @@ struct SettingsView: View {
                         .cornerRadius(12)
                     }
                     
-                    // Correction Prompt (shared)
+                    // Correction Prompt
                     VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Text("Correction Prompt")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Button("Reset to Default") {
-                                viewModel.llmCorrectionPrompt = LLMCorrectionService.defaultCorrectionPrompt
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                        }
+                        Text("Correction Prompt")
+                            .font(.headline)
+                            .foregroundColor(.primary)
                         
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("System prompt sent to the LLM for transcription correction")
+                            Text("Input text is automatically wrapped in <transcription> tags, and a safety preamble is prepended to prevent the LLM from following instructions found in the transcription.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             
-                            TextEditor(text: $viewModel.llmCorrectionPrompt)
-                                .font(.system(.body, design: .monospaced))
-                                .frame(minHeight: 80)
+                            Picker("Prompt Mode", selection: $viewModel.useCustomPrompt) {
+                                Text("Default").tag(false)
+                                Text("Custom").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            
+                            if viewModel.useCustomPrompt {
+                                Text("Custom prompt preserved across app updates")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                TextEditor(text: $viewModel.customPromptText)
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(minHeight: 80)
+                                    .padding(4)
+                                    .background(Color(.textBackgroundColor).opacity(0.5))
+                                    .cornerRadius(6)
+                            } else {
+                                Text("Uses the built-in prompt, automatically updated with new app versions")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                ScrollView {
+                                    Text(LLMCorrectionService.defaultCorrectionPrompt)
+                                        .font(.system(.body, design: .monospaced))
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(minHeight: 80, maxHeight: 200)
                                 .padding(4)
-                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .background(Color(.textBackgroundColor).opacity(0.3))
                                 .cornerRadius(6)
+                            }
                         }
                     }
                     .padding()
@@ -874,4 +910,3 @@ struct MLXModelPickerItemView: View {
         }
     }
 }
-

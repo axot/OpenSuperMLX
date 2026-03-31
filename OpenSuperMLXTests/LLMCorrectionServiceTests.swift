@@ -18,13 +18,13 @@ final class LLMCorrectionServiceTests: XCTestCase {
         sut = LLMCorrectionService(providerFactory: { [mockProvider] in mockProvider! })
         defaults.set(true, forKey: "llmCorrectionEnabled")
         defaults.set("bedrock", forKey: "llmProvider")
-        defaults.set("Test system prompt", forKey: "llmCorrectionPrompt")
+        defaults.set(false, forKey: "useCustomCorrectionPrompt")
     }
 
     override func tearDown() async throws {
         sut = nil
         mockProvider = nil
-        for key in ["llmCorrectionEnabled", "llmProvider", "llmCorrectionPrompt"] {
+        for key in ["llmCorrectionEnabled", "llmProvider", "useCustomCorrectionPrompt", "customCorrectionPrompt"] {
             defaults.removeObject(forKey: key)
         }
         try await super.tearDown()
@@ -88,15 +88,18 @@ final class LLMCorrectionServiceTests: XCTestCase {
         XCTAssertEqual(result, "hello")
     }
 
-    func testCorrectTranscription_PassesSystemPromptFromPreferences() async {
+    func testCorrectTranscription_PassesBuiltSystemPrompt() async {
+        defaults.set(true, forKey: "useCustomCorrectionPrompt")
+        defaults.set("Test custom prompt", forKey: "customCorrectionPrompt")
         mockProvider.correctResult = "corrected"
         _ = await sut.correctTranscription("hello")
-        XCTAssertEqual(mockProvider.lastSystemPrompt, "Test system prompt")
+        let expectedPrompt = LLMCorrectionService.buildSystemPrompt(userPrompt: "Test custom prompt")
+        XCTAssertEqual(mockProvider.lastSystemPrompt, expectedPrompt)
     }
 
-    func testCorrectTranscription_PassesTrimmedText() async {
+    func testCorrectTranscription_PassesWrappedText() async {
         mockProvider.correctResult = "corrected"
         _ = await sut.correctTranscription("  hello world  ")
-        XCTAssertEqual(mockProvider.lastText, "hello world")
+        XCTAssertEqual(mockProvider.lastText, "<transcription>\nhello world\n</transcription>")
     }
 }
