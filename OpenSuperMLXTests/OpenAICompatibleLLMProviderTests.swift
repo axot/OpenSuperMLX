@@ -7,10 +7,13 @@ import XCTest
 
 final class OpenAICompatibleLLMProviderTests: XCTestCase {
 
-    private let defaults = UserDefaults.standard
+    private static let suiteName = "OpenAICompatibleLLMProviderTests"
+    private var defaults: UserDefaults!
 
     override func setUp() async throws {
         try await super.setUp()
+        defaults = UserDefaults(suiteName: Self.suiteName)!
+        AppPreferences.store = defaults
         defaults.set("https://api.openai.com/v1", forKey: "openAIBaseURL")
         defaults.set("test-key", forKey: "openAIAPIKey")
         defaults.set("gpt-4o-mini", forKey: "openAIModel")
@@ -18,9 +21,9 @@ final class OpenAICompatibleLLMProviderTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        for key in ["openAIBaseURL", "openAIAPIKey", "openAIModel", "openAICustomHeaders"] {
-            defaults.removeObject(forKey: key)
-        }
+        defaults.removePersistentDomain(forName: Self.suiteName)
+        AppPreferences.store = .standard
+        defaults = nil
         try await super.tearDown()
     }
 

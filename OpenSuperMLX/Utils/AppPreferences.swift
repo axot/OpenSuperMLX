@@ -6,8 +6,8 @@ struct UserDefault<T> {
     let defaultValue: T
     
     var wrappedValue: T {
-        get { UserDefaults.standard.object(forKey: key) as? T ?? defaultValue }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { AppPreferences.store.object(forKey: key) as? T ?? defaultValue }
+        set { AppPreferences.store.set(newValue, forKey: key) }
     }
 }
 
@@ -16,13 +16,18 @@ struct OptionalUserDefault<T> {
     let key: String
     
     var wrappedValue: T? {
-        get { UserDefaults.standard.object(forKey: key) as? T }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { AppPreferences.store.object(forKey: key) as? T }
+        set { AppPreferences.store.set(newValue, forKey: key) }
     }
 }
 
 final class AppPreferences {
     static let shared = AppPreferences()
+    
+    /// The UserDefaults backing store for all preference properties.
+    /// Override in test setUp; reset to `.standard` in tearDown.
+    static var store: UserDefaults = .standard
+    
     private init() {
         migrateOldPreferences()
     }

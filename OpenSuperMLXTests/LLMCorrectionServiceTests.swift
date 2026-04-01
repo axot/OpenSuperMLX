@@ -8,12 +8,15 @@ import XCTest
 @MainActor
 final class LLMCorrectionServiceTests: XCTestCase {
 
+    private static let suiteName = "LLMCorrectionServiceTests"
     private var mockProvider: MockLLMProvider!
     private var sut: LLMCorrectionService!
-    private let defaults = UserDefaults.standard
+    private var defaults: UserDefaults!
 
     override func setUp() async throws {
         try await super.setUp()
+        defaults = UserDefaults(suiteName: Self.suiteName)!
+        AppPreferences.store = defaults
         mockProvider = MockLLMProvider()
         sut = LLMCorrectionService(providerFactory: { [mockProvider] in mockProvider! })
         defaults.set(true, forKey: "llmCorrectionEnabled")
@@ -24,9 +27,9 @@ final class LLMCorrectionServiceTests: XCTestCase {
     override func tearDown() async throws {
         sut = nil
         mockProvider = nil
-        for key in ["llmCorrectionEnabled", "llmProvider", "useCustomCorrectionPrompt", "customCorrectionPrompt"] {
-            defaults.removeObject(forKey: key)
-        }
+        defaults.removePersistentDomain(forName: Self.suiteName)
+        AppPreferences.store = .standard
+        defaults = nil
         try await super.tearDown()
     }
 

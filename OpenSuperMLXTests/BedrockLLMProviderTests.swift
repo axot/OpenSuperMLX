@@ -7,10 +7,13 @@ import XCTest
 
 final class BedrockLLMProviderTests: XCTestCase {
 
-    private let defaults = UserDefaults.standard
+    private static let suiteName = "BedrockLLMProviderTests"
+    private var defaults: UserDefaults!
 
     override func setUp() async throws {
         try await super.setUp()
+        defaults = UserDefaults(suiteName: Self.suiteName)!
+        AppPreferences.store = defaults
         defaults.set("us-east-1", forKey: "bedrockRegion")
         defaults.set("anthropic.claude-3-haiku-20240307-v1:0", forKey: "bedrockModelId")
         defaults.set("profile", forKey: "bedrockAuthMode")
@@ -20,10 +23,9 @@ final class BedrockLLMProviderTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        for key in ["bedrockRegion", "bedrockModelId", "bedrockAuthMode",
-                     "bedrockProfileName", "bedrockAccessKey", "bedrockSecretKey"] {
-            defaults.removeObject(forKey: key)
-        }
+        defaults.removePersistentDomain(forName: Self.suiteName)
+        AppPreferences.store = .standard
+        defaults = nil
         try await super.tearDown()
     }
 
