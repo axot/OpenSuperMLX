@@ -132,17 +132,26 @@ public class StreamingInferenceSession: @unchecked Sendable {
         case .coldStart:
             return
 
-        case .normal:
+        case .normal, .recoveryReset, .periodicReset:
             let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
-            let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
             let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
-            let parsedProvisional = TextMergeUtilities.parseASROutput(provisionalRaw)
             let currentChunkIndex = processor.chunkIndex
+
+            let provisionalText: String
+            if result.action == .normal && !result.provisionalTokens.isEmpty {
+                let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
+                provisionalText = TextMergeUtilities.parseASROutput(provisionalRaw).text
+            } else {
+                provisionalText = ""
+            }
 
             shared.withLock { state in
                 state.committedTokenIds = result.confirmedTokens
                 state.chunkCount = currentChunkIndex
-                if state.detectedLanguage.isEmpty && parsedConfirmed.language != "unknown" {
+                if result.action == .normal
+                    && state.detectedLanguage.isEmpty
+                    && parsedConfirmed.language != "unknown"
+                {
                     state.detectedLanguage = parsedConfirmed.language
                 }
                 state.mergedCommittedText = parsedConfirmed.text
@@ -150,23 +159,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
             continuation?.yield(.displayUpdate(
                 confirmedText: parsedConfirmed.text,
-                provisionalText: parsedProvisional.text
-            ))
-
-        case .recoveryReset, .periodicReset:
-            let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
-            let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
-            let currentChunkIndex = processor.chunkIndex
-
-            shared.withLock { state in
-                state.committedTokenIds = result.confirmedTokens
-                state.chunkCount = currentChunkIndex
-                state.mergedCommittedText = parsedConfirmed.text
-            }
-
-            continuation?.yield(.displayUpdate(
-                confirmedText: parsedConfirmed.text,
-                provisionalText: ""
+                provisionalText: provisionalText
             ))
         }
 
@@ -196,6 +189,25 @@ public class StreamingInferenceSession: @unchecked Sendable {
             configLanguage: config.language,
             detectedLanguage: detected
         )
+    }
+
+    // MARK: - Internal Reset
+
+    private func resetProcessingState() {
+        melProcessor.reset()
+        vadSegmenter.reset()
+        chunkProcessor = nil
+        chunkMelBuffer = nil
+        chunkMelFrameCount = 0
+    }
+
+    private func resetSharedState() {
+        shared.withLock {
+            $0.committedTokenIds = []
+            $0.chunkCount = 0
+            $0.mergedCommittedText = ""
+        }
+        Memory.clearCache()
     }
 
     // MARK: - Stop
@@ -229,7 +241,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         let finalText = shared.withLock { $0.mergedCommittedText }
-        Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(self.shared.withLock { $0.committedTokenIds.count })")
+        let tokenCount = shared.withLock { $0.committedTokenIds.count }
+        Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(tokenCount)")
 
         continuation?.yield(.ended(fullText: finalText))
         continuation?.finish()
@@ -237,19 +250,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
         sessionLock.withLock { _ in
             self.continuation = nil
             stopTask = nil
-            melProcessor.reset()
-            vadSegmenter.reset()
-            chunkProcessor = nil
-            chunkMelBuffer = nil
-            chunkMelFrameCount = 0
+            resetProcessingState()
         }
 
-        shared.withLock {
-            $0.committedTokenIds = []
-            $0.chunkCount = 0
-            $0.mergedCommittedText = ""
-        }
-        Memory.clearCache()
+        resetSharedState()
     }
 
     // MARK: - Cancel
@@ -261,17 +265,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
             stopTask = nil
             continuation?.finish()
             continuation = nil
-            melProcessor.reset()
-            vadSegmenter.reset()
-            chunkProcessor = nil
-            chunkMelBuffer = nil
-            chunkMelFrameCount = 0
+            resetProcessingState()
         }
-        shared.withLock {
-            $0.committedTokenIds = []
-            $0.chunkCount = 0
-            $0.mergedCommittedText = ""
-        }
-        Memory.clearCache()
+        resetSharedState()
     }
 }

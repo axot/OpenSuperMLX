@@ -80,7 +80,7 @@ struct StreamingDegenerationGuard: Sendable {
 
     // MARK: - Layer 1: Single-token run suppression
 
-    func suppressSingleTokenRuns(
+    private func suppressSingleTokenRuns(
         prefixTokens: [Int],
         newChunkTokens: [Int]
     ) -> (filtered: [Int], droppedCount: Int) {
