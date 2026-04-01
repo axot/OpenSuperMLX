@@ -12,10 +12,12 @@ final class LLMPreferencesMigrationTests: XCTestCase {
         super.setUp()
         defaults = UserDefaults(suiteName: "LLMPreferencesMigrationTests")!
         defaults.removePersistentDomain(forName: "LLMPreferencesMigrationTests")
+        AppPreferences.store = defaults
     }
 
     override func tearDown() {
         defaults.removePersistentDomain(forName: "LLMPreferencesMigrationTests")
+        AppPreferences.store = .standard
         defaults = nil
         super.tearDown()
     }

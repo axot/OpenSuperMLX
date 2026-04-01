@@ -11,10 +11,12 @@ final class AppPreferencesTests: XCTestCase {
         super.setUp()
         defaults = UserDefaults(suiteName: "AppPreferencesTests")!
         defaults.removePersistentDomain(forName: "AppPreferencesTests")
+        AppPreferences.store = defaults
     }
 
     override func tearDown() {
         defaults.removePersistentDomain(forName: "AppPreferencesTests")
+        AppPreferences.store = .standard
         defaults = nil
         super.tearDown()
     }
@@ -54,13 +56,6 @@ final class AppPreferencesTests: XCTestCase {
 
     func testEffectivePrompt_DefaultMode_ReturnsDefault() {
         let prefs = AppPreferences.shared
-        let originalFlag = prefs.useCustomCorrectionPrompt
-        let originalCustom = prefs.customCorrectionPrompt
-        defer {
-            prefs.useCustomCorrectionPrompt = originalFlag
-            prefs.customCorrectionPrompt = originalCustom
-        }
-
         prefs.useCustomCorrectionPrompt = false
         prefs.customCorrectionPrompt = "Some saved custom text"
 
@@ -69,13 +64,6 @@ final class AppPreferencesTests: XCTestCase {
 
     func testEffectivePrompt_CustomMode_ReturnsCustom() {
         let prefs = AppPreferences.shared
-        let originalFlag = prefs.useCustomCorrectionPrompt
-        let originalCustom = prefs.customCorrectionPrompt
-        defer {
-            prefs.useCustomCorrectionPrompt = originalFlag
-            prefs.customCorrectionPrompt = originalCustom
-        }
-
         let custom = "Custom correction prompt for test"
         prefs.useCustomCorrectionPrompt = true
         prefs.customCorrectionPrompt = custom
@@ -85,13 +73,6 @@ final class AppPreferencesTests: XCTestCase {
 
     func testEffectivePrompt_CustomModeEmptyText_FallsBackToDefault() {
         let prefs = AppPreferences.shared
-        let originalFlag = prefs.useCustomCorrectionPrompt
-        let originalCustom = prefs.customCorrectionPrompt
-        defer {
-            prefs.useCustomCorrectionPrompt = originalFlag
-            prefs.customCorrectionPrompt = originalCustom
-        }
-
         prefs.useCustomCorrectionPrompt = true
         prefs.customCorrectionPrompt = ""
 
