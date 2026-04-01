@@ -640,6 +640,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(inherited)";
 				INFOPLIST_FILE = "OpenSuperMLX/OpenSuperMLX-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OpenSuperMLX Debug";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX needs accessibility access to provide system-wide functionality.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -661,7 +662,7 @@
 					"$(inherited)",
 					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLX;
+				PRODUCT_BUNDLE_IDENTIFIER = org.axot.OpenSuperMLX.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
