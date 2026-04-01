@@ -19,16 +19,11 @@ private struct SessionState: Sendable {
     var chunkCount: Int = 0
     var mergedCommittedText: String = ""
     var detectedLanguage: String = ""
-    var isDecoding: Bool = false
 }
 
-/// Orchestrates streaming speech-to-text inference using VAD-segmented audio.
-///
-/// Audio flows through Silero VAD (36ms frames), accumulates speech samples,
-/// and triggers ASR decode on natural pause boundaries. Each speech segment
-/// is processed exactly once — no speculative/pending window.
+// MARK: - StreamingInferenceSession
+
 public class StreamingInferenceSession: @unchecked Sendable {
-    private static let eosTokenIds = [151645, 151643]
     private static let logger = Logger(subsystem: "MLXAudioSTT", category: "StreamingSession")
 
     private let model: Qwen3ASRModel
@@ -42,14 +37,12 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var isActive: Bool = false
     private var totalSamplesFed: Int = 0
 
-    private let shouldAbort = OSAllocatedUnfairLock(initialState: false)
+    private var chunkProcessor: ContinuousChunkProcessor?
+    private var chunkMelBuffer: MLXArray?
+    private var chunkMelFrameCount: Int = 0
 
     private var continuation: AsyncStream<TranscriptionEvent>.Continuation?
     private var stopTask: Task<Void, Never>?
-
-    // MARK: - KV Cache State
-
-    private var decoderCache: [KVCache]?
 
     public let events: AsyncStream<TranscriptionEvent>
 
@@ -68,14 +61,16 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.events = AsyncStream { continuation = $0 }
         self.continuation = continuation
         self.isActive = true
-        self.shouldAbort.withLock { $0 = false }
     }
 
-    /// Whether VAD loaded successfully.
     public var isVADAvailable: Bool { vadSegmenter.isAvailable }
 
-    /// Current VAD speech detection state for UI.
     public var isSpeechActive: Bool { vadSegmenter.isSpeechActive }
+
+    // 16000 Hz / 160 hop = 100 mel frames per second
+    private var chunkSizeMelFrames: Int {
+        Int(config.chunkDurationSeconds * 100)
+    }
 
     // MARK: - Audio Input
 
@@ -84,197 +79,123 @@ public class StreamingInferenceSession: @unchecked Sendable {
             guard isActive else { return }
             totalSamplesFed += samples.count
 
-            let segments = vadSegmenter.feedSamples(samples)
-            for segment in segments {
-                processCompletedSegment(segment)
+            _ = vadSegmenter.feedSamples(samples)
+            if let newMelFrames = melProcessor.process(samples: samples) {
+                accumulateChunkMel(newMelFrames)
+                processAccumulatedChunks()
             }
         }
     }
 
-    // MARK: - Segment Processing
+    // MARK: - Chunk Processing
 
-    private func processCompletedSegment(_ segment: SpeechSegment) {
+    private func accumulateChunkMel(_ newFrames: MLXArray) {
+        if let existing = chunkMelBuffer {
+            chunkMelBuffer = MLX.concatenated([existing, newFrames], axis: 0)
+        } else {
+            chunkMelBuffer = newFrames
+        }
+        chunkMelFrameCount = chunkMelBuffer!.dim(0)
+    }
+
+    private func processAccumulatedChunks() {
+        let chunkSize = chunkSizeMelFrames
+        guard chunkSize > 0 else { return }
+
+        while chunkMelFrameCount >= chunkSize {
+            let chunkMel = chunkMelBuffer![0..<chunkSize]
+            if chunkMelFrameCount > chunkSize {
+                chunkMelBuffer = chunkMelBuffer![chunkSize..<chunkMelFrameCount]
+            } else {
+                chunkMelBuffer = nil
+            }
+            chunkMelFrameCount = chunkMelBuffer?.dim(0) ?? 0
+            processChunk(melFrames: chunkMel, isFinal: false)
+        }
+    }
+
+    private func processChunk(melFrames: MLXArray, isFinal: Bool) {
         guard let tokenizer = model.tokenizer else { return }
 
-        let startTime = Date()
-
-        melProcessor.reset()
-
-        var melFrames: MLXArray?
-        if let frames = melProcessor.process(samples: segment.samples) {
-            melFrames = frames
-        }
-        if let flushedFrames = melProcessor.flush() {
-            if let existing = melFrames {
-                melFrames = MLX.concatenated([existing, flushedFrames], axis: 0)
-            } else {
-                melFrames = flushedFrames
-            }
-        }
-
-        guard let mel = melFrames else {
-            Self.logger.warning("no mel frames from segment of \(segment.samples.count) samples")
-            return
-        }
-
-        let audioFeatures = model.audioTower.encodeSingleWindow(mel)
-        eval(audioFeatures)
-        Memory.clearCache()
-
-        let isFirstSegment = shared.withLock { $0.chunkCount == 0 }
-        let (logits, _) = forwardAudioFeatures(audioFeatures)
-        if isFirstSegment {
-            Self.logger.info("[DIAG:KV] first segment — new KV cache created")
-        }
-        let recentContext = shared.withLock { $0.committedTokenIds }
-        let tokens = generateTokens(
-            initialLogits: logits,
-            tokenizer: tokenizer,
-            maxTokens: config.maxNewTokensPerChunk,
-            recentContext: recentContext
-        )
-        let lang = effectiveLanguage
-        let parsed = TextMergeUtilities.parseASROutput(tokenizer.decode(tokens: tokens))
-        let segmentText = parsed.text
-
-        let displayText = shared.withLock { state -> String in
-            state.committedTokenIds += tokens
-            state.chunkCount += 1
-
-            if state.detectedLanguage.isEmpty && parsed.language != "unknown" {
-                state.detectedLanguage = parsed.language
-            }
-
-            let beforeMerge = state.mergedCommittedText
-            state.mergedCommittedText = TextMergeUtilities.mergeChunkText(
-                accumulated: state.mergedCommittedText,
-                newChunk: segmentText,
-                language: lang
+        if chunkProcessor == nil {
+            chunkProcessor = ContinuousChunkProcessor(
+                model: model, tokenizer: tokenizer, config: config
             )
-            let afterMerge = state.mergedCommittedText
-            if beforeMerge == afterMerge && !segmentText.isEmpty {
-                Self.logger.warning("[DIAG:MERGE_DROP] segment text DROPPED by merge: '\(segmentText.prefix(30), privacy: .public)' — accumulated unchanged at '\(afterMerge.suffix(20), privacy: .public)'")
+        }
+        guard let processor = chunkProcessor else { return }
+
+        let startTime = Date()
+        let lang = effectiveLanguage
+        let result = processor.processChunk(melFrames: melFrames, language: lang, isFinal: isFinal)
+
+        switch result.action {
+        case .coldStart:
+            return
+
+        case .normal:
+            let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
+            let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
+            let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
+            let parsedProvisional = TextMergeUtilities.parseASROutput(provisionalRaw)
+            let currentChunkIndex = processor.chunkIndex
+
+            shared.withLock { state in
+                state.committedTokenIds = result.confirmedTokens
+                state.chunkCount = currentChunkIndex
+                if state.detectedLanguage.isEmpty && parsedConfirmed.language != "unknown" {
+                    state.detectedLanguage = parsedConfirmed.language
+                }
+                state.mergedCommittedText = parsedConfirmed.text
             }
-            return state.mergedCommittedText
+
+            continuation?.yield(.displayUpdate(
+                confirmedText: parsedConfirmed.text,
+                provisionalText: parsedProvisional.text
+            ))
+
+        case .recoveryReset, .periodicReset:
+            let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
+            let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
+            let currentChunkIndex = processor.chunkIndex
+
+            shared.withLock { state in
+                state.committedTokenIds = result.confirmedTokens
+                state.chunkCount = currentChunkIndex
+                state.mergedCommittedText = parsedConfirmed.text
+            }
+
+            continuation?.yield(.displayUpdate(
+                confirmedText: parsedConfirmed.text,
+                provisionalText: ""
+            ))
         }
 
         let decodeTime = Date().timeIntervalSince(startTime)
-        let totalTokens = shared.withLock { $0.committedTokenIds.count }
-        Self.logger.info("segment: duration=\(String(format: "%.1f", segment.durationSeconds), privacy: .public)s tokens=\(tokens.count) total=\(totalTokens) time=\(String(format: "%.2f", decodeTime), privacy: .public)s text='\(segmentText.prefix(40), privacy: .public)'")
-
-        continuation?.yield(.displayUpdate(confirmedText: displayText, provisionalText: ""))
-
         continuation?.yield(.stats(StreamingStats(
-            encodedWindowCount: shared.withLock { $0.chunkCount },
+            encodedWindowCount: processor.encodedWindowCount,
             totalAudioSeconds: Double(totalSamplesFed) / 16000.0,
-            tokensPerSecond: decodeTime > 0 ? Double(tokens.count) / decodeTime : 0,
+            tokensPerSecond: decodeTime > 0 ? Double(result.newlyEmittedTokens.count) / decodeTime : 0,
             realTimeFactor: 0,
             peakMemoryGB: Double(Memory.peakMemory) / 1e9
         )))
-
-        Memory.clearCache()
     }
 
     // MARK: - Decoder Helpers
 
+    static func resolveEffectiveLanguage(configLanguage: String, detectedLanguage: String) -> String {
+        let configLang = configLanguage.trimmingCharacters(in: .whitespaces).lowercased()
+        if !configLang.isEmpty && configLang != "auto" {
+            return configLanguage
+        }
+        return detectedLanguage.isEmpty ? configLanguage : detectedLanguage
+    }
+
     private var effectiveLanguage: String {
         let detected = shared.withLock { $0.detectedLanguage }
-        return detected.isEmpty ? config.language : detected
-    }
-
-    private func forwardAudioFeatures(_ audioFeatures: MLXArray) -> (logits: MLXArray, inputIds: MLXArray) {
-        let lang = effectiveLanguage
-
-        decoderCache = model.makeCache()
-
-        let context = shared.withLock { state -> String in
-            let text = state.mergedCommittedText
-            if text.count > 500 {
-                return String(text.suffix(500))
-            }
-            return text
-        }
-
-        let inputIds = model.buildPrompt(
-            numAudioTokens: audioFeatures.dim(0),
-            language: lang,
-            context: context
+        return StreamingInferenceSession.resolveEffectiveLanguage(
+            configLanguage: config.language,
+            detectedLanguage: detected
         )
-        let embeds = model.model.embedTokens(inputIds)
-        let inputsEmbeds = model.mergeAudioFeatures(
-            inputsEmbeds: embeds,
-            audioFeatures: audioFeatures.asType(embeds.dtype),
-            inputIds: inputIds
-        )
-        let logits = model.callAsFunction(
-            inputIds: inputIds,
-            inputEmbeddings: inputsEmbeds,
-            cache: decoderCache
-        )
-        eval(logits)
-        return (logits, inputIds)
-    }
-
-    // MARK: - Token Generation
-
-    private func generateTokens(
-        initialLogits: MLXArray,
-        tokenizer: any Tokenizer,
-        maxTokens: Int,
-        recentContext: [Int],
-        emitUpdates: ((_ newTokens: [Int]) -> Void)? = nil
-    ) -> [Int] {
-        var logits = initialLogits
-        var newTokenIds: [Int] = []
-        var recentTokenIds = Array(recentContext.suffix(config.repetitionContextSize))
-
-        for _ in 0..<maxTokens {
-            if shouldAbort.withLock({ $0 }) {
-                Self.logger.warning("generateTokens aborted after \(newTokenIds.count) tokens")
-                return newTokenIds
-            }
-
-            var lastLogits = logits[0..., -1, 0...]
-            if config.temperature > 0 {
-                lastLogits = lastLogits / config.temperature
-            }
-
-            if config.repetitionPenalty > 1.0 && !recentTokenIds.isEmpty {
-                let indices = MLXArray(recentTokenIds.map { UInt32($0) })
-                var selected = lastLogits[0..., indices]
-                selected = MLX.where(selected .< 0, selected * config.repetitionPenalty, selected / config.repetitionPenalty)
-                lastLogits[0..., indices] = selected
-            }
-
-            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
-            if Self.eosTokenIds.contains(nextToken) {
-                if newTokenIds.count < 3 {
-                    Self.logger.warning("[DIAG:EARLY_EOS] EOS after only \(newTokenIds.count) tokens — model may have ignored audio")
-                }
-                break
-            }
-            newTokenIds.append(nextToken)
-
-            recentTokenIds.append(nextToken)
-            if recentTokenIds.count > config.repetitionContextSize {
-                recentTokenIds.removeFirst()
-            }
-
-            if RepetitionDetector.detectTokenRepetition(newTokenIds) {
-                let removeCount = min(newTokenIds.count, 20)
-                Self.logger.warning("[DIAG:REP_DETECT] RepetitionDetector removing last \(removeCount) of \(newTokenIds.count) tokens")
-                newTokenIds.removeLast(removeCount)
-                break
-            }
-
-            emitUpdates?(newTokenIds)
-
-            let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
-            logits = model.callAsFunction(inputIds: nextTokenArray, cache: decoderCache)
-            eval(logits)
-        }
-
-        return newTokenIds
     }
 
     // MARK: - Stop
@@ -295,8 +216,13 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         sessionLock.withLock { _ in
-            if let remaining = vadSegmenter.flush(force: true) {
-                processCompletedSegment(remaining)
+            if let flushedMel = melProcessor.flush() {
+                accumulateChunkMel(flushedMel)
+            }
+            if let remainingMel = chunkMelBuffer {
+                processChunk(melFrames: remainingMel, isFinal: true)
+                chunkMelBuffer = nil
+                chunkMelFrameCount = 0
             }
         }
 
@@ -313,6 +239,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
             stopTask = nil
             melProcessor.reset()
             vadSegmenter.reset()
+            chunkProcessor = nil
+            chunkMelBuffer = nil
+            chunkMelFrameCount = 0
         }
 
         shared.withLock {
@@ -320,14 +249,12 @@ public class StreamingInferenceSession: @unchecked Sendable {
             $0.chunkCount = 0
             $0.mergedCommittedText = ""
         }
-        decoderCache = nil
         Memory.clearCache()
     }
 
     // MARK: - Cancel
 
     public func cancel() {
-        shouldAbort.withLock { $0 = true }
         sessionLock.withLock { _ in
             isActive = false
             stopTask?.cancel()
@@ -336,7 +263,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
             continuation = nil
             melProcessor.reset()
             vadSegmenter.reset()
-            decoderCache = nil
+            chunkProcessor = nil
+            chunkMelBuffer = nil
+            chunkMelFrameCount = 0
         }
         shared.withLock {
             $0.committedTokenIds = []
