@@ -35,16 +35,17 @@ enum CLITranscribe {
         fputs("Model loaded: \(modelId)\n", stderr)
 
         fputs("Loading audio: \(url.lastPathComponent)\n", stderr)
-        let audioArray: MLXArray
+        let samples: [Float]
+        let totalSamples: Int
         do {
             let (_, audio) = try loadAudioArray(from: url, sampleRate: 16000)
-            audioArray = audio
+            totalSamples = audio.dim(0)
+            samples = audio.asArray(Float.self)
         } catch {
             fputs("Error loading audio: \(error)\n", stderr)
             exit(1)
         }
 
-        let totalSamples = audioArray.dim(0)
         let durationSec = Float(totalSamples) / 16000.0
         fputs("Audio: \(totalSamples) samples, \(String(format: "%.1f", durationSec))s\n", stderr)
 
@@ -81,7 +82,6 @@ enum CLITranscribe {
             }
         }
 
-        let samples = audioArray.asArray(Float.self)
         let chunkSize = 3200  // 0.2s chunks to simulate streaming
         var offset = 0
         while offset < samples.count {

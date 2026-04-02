@@ -29,3 +29,61 @@ Added `libtext_processing_rs.dylib` to `run.sh` and `release.yml` but initially 
 - **`release.yml`**: Uses ad-hoc signing on CI (GitHub Actions doesn't have signing identity) — the Xcode build step handles final signing
 
 Forgetting the signing difference will cause notarization to fail even if the library is present.
+
+## MLX Streaming Memory — Lessons from a 12 GB Leak (2026-04)
+
+A 21-minute audio transcription caused MLX peak memory to grow from 3.9 GB to 12.3 GB. Root cause was three interacting issues in `ContinuousChunkProcessor`. All three must be addressed together — fixing only one or two is insufficient.
+
+### Lesson 1: Truncate accumulated state on periodic reset
+
+The mel spectrogram buffer (`accumulatedMel`) grew unboundedly across reset cycles. `reset(keepEmittedTokens: true)` preserved the full buffer, so every reset rebuilt the KV cache from the entire audio history.
+
+**Rule**: On periodic reset, truncate `accumulatedMel` to at most one incomplete encoder window. Call `eval()` on the truncated slice to break MLX's lazy reference to the parent array.
+
+### Lesson 2: Always set `Memory.cacheLimit` for long-running sessions
+
+MLX caches freed Metal buffers for reuse. The default limit is ~95% of system RAM. Each prefill pass allocates ~1.2 GB of transient buffers that get cached instead of released.
+
+**Rule**: Set `Memory.cacheLimit` at session start. Use the same value as the non-streaming path (currently 64 MB). Without this, RSS grows by ~1 GB above what `Memory.activeMemory` reports.
+
+### Lesson 3: Call `Memory.clearCache()` at every deallocation boundary
+
+`Memory.clearCache()` was only called after token decoding. Missing it after prefill and during reset caused ~500 MB of leaked cache per reset cycle.
+
+**Rule**: Call `Memory.clearCache()` after prefill (`prefillWithEmbeddingDiff`), after decode (`decodeTokens`), and at the end of `reset()`.
+
+### Lesson 4: MLX array slicing retains the parent
+
+`accumulatedMel![tailStart..<end]` creates a lazy view that holds a reference to the entire original array. Without `eval()`, "truncating" to 800 frames still keeps 98,000 frames in memory.
+
+**Rule**: After slicing an MLXArray to discard old data, always `eval()` the result to force materialization and release the parent.
+
+### Lesson 5: Match mel dtype to encoder weight dtype
+
+The audio encoder weights are bfloat16 but mel spectrogram is computed as float32. When float32 input meets bfloat16 weights, MLX promotes all intermediates to float32 — doubling transient memory from ~95 MB to ~750 MB per encoder forward pass.
+
+**Rule**: Cast mel to bfloat16 at the entry of `encodeSingleWindow`. Cast the sinusoidal positional embedding to match (`posEmb.asType(x.dtype)`) — it's hardcoded to float32 in its initializer. Verify with `x.dtype` logging after conv and after transformer layers.
+
+Note: `.asType(.float16)` does NOT help when weights are `.bfloat16` — MLX promotes float16 × bfloat16 back to float32.
+
+### Lesson 6: Intermediate eval() bounds concurrent tensor memory
+
+MLX lazy evaluation builds the full compute graph before executing. For 24 transformer layers evaluated at once, all layers' intermediate tensors can coexist in memory. Calling `eval()` every 8 layers forces materialization and allows earlier layers' intermediates to be freed.
+
+**Rule**: In transformer loops with many layers, insert `eval(hiddenStates)` periodically (every 8 layers). This reduces peak memory with minimal throughput impact (~3%).
+
+### Lesson 7: Encoder window cache must truly slide
+
+When `EncoderWindowCache` is full, the guard `encoderCache.count < maxEncoderWindows` in `encodeCompleteWindows()` prevented encoding new windows. But `addWindow()` already has eviction logic. The guard caused the tail mel (unencoded portion) to grow unboundedly, with `encodeSingleWindow(tailMel)` processing an ever-larger input.
+
+**Rule**: Remove the cache-full guard — let `addWindow()`'s built-in eviction handle the sliding window. Tail mel should never exceed one encoder window size (800 frames).
+
+### Lesson 8: Activity Monitor double-counts unified memory
+
+On Apple Silicon, Metal buffers are `StorageModeShared` — mmap'd into process address space. Activity Monitor includes them in "Memory" alongside the GPU allocation. `Memory.activeMemory` is the true GPU figure. RSS will always be higher.
+
+**Rule**: Use `Memory.activeMemory` / `Memory.peakMemory` for profiling, not Activity Monitor. See `docs/memory.md` for profiling instructions.
+
+### Reference Implementation
+
+antirez's C implementation ([antirez/qwen-asr](https://github.com/antirez/qwen-asr)) achieves flat O(1) memory by: never persisting mel (computed and freed per-chunk), hard-resetting the KV cache cursor each chunk, and compacting the raw audio buffer on reset. When porting streaming inference, follow this memory model.

@@ -495,7 +495,7 @@ public class Qwen3ASRAudioEncoder: Module {
             x = convOut(x)  // [batchLen, t, d_model]
 
             // Add positional embeddings
-            let posEmb = positionalEmbedding(x.dim(1))
+            let posEmb = positionalEmbedding(x.dim(1)).asType(x.dtype)
             x = x + posEmb.expandedDimensions(axis: 0)
 
             eval(x) 
@@ -588,7 +588,8 @@ public class Qwen3ASRAudioEncoder: Module {
     ///   Frames are automatically split into conv-sized chunks internally.
     /// - Returns: Encoded features `[numTokens, outputDim]`
     public func encodeSingleWindow(_ melFrames: MLXArray) -> MLXArray {
-        let numFrames = melFrames.dim(0)
+        let mel = melFrames.asType(.bfloat16)
+        let numFrames = mel.dim(0)
         let chunkSize = nWindow * 2  // 100 mel frames per conv chunk
 
         // Split into conv-sized chunks
@@ -599,7 +600,7 @@ public class Qwen3ASRAudioEncoder: Module {
         for j in 0..<numChunks {
             let start = j * chunkSize
             let end = min(start + chunkSize, numFrames)
-            let chunk = melFrames[start..<end]  // [clen, nMels]
+            let chunk = mel[start..<end]  // [clen, nMels]
             let transposed = chunk.transposed(1, 0)  // [nMels, clen]
             chunks.append(transposed)
             chunkLengths.append(end - start)
@@ -639,7 +640,7 @@ public class Qwen3ASRAudioEncoder: Module {
         x = x.transposed(0, 2, 3, 1).reshaped(numChunks, t, c * f)
         x = convOut(x)
 
-        let posEmb = positionalEmbedding(x.dim(1))
+        let posEmb = positionalEmbedding(x.dim(1)).asType(x.dtype)
         x = x + posEmb.expandedDimensions(axis: 0)
         eval(x)
 
@@ -655,11 +656,13 @@ public class Qwen3ASRAudioEncoder: Module {
 
         // Self-attention across the full window (no cross-window mask needed)
         hiddenStates = hiddenStates.expandedDimensions(axis: 0)  // [1, totalTokens, dModel]
-        for layer in layers {
+        for (i, layer) in layers.enumerated() {
             hiddenStates = layer(hiddenStates, mask: nil)
+            if (i + 1) % 8 == 0 {
+                eval(hiddenStates)
+            }
         }
         eval(hiddenStates)
-
         hiddenStates = hiddenStates.squeezed(axis: 0)  // [totalTokens, dModel]
 
         // Post-processing

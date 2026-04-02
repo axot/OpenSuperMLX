@@ -57,6 +57,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
         )
         self.vadSegmenter = VADSegmenter()
 
+        Memory.cacheLimit = 64 * 1024 * 1024
+
         var continuation: AsyncStream<TranscriptionEvent>.Continuation!
         self.events = AsyncStream { continuation = $0 }
         self.continuation = continuation

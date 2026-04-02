@@ -179,12 +179,26 @@ class ContinuousChunkProcessor {
         if !keepEmittedTokens {
             accumulatedMel = nil
             accumulatedMelFrameCount = 0
+        } else {
+            let windowSize = config.encoderWindowSizeMelFrames
+            let tailStart = (accumulatedMelFrameCount / windowSize) * windowSize
+            if tailStart > 0 {
+                if tailStart < accumulatedMelFrameCount {
+                    let truncated = accumulatedMel![tailStart..<accumulatedMelFrameCount]
+                    eval(truncated)
+                    accumulatedMel = truncated
+                } else {
+                    accumulatedMel = nil
+                }
+                accumulatedMelFrameCount = accumulatedMel?.dim(0) ?? 0
+            }
         }
 
         decoderCache = nil
         prevPrefillEmbeds = nil
         chunkIndex = 0
         degenerationGuard.resetStagnation()
+        Memory.clearCache()
     }
 
     // MARK: - Mel Accumulation
@@ -206,7 +220,7 @@ class ContinuousChunkProcessor {
             totalMelFrames: accumulatedMelFrameCount, windowSize: windowSize
         )
 
-        while encodedWindowCount < totalComplete && encoderCache.count < config.maxEncoderWindows {
+        while encodedWindowCount < totalComplete {
             let windowStart = encodedWindowCount * windowSize
             let windowEnd = windowStart + windowSize
             let windowMel = accumulatedMel![windowStart..<windowEnd]
@@ -268,7 +282,6 @@ class ContinuousChunkProcessor {
             current: inputsEmbeds, previous: prevPrefillEmbeds
         )
 
-        // Always prefill at least the last row to get valid logits
         let seqLen = inputsEmbeds.dim(1)
         matchedRows = min(matchedRows, seqLen - 1)
 
@@ -298,6 +311,7 @@ class ContinuousChunkProcessor {
         }
 
         eval(logits)
+        Memory.clearCache()
         prevPrefillEmbeds = inputsEmbeds
         return logits
     }
