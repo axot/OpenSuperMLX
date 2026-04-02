@@ -49,9 +49,7 @@ enum CLITranscribe {
         let durationSec = Float(totalSamples) / 16000.0
         fputs("Audio: \(totalSamples) samples, \(String(format: "%.1f", durationSec))s\n", stderr)
 
-        let config = StreamingConfig(
-            language: language
-        )
+        let config = StreamingConfig(language: language)
         let session = StreamingInferenceSession(model: model, config: config)
 
         let eventTask = Task {

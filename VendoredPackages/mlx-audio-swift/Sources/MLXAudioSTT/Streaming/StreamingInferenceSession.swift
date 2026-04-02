@@ -242,8 +242,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
         if Task.isCancelled { return }
 
-        let finalText = shared.withLock { $0.mergedCommittedText }
-        let tokenCount = shared.withLock { $0.committedTokenIds.count }
+        let (finalText, tokenCount) = shared.withLock { ($0.mergedCommittedText, $0.committedTokenIds.count) }
         Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(tokenCount)")
 
         continuation?.yield(.ended(fullText: finalText))

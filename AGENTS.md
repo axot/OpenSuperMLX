@@ -62,7 +62,9 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 
 ```
 OpenSuperMLX/                    # Main app target
-├── OpenSuperMLXApp.swift        # @main entry, AppState, AppDelegate, menu bar
+├── main.swift                   # Entry point: CLI (--transcribe) or GUI
+├── CLITranscribe.swift          # CLI transcription mode
+├── OpenSuperMLXApp.swift        # AppState, AppDelegate, menu bar
 ├── ContentView.swift            # Main UI (recording list, search, mic picker)
 ├── Settings.swift               # Settings UI + SettingsViewModel + Settings value type
 ├── AudioRecorder.swift          # AVAudioRecorder/Player wrapper (singleton)
@@ -78,7 +80,13 @@ OpenSuperMLX/                    # Main app target
 │   ├── TranscriptionEngine.swift  # Protocol definition
 │   └── MLXEngine.swift            # MLX-based implementation
 ├── Services/
-│   └── BedrockService.swift       # AWS Bedrock LLM post-transcription correction
+│   ├── AECService.swift           # Acoustic echo cancellation
+│   ├── BedrockLLMProvider.swift   # AWS Bedrock LLM provider
+│   ├── CallDetectionService.swift # Audio call detection
+│   ├── LLMCorrectionService.swift # Post-transcription LLM correction
+│   ├── LLMProvider.swift          # LLM provider protocol
+│   ├── OpenAICompatibleLLMProvider.swift # OpenAI-compatible LLM provider
+│   └── SystemAudioService.swift   # System audio capture
 ├── Models/
 │   └── Recording.swift          # Recording model + RecordingStore (GRDB)
 ├── Indicator/                   # Floating mini-recorder overlay
@@ -94,10 +102,14 @@ OpenSuperMLX/                    # Main app target
 │   ├── LanguageUtil.swift       # Language code ↔ display name mapping
 │   └── NotificationName+App.swift  # Typed Notification.Name extensions
 ├── Bridge.h                     # Bridging header (autocorrect + text-processing-rs)
-OpenSuperMLXTests/               # Unit tests (XCTest)
+OpenSuperMLXTests/               # Unit tests (XCTest) — primary test target
+OpenSuperMLXUnitTests/           # Integration tests (streaming inference)
+OpenSuperMLXUITests/             # UI tests
 asian-autocorrect/               # Git submodule — Rust autocorrect library
 text-processing-rs/              # Git submodule — Rust English ITN library (NeMo port)
 patches/                         # Patches applied to SPM checkouts by run.sh
+Scripts/                         # Utility scripts (keyboard layout mgmt, patch resolution)
+Resources/ITN/                   # ITN binary resources
 VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
 docs/                            # See [Reference Docs](#reference-docs) for when to consult each
@@ -280,11 +292,15 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 | [`docs/debugging.md`](docs/debugging.md) | **Investigating any bug or unexpected behavior.** Read before proposing fixes — covers CLI-first repro strategy and Logger-based tracing. |
 | [`docs/logging.md`](docs/logging.md) | **Adding or reading Logger statements.** Covers `os.Logger` setup, privacy annotations, and `log stream` / `log show` commands. |
 | [`docs/learnings.md`](docs/learnings.md) | **Before any release, or when touching native libraries.** Past mistakes and the New Native Library Checklist. |
+| [`docs/memory.md`](docs/memory.md) | **Profiling memory or touching streaming pipeline.** MLX GPU memory budget, encoder dtype, streaming memory invariants, and red flags for memory regressions. |
+| [`docs/release_build.md`](docs/release_build.md) | **Building a release.** Notarization command (`notarize_app.sh`). |
 
 ## Release
 
 ```bash
 ./make_release.sh <version> "<code_sign_identity>" [github_token]
+# Notarize only:
+./notarize_app.sh "<code_sign_identity>"
 ```
 
 **Before any release**, consult [`docs/learnings.md`](docs/learnings.md) — especially the **New Native Library Checklist** if any native libraries were added or modified since the last release. See [Reference Docs](#reference-docs).

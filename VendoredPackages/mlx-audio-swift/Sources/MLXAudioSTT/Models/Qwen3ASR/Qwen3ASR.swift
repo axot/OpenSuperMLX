@@ -338,6 +338,16 @@ public class Qwen3ASRAudioEncoder: Module {
 
     let positionalEmbedding: Qwen3ASRSinusoidalPE
 
+    private static func padChunksToMaxLength(
+        _ chunks: [MLXArray], lengths: [Int], maxLength: Int
+    ) -> [MLXArray] {
+        chunks.enumerated().map { idx, chunk in
+            let padWidth = maxLength - lengths[idx]
+            guard padWidth > 0 else { return chunk }
+            return MLX.padded(chunk, widths: [IntOrPair((0, 0)), IntOrPair((0, padWidth))])
+        }
+    }
+
     public init(_ config: Qwen3AudioEncoderConfig) {
         self.config = config
         let embedDim = config.dModel
@@ -449,19 +459,7 @@ public class Qwen3ASRAudioEncoder: Module {
         }
 
         let maxChunkLen = chunkLengths.max() ?? 0
-
-        // Pad chunks to max length
-        var paddedChunks: [MLXArray] = []
-        for (idx, chunk) in chunks.enumerated() {
-            let clen = chunkLengths[idx]
-            if clen < maxChunkLen {
-                let padWidth = maxChunkLen - clen
-                let padded = MLX.padded(chunk, widths: [IntOrPair((0, 0)), IntOrPair((0, padWidth))])
-                paddedChunks.append(padded)
-            } else {
-                paddedChunks.append(chunk)
-            }
-        }
+        let paddedChunks = Self.padChunksToMaxLength(chunks, lengths: chunkLengths, maxLength: maxChunkLen)
 
         // Compute output lengths after CNN for each chunk
         let chunkLensArray = MLXArray(chunkLengths.map { Int32($0) })
@@ -607,19 +605,7 @@ public class Qwen3ASRAudioEncoder: Module {
         }
 
         let maxChunkLen = chunkLengths.max() ?? 0
-
-        // Pad chunks to same length
-        var paddedChunks: [MLXArray] = []
-        for (idx, chunk) in chunks.enumerated() {
-            let clen = chunkLengths[idx]
-            if clen < maxChunkLen {
-                let padWidth = maxChunkLen - clen
-                let padded = MLX.padded(chunk, widths: [IntOrPair((0, 0)), IntOrPair((0, padWidth))])
-                paddedChunks.append(padded)
-            } else {
-                paddedChunks.append(chunk)
-            }
-        }
+        let paddedChunks = Self.padChunksToMaxLength(chunks, lengths: chunkLengths, maxLength: maxChunkLen)
 
         // Compute output lengths after CNN
         let chunkLensArray = MLXArray(chunkLengths.map { Int32($0) })
