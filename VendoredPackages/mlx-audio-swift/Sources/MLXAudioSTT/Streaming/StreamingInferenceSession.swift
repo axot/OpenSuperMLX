@@ -182,7 +182,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if !configLang.isEmpty && configLang != "auto" {
             return configLanguage
         }
-        return detectedLanguage.isEmpty ? configLanguage : detectedLanguage
+        return configLanguage
     }
 
     private var effectiveLanguage: String {

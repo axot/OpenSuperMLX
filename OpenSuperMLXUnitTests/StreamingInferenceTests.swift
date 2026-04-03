@@ -26,3 +26,40 @@ final class StreamingInferenceTests: XCTestCase {
         XCTAssertEqual(config.temperature, 0.3, accuracy: 0.001)
     }
 }
+
+// MARK: - resolveEffectiveLanguage
+
+final class ResolveEffectiveLanguageTests: XCTestCase {
+
+    func testAutoModeNeverOverridesWithDetectedLanguage() {
+        let result = StreamingInferenceSession.resolveEffectiveLanguage(
+            configLanguage: "auto",
+            detectedLanguage: "English"
+        )
+        XCTAssertEqual(result, "auto")
+    }
+
+    func testAutoModeReturnsAutoWhenNothingDetected() {
+        let result = StreamingInferenceSession.resolveEffectiveLanguage(
+            configLanguage: "auto",
+            detectedLanguage: ""
+        )
+        XCTAssertEqual(result, "auto")
+    }
+
+    func testExplicitLanguageIgnoresDetected() {
+        let result = StreamingInferenceSession.resolveEffectiveLanguage(
+            configLanguage: "Japanese",
+            detectedLanguage: "English"
+        )
+        XCTAssertEqual(result, "Japanese")
+    }
+
+    func testExplicitLanguageUsedWhenNothingDetected() {
+        let result = StreamingInferenceSession.resolveEffectiveLanguage(
+            configLanguage: "Chinese",
+            detectedLanguage: ""
+        )
+        XCTAssertEqual(result, "Chinese")
+    }
+}
