@@ -130,6 +130,7 @@ class TranscriptionService: ObservableObject {
             )]
 
             let mergedText = mergeTranscripts(micSegments: micSegments, systemSegments: systemSegments)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
             await RecordingStore.shared.updateRecordingProgressOnlySync(
                 recordingId,

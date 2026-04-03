@@ -231,13 +231,7 @@ final class MicrophoneService: ObservableObject {
     }
     
     func getDefaultMicrophone() -> AudioDevice? {
-        if let builtIn = availableMicrophones.first(where: { $0.isBuiltIn && !isVirtualDevice($0) }) {
-            return builtIn
-        }
-        if let physical = firstPhysicalMicrophone() {
-            return physical
-        }
-        return availableMicrophones.first
+        firstPhysicalMicrophone() ?? availableMicrophones.first
     }
 
     private func firstPhysicalMicrophone() -> AudioDevice? {
@@ -308,7 +302,7 @@ final class MicrophoneService: ObservableObject {
     }
 
     func isVirtualDevice(_ device: AudioDevice) -> Bool {
-        if let deviceID = getCoreAudioDeviceID(for: device) {
+        if getCoreAudioDeviceID(for: device) != nil {
             let transportType = UInt32(bitPattern: getTransportType(for: device))
             if transportType == kAudioDeviceTransportTypeVirtual
                 || transportType == kAudioDeviceTransportTypeAggregate
@@ -321,6 +315,8 @@ final class MicrophoneService: ObservableObject {
         return lower.contains("blackhole")
             || lower.contains("soundflower")
             || lower.contains("loopback")
+            || lower.contains("vb-cable")
+            || lower.contains("vb-audio")
             || lower.contains("aggregate device")
             || lower.contains("multi-output device")
     }

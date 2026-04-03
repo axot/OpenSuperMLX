@@ -199,50 +199,47 @@ class IndicatorViewModel: ObservableObject {
                 }
                 
                 let micTextEmpty = finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
-                if wasDualTrack && micTextEmpty {
+                let shouldProcessDualTrack: Bool
+                if wasDualTrack {
                     let duration = recordingStart.map { Date().timeIntervalSince($0) } ?? 0
-                    if DualTrackDecision.shouldProcessSystemAudio(
+                    shouldProcessDualTrack = DualTrackDecision.shouldProcessSystemAudio(
                         recordingDuration: duration,
                         systemAudioURL: systemAudioURL
-                    ) {
-                        let recordingId = result.recording.id
-                        if let systemText = await self.transcriptionService.handleDualTrackCompletion(
-                            systemAudioURL: systemAudioURL,
-                            outputType: outputType,
-                            micTranscription: finalText,
-                            recordingId: recordingId
-                        ) {
-                            if let corrected = await self.runLLMCorrectionIfNeeded(on: systemText) {
-                                self.insertText(corrected)
-                                logger.info("Transcription result (system audio): \(corrected.prefix(100), privacy: .public)")
-                            }
-                        }
-                    } else {
+                    )
+                    if !shouldProcessDualTrack {
                         self.logger.info("Skipping system audio transcription (duration=\(duration, format: .fixed(precision: 1), privacy: .public)s, hasURL=\(systemAudioURL != nil, privacy: .public))")
+                    }
+                } else {
+                    shouldProcessDualTrack = false
+                }
+
+                if wasDualTrack && micTextEmpty && shouldProcessDualTrack {
+                    let recordingId = result.recording.id
+                    if let systemText = await self.transcriptionService.handleDualTrackCompletion(
+                        systemAudioURL: systemAudioURL,
+                        outputType: outputType,
+                        micTranscription: finalText,
+                        recordingId: recordingId
+                    ) {
+                        if let corrected = await self.runLLMCorrectionIfNeeded(on: systemText) {
+                            self.insertText(corrected)
+                            logger.info("Transcription result (system audio): \(corrected.prefix(100), privacy: .public)")
+                        }
                     }
                 } else {
                     self.insertText(finalText)
                     logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
 
-                    if wasDualTrack {
-                        let duration = recordingStart.map { Date().timeIntervalSince($0) } ?? 0
-                        if DualTrackDecision.shouldProcessSystemAudio(
-                            recordingDuration: duration,
-                            systemAudioURL: systemAudioURL
-                        ) {
-                            let recordingId = result.recording.id
-                            let micText = finalText
-                            Task {
-                                await self.transcriptionService.handleDualTrackCompletion(
-                                    systemAudioURL: systemAudioURL,
-                                    outputType: outputType,
-                                    micTranscription: micText,
-                                    recordingId: recordingId
-                                )
-                            }
-                        } else {
-                            self.logger.info("Skipping system audio transcription (duration=\(duration, format: .fixed(precision: 1), privacy: .public)s, hasURL=\(systemAudioURL != nil, privacy: .public))")
+                    if shouldProcessDualTrack {
+                        let recordingId = result.recording.id
+                        let micText = finalText
+                        Task {
+                            await self.transcriptionService.handleDualTrackCompletion(
+                                systemAudioURL: systemAudioURL,
+                                outputType: outputType,
+                                micTranscription: micText,
+                                recordingId: recordingId
+                            )
                         }
                     }
                 }
