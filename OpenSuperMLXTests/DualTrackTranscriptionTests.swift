@@ -110,4 +110,35 @@ final class DualTrackTranscriptionTests: XCTestCase {
         // Both kept; stable sort means mic first since it appears first in combined array
         XCTAssertEqual(result, "mic\nsys")
     }
+
+    // MARK: - handleDualTrackCompletion return value
+
+    func testHandleDualTrackCompletionReturnsSystemAudioText() async throws {
+        mockEngine.transcribeResult = "system audio text"
+        let tempDir = FileManager.default.temporaryDirectory
+        let fakeAudio = tempDir.appendingPathComponent("test_system_audio_\(UUID().uuidString).wav")
+        try Data([0]).write(to: fakeAudio)
+        defer { try? FileManager.default.removeItem(at: fakeAudio) }
+
+        let result = await sut.handleDualTrackCompletion(
+            systemAudioURL: fakeAudio,
+            outputType: .headphones,
+            micTranscription: "",
+            recordingId: UUID()
+        )
+
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result?.contains("system audio text") == true)
+    }
+
+    func testHandleDualTrackCompletionReturnsNilForNoSystemAudio() async {
+        let result = await sut.handleDualTrackCompletion(
+            systemAudioURL: nil,
+            outputType: .headphones,
+            micTranscription: "mic text",
+            recordingId: UUID()
+        )
+
+        XCTAssertNil(result)
+    }
 }

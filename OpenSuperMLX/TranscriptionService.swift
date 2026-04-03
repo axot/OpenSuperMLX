@@ -88,15 +88,16 @@ class TranscriptionService: ObservableObject {
         )]
     }
 
+    @discardableResult
     func handleDualTrackCompletion(
         systemAudioURL: URL?,
         outputType: OutputType,
         micTranscription: String,
         recordingId: UUID
-    ) async {
+    ) async -> String? {
         guard let systemAudioURL else {
             logger.info("No system audio track, using mic transcription only")
-            return
+            return nil
         }
 
         do {
@@ -118,7 +119,7 @@ class TranscriptionService: ObservableObject {
 
             guard !systemSegments.isEmpty else {
                 logger.info("System audio track was silent, using mic transcription only")
-                return
+                return nil
             }
 
             let micSegments = [TranscriptionSegment(
@@ -136,8 +137,10 @@ class TranscriptionService: ObservableObject {
                 progress: 1.0,
                 status: .completed
             )
+            return mergedText
         } catch {
             logger.error("Dual-track processing failed: \(error, privacy: .public)")
+            return nil
         }
     }
 
