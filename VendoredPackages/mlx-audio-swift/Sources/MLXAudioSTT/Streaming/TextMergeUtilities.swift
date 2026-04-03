@@ -45,4 +45,21 @@ enum TextMergeUtilities {
         }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    // MARK: - Overlap Merge
+
+    static func mergeWithOverlapRemoval(
+        prefix: String,
+        newText: String,
+        maxOverlap: Int = 200
+    ) -> String {
+        guard !prefix.isEmpty, !newText.isEmpty else { return prefix + newText }
+        let maxCheck = min(maxOverlap, prefix.count, newText.count)
+        for len in stride(from: maxCheck, through: 1, by: -1) {
+            if prefix.hasSuffix(String(newText.prefix(len))) {
+                return prefix + newText.dropFirst(len)
+            }
+        }
+        return prefix + newText
+    }
 }

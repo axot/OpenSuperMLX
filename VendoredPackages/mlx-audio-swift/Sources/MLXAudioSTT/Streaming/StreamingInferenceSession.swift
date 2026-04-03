@@ -19,6 +19,7 @@ private struct SessionState: Sendable {
     var chunkCount: Int = 0
     var mergedCommittedText: String = ""
     var detectedLanguage: String = ""
+    var preResetTextPrefix: String = ""
 }
 
 // MARK: - StreamingInferenceSession
@@ -147,7 +148,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 provisionalText = ""
             }
 
-            shared.withLock { state in
+            let displayConfirmed: String = shared.withLock { state in
                 state.committedTokenIds = result.confirmedTokens
                 state.chunkCount = currentChunkIndex
                 if result.action == .normal
@@ -156,11 +157,29 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 {
                     state.detectedLanguage = parsedConfirmed.language
                 }
-                state.mergedCommittedText = parsedConfirmed.text
+
+                switch result.action {
+                case .periodicReset, .recoveryReset:
+                    let merged = state.preResetTextPrefix.isEmpty
+                        ? parsedConfirmed.text
+                        : TextMergeUtilities.mergeWithOverlapRemoval(
+                            prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
+                    state.preResetTextPrefix = merged
+                    state.mergedCommittedText = merged
+
+                case .normal, .coldStart:
+                    if state.preResetTextPrefix.isEmpty {
+                        state.mergedCommittedText = parsedConfirmed.text
+                    } else {
+                        state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
+                            prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
+                    }
+                }
+                return state.mergedCommittedText
             }
 
             continuation?.yield(.displayUpdate(
-                confirmedText: parsedConfirmed.text,
+                confirmedText: displayConfirmed,
                 provisionalText: provisionalText
             ))
         }
@@ -208,6 +227,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
             $0.committedTokenIds = []
             $0.chunkCount = 0
             $0.mergedCommittedText = ""
+            $0.preResetTextPrefix = ""
         }
         Memory.clearCache()
     }
