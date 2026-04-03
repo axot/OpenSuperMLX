@@ -136,6 +136,51 @@ final class MicrophoneServiceBluetoothTests: XCTestCase {
     }
 }
 
+// MARK: - Virtual Device Detection
+
+final class MicrophoneServiceVirtualDeviceTests: XCTestCase {
+
+    func testVirtualDetection_BlackHole2ch() {
+        let device = MicrophoneService.AudioDevice(id: "BlackHole2ch_UID", name: "BlackHole 2ch", manufacturer: "Existential Audio Inc.", isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_BlackHole16ch() {
+        let device = MicrophoneService.AudioDevice(id: "BlackHole16ch_UID", name: "BlackHole 16ch", manufacturer: "Existential Audio Inc.", isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_Soundflower() {
+        let device = MicrophoneService.AudioDevice(id: "SoundflowerEngine:0", name: "Soundflower (2ch)", manufacturer: "Cycling '74", isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_LoopbackInName() {
+        let device = MicrophoneService.AudioDevice(id: "com.rogueamoeba.loopback", name: "Loopback Audio", manufacturer: "Rogue Amoeba", isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_AggregateDevice() {
+        let device = MicrophoneService.AudioDevice(id: "aggregate-123", name: "Aggregate Device", manufacturer: nil, isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_MultiOutputDevice() {
+        let device = MicrophoneService.AudioDevice(id: "multi-output-123", name: "Multi-Output Device", manufacturer: nil, isBuiltIn: false)
+        XCTAssertTrue(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_BuiltInMicIsNotVirtual() {
+        let device = MicrophoneService.AudioDevice(id: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", manufacturer: "Apple Inc.", isBuiltIn: true)
+        XCTAssertFalse(MicrophoneService.shared.isVirtualDevice(device))
+    }
+
+    func testVirtualDetection_USBMicIsNotVirtual() {
+        let device = MicrophoneService.AudioDevice(id: "usb-audio-device-123", name: "Blue Yeti", manufacturer: "Blue Microphones", isBuiltIn: false)
+        XCTAssertFalse(MicrophoneService.shared.isVirtualDevice(device))
+    }
+}
+
 // MARK: - Requires Connection
 
 final class MicrophoneServiceRequiresConnectionTests: XCTestCase {

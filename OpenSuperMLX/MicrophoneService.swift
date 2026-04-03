@@ -231,10 +231,18 @@ final class MicrophoneService: ObservableObject {
     }
     
     func getDefaultMicrophone() -> AudioDevice? {
-        if let builtIn = availableMicrophones.first(where: { $0.isBuiltIn }) {
+        if let builtIn = availableMicrophones.first(where: { $0.isBuiltIn && !isVirtualDevice($0) }) {
             return builtIn
         }
+        if let physical = firstPhysicalMicrophone() {
+            return physical
+        }
         return availableMicrophones.first
+    }
+
+    private func firstPhysicalMicrophone() -> AudioDevice? {
+        availableMicrophones.first(where: { $0.isBuiltIn && !isVirtualDevice($0) })
+            ?? availableMicrophones.first(where: { !isVirtualDevice($0) })
     }
     
     func selectMicrophone(_ device: AudioDevice) {
@@ -281,11 +289,40 @@ final class MicrophoneService: ObservableObject {
         }
         let matched = availableMicrophones.first { getCoreAudioDeviceID(for: $0) == defaultDeviceID }
         if let matched {
-            currentMicrophone = matched
-            logger.info("Auto mode: tracking system default mic \(matched.name, privacy: .public)")
+            if isVirtualDevice(matched) {
+                logger.info("Auto mode: system default mic \(matched.name, privacy: .public) is virtual, falling back to physical mic")
+                if let physical = firstPhysicalMicrophone() {
+                    currentMicrophone = physical
+                    logger.info("Auto mode: using \(physical.name, privacy: .public) instead")
+                } else {
+                    currentMicrophone = matched
+                    logger.warning("Auto mode: no physical mic found, using virtual device \(matched.name, privacy: .public)")
+                }
+            } else {
+                currentMicrophone = matched
+                logger.info("Auto mode: tracking system default mic \(matched.name, privacy: .public)")
+            }
         } else {
             logger.warning("activateSystemDefaultMicrophone: system default device \(defaultDeviceID, privacy: .public) not found in availableMicrophones")
         }
+    }
+
+    func isVirtualDevice(_ device: AudioDevice) -> Bool {
+        if let deviceID = getCoreAudioDeviceID(for: device) {
+            let transportType = UInt32(bitPattern: getTransportType(for: device))
+            if transportType == kAudioDeviceTransportTypeVirtual
+                || transportType == kAudioDeviceTransportTypeAggregate
+            {
+                return true
+            }
+        }
+
+        let lower = device.name.lowercased()
+        return lower.contains("blackhole")
+            || lower.contains("soundflower")
+            || lower.contains("loopback")
+            || lower.contains("aggregate device")
+            || lower.contains("multi-output device")
     }
 
     func isActiveMicrophoneBluetooth() -> Bool {
