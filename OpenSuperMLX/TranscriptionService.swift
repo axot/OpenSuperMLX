@@ -6,20 +6,6 @@ import MLXAudioSTT
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionService")
 
-// MARK: - Dual-Track Types
-
-enum SegmentSource: Equatable {
-    case microphone
-    case systemAudio
-}
-
-struct TranscriptionSegment {
-    let text: String
-    let startTime: TimeInterval
-    let endTime: TimeInterval
-    let source: SegmentSource
-}
-
 // MARK: -
 
 @MainActor
@@ -53,98 +39,6 @@ class TranscriptionService: ObservableObject {
         self.isLoading = false
     }
     
-    // MARK: - Dual-Track Transcription
-
-    func mergeTranscripts(micSegments: [TranscriptionSegment], systemSegments: [TranscriptionSegment]) -> String {
-        let allSegments = (micSegments + systemSegments).sorted { $0.startTime < $1.startTime }
-        return allSegments.map(\.text).joined(separator: "\n")
-    }
-
-    func processSystemAudioTrack(_ url: URL) async throws -> [TranscriptionSegment] {
-        guard let engine = currentEngine else {
-            throw TranscriptionError.contextInitializationFailed
-        }
-
-        let settings = Settings()
-        let result = try await Task.detached(priority: .userInitiated) {
-            try await engine.transcribeAudio(url: url, settings: settings)
-        }.value
-
-        guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return []
-        }
-
-        let duration: Float = await (try? Task.detached(priority: .userInitiated) {
-            let asset = AVAsset(url: url)
-            let d = try await asset.load(.duration)
-            return Float(CMTimeGetSeconds(d))
-        }.value) ?? 0.0
-
-        return [TranscriptionSegment(
-            text: result,
-            startTime: 0,
-            endTime: TimeInterval(duration),
-            source: .systemAudio
-        )]
-    }
-
-    @discardableResult
-    func handleDualTrackCompletion(
-        systemAudioURL: URL?,
-        outputType: OutputType,
-        micTranscription: String,
-        recordingId: UUID
-    ) async -> String? {
-        guard let systemAudioURL else {
-            logger.info("No system audio track, using mic transcription only")
-            return nil
-        }
-
-        do {
-            var audioToTranscribe = systemAudioURL
-
-            if outputType == .speakers || outputType == .unknown {
-                let micTrackURL = RecordingStore.shared.recordings
-                    .first(where: { $0.id == recordingId })?.url
-
-                if let micTrackURL {
-                    audioToTranscribe = try await AECService.shared.processRecording(
-                        micTrackURL: micTrackURL,
-                        systemAudioTrackURL: systemAudioURL
-                    )
-                }
-            }
-
-            let systemSegments = try await processSystemAudioTrack(audioToTranscribe)
-
-            guard !systemSegments.isEmpty else {
-                logger.info("System audio track was silent, using mic transcription only")
-                return nil
-            }
-
-            let micSegments = [TranscriptionSegment(
-                text: micTranscription,
-                startTime: 0,
-                endTime: 0,
-                source: .microphone
-            )]
-
-            let mergedText = mergeTranscripts(micSegments: micSegments, systemSegments: systemSegments)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            await RecordingStore.shared.updateRecordingProgressOnlySync(
-                recordingId,
-                transcription: mergedText,
-                progress: 1.0,
-                status: .completed
-            )
-            return mergedText
-        } catch {
-            logger.error("Dual-track processing failed: \(error, privacy: .public)")
-            return nil
-        }
-    }
-
     // MARK: - Cancellation
 
     func cancelTranscription() {

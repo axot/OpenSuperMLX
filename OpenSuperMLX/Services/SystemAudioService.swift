@@ -30,7 +30,7 @@ final class SystemAudioService: NSObject, ObservableObject {
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
-        config.sampleRate = 16000
+        config.sampleRate = 44100
         config.channelCount = 1
 
         // Minimize video overhead — ScreenCaptureKit requires a display but we only want audio
@@ -78,6 +78,14 @@ final class SystemAudioService: NSObject, ObservableObject {
         logger.info("System audio capture started (bundleID: \(bundleID ?? "all", privacy: .public))")
     }
 
+    nonisolated func drainAccumulatedSamples() -> [Float] {
+        accumulatedSamples.withLock { buffer in
+            let drained = buffer
+            buffer.removeAll(keepingCapacity: true)
+            return drained
+        }
+    }
+
     func stopCapture() async -> URL? {
         guard isCapturing, let stream else { return nil }
 
@@ -119,7 +127,7 @@ final class SystemAudioService: NSObject, ObservableObject {
     private func writeSamplesToWAV(_ samples: [Float], url: URL) throws {
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 16000,
+            sampleRate: 44100,
             channels: 1,
             interleaved: false
         ) else {

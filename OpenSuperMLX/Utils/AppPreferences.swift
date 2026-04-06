@@ -174,6 +174,6 @@ final class AppPreferences {
 
     // MARK: - Audio Source
 
-    @UserDefault(key: "audioSourceMode", defaultValue: "auto")
-    var audioSourceMode: String
+    @UserDefault(key: "speakerCaptureEnabled", defaultValue: false)
+    var speakerCaptureEnabled: Bool
 }

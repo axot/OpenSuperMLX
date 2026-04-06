@@ -4,25 +4,6 @@ import CoreAudio
 import Foundation
 import os
 
-// MARK: - Audio Source Types
-
-enum AudioSourceMode: String, Codable {
-    case auto
-    case microphoneOnly
-}
-
-enum CaptureMode {
-    case micOnly
-    case dualTrack
-}
-
-struct ResolvedAudioSource {
-    let mode: CaptureMode
-    let outputType: OutputType
-    let callingApp: String?
-    let bundleID: String?
-}
-
 // MARK: - MicrophoneService
 
 final class MicrophoneService: ObservableObject {
@@ -31,9 +12,9 @@ final class MicrophoneService: ObservableObject {
     @Published var availableMicrophones: [AudioDevice] = []
     @Published var selectedMicrophone: AudioDevice?
     @Published var currentMicrophone: AudioDevice?
-    @Published var audioSourceMode: AudioSourceMode = .auto
+    @Published var speakerCaptureEnabled: Bool = false
     
-    private var audioSourceModeCancellable: AnyCancellable?
+    private var speakerCaptureCancellable: AnyCancellable?
     private var deviceChangeObserver: Any?
     private var timer: Timer?
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "MicrophoneService")
@@ -55,65 +36,29 @@ final class MicrophoneService: ObservableObject {
     
     private init() {
         loadSavedMicrophone()
-        loadAudioSourceMode()
+        speakerCaptureEnabled = AppPreferences.shared.speakerCaptureEnabled
         refreshAvailableMicrophones()
         setupDeviceMonitoring()
         updateCurrentMicrophone()
-        setupAudioSourceModeSync()
+        setupSpeakerCaptureSync()
     }
     
     deinit {
-        audioSourceModeCancellable?.cancel()
+        speakerCaptureCancellable?.cancel()
         if let observer = deviceChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         timer?.invalidate()
     }
 
-    // MARK: - Audio Source Mode
+    // MARK: - Speaker Capture Sync
 
-    private func loadAudioSourceMode() {
-        let raw = AppPreferences.shared.audioSourceMode
-        audioSourceMode = AudioSourceMode(rawValue: raw) ?? .auto
-    }
-
-    private func setupAudioSourceModeSync() {
-        audioSourceModeCancellable = $audioSourceMode
+    private func setupSpeakerCaptureSync() {
+        speakerCaptureCancellable = $speakerCaptureEnabled
             .dropFirst()
-            .sink { newMode in
-                AppPreferences.shared.audioSourceMode = newMode.rawValue
+            .sink { newValue in
+                AppPreferences.shared.speakerCaptureEnabled = newValue
             }
-    }
-
-    func resolveAudioSource() -> ResolvedAudioSource {
-        let outputType = OutputDeviceDetector.detectOutputType()
-
-        switch audioSourceMode {
-        case .microphoneOnly:
-            return ResolvedAudioSource(
-                mode: .micOnly,
-                outputType: outputType,
-                callingApp: nil,
-                bundleID: nil
-            )
-        case .auto:
-            activateSystemDefaultMicrophone()
-            let callResult = CallDetectionService.shared.detectActiveCall()
-            if callResult.isCallActive {
-                return ResolvedAudioSource(
-                    mode: .dualTrack,
-                    outputType: outputType,
-                    callingApp: callResult.callingApp,
-                    bundleID: callResult.bundleID
-                )
-            }
-            return ResolvedAudioSource(
-                mode: .micOnly,
-                outputType: outputType,
-                callingApp: nil,
-                bundleID: nil
-            )
-        }
     }
     
     private func setupDeviceMonitoring() {
@@ -131,8 +76,19 @@ final class MicrophoneService: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshAvailableMicrophones()
-            self?.updateCurrentMicrophone()
+            guard let self else { return }
+            let previousMic = self.currentMicrophone
+            self.refreshAvailableMicrophones()
+            self.updateCurrentMicrophone()
+
+            if let previous = previousMic, !self.isDeviceAvailable(previous) {
+                self.logger.warning("Active microphone disconnected: \(previous.name, privacy: .public)")
+                NotificationCenter.default.post(
+                    name: .microphoneDisconnected,
+                    object: nil,
+                    userInfo: ["device": previous]
+                )
+            }
         }
     }
     
@@ -150,10 +106,7 @@ final class MicrophoneService: ObservableObject {
             position: .unspecified
         )
         
-        availableMicrophones = discoverySession.devices
-            .filter { device in
-                !device.uniqueID.contains("CADefaultDeviceAggregate")
-            }
+        let allDevices = discoverySession.devices
             .map { device in
                 let isBuiltIn = isBuiltInDevice(device)
                 return AudioDevice(
@@ -163,6 +116,9 @@ final class MicrophoneService: ObservableObject {
                     isBuiltIn: isBuiltIn
                 )
             }
+        availableMicrophones = allDevices.filter { device in
+            !isAggregateDevice(device) && hasRealInputStream(device)
+        }
         if AppPreferences.shared.debugMode {
             logger.debug("[DEBUG] Discovered \(self.availableMicrophones.count, privacy: .public) microphones: \(self.availableMicrophones.map { $0.name }.joined(separator: ", "), privacy: .public)")
         }
@@ -261,64 +217,20 @@ final class MicrophoneService: ObservableObject {
     func activateForRecording() -> AudioDevice? {
         guard let device = getActiveMicrophone() else { return nil }
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Activating microphone for recording: name=\(device.name, privacy: .public), isBluetooth=\(self.isBluetoothMicrophone(device), privacy: .public), isContinuity=\(self.isContinuityMicrophone(device), privacy: .public)")
+            logger.debug("[DEBUG] Activating microphone for recording: name=\(device.name, privacy: .public)")
         }
-        
-        if setAsSystemDefaultInput(device) {
-            return device
-        }
-        
-        logger.warning("Failed to set \(device.displayName, privacy: .public) as system default input, falling back to default microphone")
-        resetToDefault()
-        
-        guard let fallback = currentMicrophone,
-              setAsSystemDefaultInput(fallback) else { return nil }
-        return fallback
+        return device
     }
     
-    func activateSystemDefaultMicrophone() {
-        guard let defaultDeviceID = getCurrentSystemDefaultInputDevice() else {
-            logger.warning("activateSystemDefaultMicrophone: could not read system default input device")
-            return
-        }
-        let matched = availableMicrophones.first { getCoreAudioDeviceID(for: $0) == defaultDeviceID }
-        if let matched {
-            if isVirtualDevice(matched) {
-                logger.info("Auto mode: system default mic \(matched.name, privacy: .public) is virtual, falling back to physical mic")
-                if let physical = firstPhysicalMicrophone() {
-                    currentMicrophone = physical
-                    logger.info("Auto mode: using \(physical.name, privacy: .public) instead")
-                } else {
-                    currentMicrophone = matched
-                    logger.warning("Auto mode: no physical mic found, using virtual device \(matched.name, privacy: .public)")
-                }
-            } else {
-                currentMicrophone = matched
-                logger.info("Auto mode: tracking system default mic \(matched.name, privacy: .public)")
-            }
-        } else {
-            logger.warning("activateSystemDefaultMicrophone: system default device \(defaultDeviceID, privacy: .public) not found in availableMicrophones")
-        }
-    }
-
     func isVirtualDevice(_ device: AudioDevice) -> Bool {
-        if getCoreAudioDeviceID(for: device) != nil {
-            let transportType = UInt32(bitPattern: getTransportType(for: device))
-            if transportType == kAudioDeviceTransportTypeVirtual
-                || transportType == kAudioDeviceTransportTypeAggregate
-            {
-                return true
-            }
+        guard getCoreAudioDeviceID(for: device) != nil else {
+            logger.warning("Cannot map device to CoreAudio: \(device.name, privacy: .public), treating as physical")
+            return false
         }
-
-        let lower = device.name.lowercased()
-        return lower.contains("blackhole")
-            || lower.contains("soundflower")
-            || lower.contains("loopback")
-            || lower.contains("vb-cable")
-            || lower.contains("vb-audio")
-            || lower.contains("aggregate device")
-            || lower.contains("multi-output device")
+        let transportType = UInt32(bitPattern: getTransportType(for: device))
+        return transportType == kAudioDeviceTransportTypeVirtual
+            || transportType == kAudioDeviceTransportTypeAggregate
+            || transportType == kAudioDeviceTransportTypeAutoAggregate
     }
 
     func isActiveMicrophoneBluetooth() -> Bool {
@@ -381,7 +293,90 @@ final class MicrophoneService: ObservableObject {
         
         return status == noErr ? Int32(transportType) : 0
     }
-    
+
+    private func canBeDefaultInputDevice(_ device: AudioDevice) -> Bool {
+        guard let deviceID = getCoreAudioDeviceID(for: device) else { return false }
+
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceCanBeDefaultDevice,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var canBeDefault: UInt32 = 0
+        var propertySize = UInt32(MemoryLayout<UInt32>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(deviceID),
+            &propertyAddress,
+            0,
+            nil,
+            &propertySize,
+            &canBeDefault
+        )
+
+        return status == noErr && canBeDefault == 1
+    }
+
+    private func isAggregateDevice(_ device: AudioDevice) -> Bool {
+        let transportType = UInt32(bitPattern: getTransportType(for: device))
+        return transportType == kAudioDeviceTransportTypeAggregate
+            || transportType == kAudioDeviceTransportTypeAutoAggregate
+    }
+
+    // MARK: - Stream Inspection
+
+    private func hasRealInputStream(_ device: AudioDevice) -> Bool {
+        guard let deviceID = getCoreAudioDeviceID(for: device) else { return false }
+
+        var streamsAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var streamsSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &streamsAddress, 0, nil, &streamsSize) == noErr,
+              streamsSize > 0 else { return false }
+
+        let streamCount = Int(streamsSize) / MemoryLayout<AudioStreamID>.size
+        var streamIDs = [AudioStreamID](repeating: 0, count: streamCount)
+        guard AudioObjectGetPropertyData(deviceID, &streamsAddress, 0, nil, &streamsSize, &streamIDs) == noErr else {
+            return false
+        }
+
+        for streamID in streamIDs {
+            var dirAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioStreamPropertyDirection,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var direction: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(streamID, &dirAddress, 0, nil, &size, &direction) == noErr else {
+                continue
+            }
+            guard direction == 1 else { continue }
+
+            var termAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioStreamPropertyTerminalType,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var terminal: UInt32 = 0
+            size = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(streamID, &termAddress, 0, nil, &size, &terminal) == noErr else {
+                continue
+            }
+
+            if terminal != 0 {
+                return true
+            }
+        }
+
+        return false
+    }
+
     func isActiveMicrophoneContinuity() -> Bool {
         guard let device = getActiveMicrophone() else { return false }
         return isContinuityMicrophone(device)
@@ -454,30 +449,6 @@ final class MicrophoneService: ObservableObject {
         )
         
         return status == noErr ? audioDeviceID : nil
-    }
-    
-    func setAsSystemDefaultInput(_ device: AudioDevice) -> Bool {
-        guard let deviceID = getCoreAudioDeviceID(for: device) else {
-            return false
-        }
-        
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        
-        var mutableDeviceID = deviceID
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            UInt32(MemoryLayout<AudioDeviceID>.size),
-            &mutableDeviceID
-        )
-        
-        return status == noErr
     }
     
     func getCurrentSystemDefaultInputDevice() -> AudioDeviceID? {
@@ -588,7 +559,7 @@ final class MicrophoneService: ObservableObject {
     }
     
     func getInputChannelCount(for device: AudioDevice) -> Int {
-        guard let deviceID = getCoreAudioDeviceID(for: device) else { return 1 }
+        guard let deviceID = getCoreAudioDeviceID(for: device) else { return 0 }
         
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
@@ -598,13 +569,13 @@ final class MicrophoneService: ObservableObject {
         
         var propertySize: UInt32 = 0
         let sizeStatus = AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &propertySize)
-        guard sizeStatus == noErr, propertySize > 0 else { return 1 }
+        guard sizeStatus == noErr, propertySize > 0 else { return 0 }
         
         let bufferListRawPointer = UnsafeMutableRawPointer.allocate(byteCount: Int(propertySize), alignment: MemoryLayout<AudioBufferList>.alignment)
         defer { bufferListRawPointer.deallocate() }
         
         let status = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &propertySize, bufferListRawPointer)
-        guard status == noErr else { return 1 }
+        guard status == noErr else { return 0 }
         
         let bufferList = bufferListRawPointer.assumingMemoryBound(to: AudioBufferList.self)
         let bufferCount = Int(bufferList.pointee.mNumberBuffers)
@@ -617,7 +588,7 @@ final class MicrophoneService: ObservableObject {
             }
         }
         
-        return max(totalChannels, 1)
+        return totalChannels
     }
     #endif
 }

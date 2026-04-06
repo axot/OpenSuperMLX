@@ -23,12 +23,13 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var provisionalText = ""
     @Published private(set) var isStreaming = false
     @Published private(set) var isSpeechDetected = false
-    @Published private(set) var isDualTrackMode = false
 
     // MARK: - Private State
 
     private var audioEngine: AVAudioEngine?
-    private var audioConverter: AVAudioConverter?
+    private var audioMixer: AudioMixer?
+    private var nativeSampleRate: Double = 44100
+    private var speakerCaptureActiveForSession = false
     private var streamingSession: StreamingInferenceSession?
     private var wavWriter: StreamingWAVWriter?
     private var currentWAVURL: URL?
@@ -44,8 +45,7 @@ class StreamingAudioService: ObservableObject {
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
-    /// When not recording, cap ring buffer at 500ms (8000 samples at 16kHz) as pre-buffer.
-    private let preBufferCapacity = 8000
+    private let preBufferCapacity = 22050
     private var isEngineWarmed = false
 
     // MARK: - Init
@@ -59,8 +59,7 @@ class StreamingAudioService: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isStreaming {
-                    self.cancelStreaming()
-                    logger.info("Streaming cancelled due to microphone change")
+                    self.hotSwapMicrophone()
                 } else if self.isEngineWarmed {
                     self.coolDown()
                     self.warmUp()
@@ -74,77 +73,52 @@ class StreamingAudioService: ObservableObject {
     func warmUp() {
         guard !isEngineWarmed, audioEngine == nil else { return }
 
-        if MicrophoneService.shared.audioSourceMode == .microphoneOnly {
-            if let activeMic = MicrophoneService.shared.activateForRecording() {
-                logger.info("Warm-up: set input to \(activeMic.displayName, privacy: .public)")
+        let engine = AVAudioEngine()
+
+        let activeMic = MicrophoneService.shared.activateForRecording()
+
+        if let activeMic,
+           let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
+            var deviceID = coreAudioID
+            let status = AudioUnitSetProperty(
+                engine.inputNode.audioUnit!,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global, 0,
+                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status == noErr {
+                logger.info("Warm-up: bound input to \(activeMic.displayName, privacy: .public)")
+            } else {
+                logger.error("Warm-up: failed to bind input device (status \(status, privacy: .public))")
+            }
+        }
+
+        let inputNode = engine.inputNode
+
+        let isVirtual = activeMic.map { MicrophoneService.shared.isVirtualDevice($0) } ?? false
+        if !isVirtual {
+            do {
+                try inputNode.setVoiceProcessingEnabled(true)
+                logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
+            } catch {
+                logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
             }
         } else {
-            logger.info("Warm-up: auto mode, using system default input device")
+            logger.info("Warm-up: VoiceProcessingIO skipped for virtual device \(activeMic?.displayName ?? "unknown", privacy: .public)")
         }
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
+        self.nativeSampleRate = nativeFormat.sampleRate
 
-        let targetSampleRate: Double = 16000
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: targetSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            logger.error("Warm-up: failed to create target format")
-            return
-        }
-
-        let converter: AVAudioConverter?
-        if nativeFormat.sampleRate != targetSampleRate || nativeFormat.channelCount != 1 {
-            converter = AVAudioConverter(from: nativeFormat, to: targetFormat)
-        } else {
-            converter = nil
-        }
-        audioConverter = converter
-
-        let nativeSampleRate = nativeFormat.sampleRate
         let ringBufferLock = self.ringBuffer
         let preCapacity = self.preBufferCapacity
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) {
             [weak self] buffer, _ in
-
-            let floats: [Float]
-            if let converter {
-                let frameCapacity = AVAudioFrameCount(
-                    Double(buffer.frameLength) * targetSampleRate / nativeSampleRate
-                )
-                guard let converted = AVAudioPCMBuffer(
-                    pcmFormat: targetFormat, frameCapacity: frameCapacity
-                ) else { return }
-
-                var error: NSError?
-                var consumed = false
-                converter.convert(to: converted, error: &error) { _, outStatus in
-                    if consumed {
-                        outStatus.pointee = .noDataNow
-                        return nil
-                    }
-                    consumed = true
-                    outStatus.pointee = .haveData
-                    return buffer
-                }
-                if error != nil { return }
-
-                floats = Array(UnsafeBufferPointer(
-                    start: converted.floatChannelData![0],
-                    count: Int(converted.frameLength)
-                ))
-            } else {
-                floats = Array(UnsafeBufferPointer(
-                    start: buffer.floatChannelData![0],
-                    count: Int(buffer.frameLength)
-                ))
-            }
-
+            let floats = Array(UnsafeBufferPointer(
+                start: buffer.floatChannelData![0],
+                count: Int(buffer.frameLength)
+            ))
             ringBufferLock.withLock { buf in
                 buf.append(contentsOf: floats)
                 let isCurrentlyStreaming = self?.isStreaming ?? false
@@ -169,10 +143,38 @@ class StreamingAudioService: ObservableObject {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        audioConverter = nil
         isEngineWarmed = false
         ringBuffer.withLock { $0.removeAll() }
         logger.info("Audio engine cooled down")
+    }
+
+    // MARK: - Mic Hot-Swap
+
+    private func hotSwapMicrophone() {
+        guard let engine = audioEngine else { return }
+
+        let preserved = ringBuffer.withLock { buffer -> [Float] in
+            let saved = buffer
+            buffer.removeAll(keepingCapacity: true)
+            return saved
+        }
+
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        audioEngine = nil
+        isEngineWarmed = false
+
+        warmUp()
+
+        if !isEngineWarmed {
+            logger.error("Hot-swap failed: audio engine did not start with new device")
+        }
+
+        ringBuffer.withLock { buffer in
+            buffer.insert(contentsOf: preserved, at: 0)
+        }
+
+        logger.info("Hot-swapped microphone, preserved \(preserved.count) samples")
     }
 
     // MARK: - Start Streaming
@@ -225,6 +227,22 @@ class StreamingAudioService: ObservableObject {
         playNotificationSound()
         logger.info("Streaming started (engine pre-warmed, pre-buffer available)")
 
+        let speakerEnabled = MicrophoneService.shared.speakerCaptureEnabled
+        speakerCaptureActiveForSession = speakerEnabled
+        let mixer = AudioMixer(inputSampleRate: nativeSampleRate)
+        self.audioMixer = mixer
+
+        if speakerEnabled {
+            Task {
+                do {
+                    try await SystemAudioService.shared.startCapture()
+                    logger.info("Speaker capture started")
+                } catch {
+                    logger.warning("Speaker capture failed: \(error, privacy: .public)")
+                }
+            }
+        }
+
         eventTask = Task.detached { [weak self] in
             for await event in session.events {
                 await MainActor.run { [weak self] in
@@ -239,20 +257,30 @@ class StreamingAudioService: ObservableObject {
 
         let ringBufferRef = self.ringBuffer
         let shouldStopRef = self.shouldStopFeeding
+        let sampleRate = self.nativeSampleRate
         feedTask = Task.detached {
             while !shouldStopRef.withLock({ $0 }) {
-                let samples = ringBufferRef.withLock { buffer -> [Float] in
+                let micSamples = ringBufferRef.withLock { buffer -> [Float] in
                     guard !buffer.isEmpty else { return [] }
                     let drained = buffer
                     buffer.removeAll(keepingCapacity: true)
                     return drained
                 }
 
-                if !samples.isEmpty {
-                    session.feedAudio(samples: samples)
+                let samples16k: [Float]
+                if speakerEnabled {
+                    let sysSamples = await SystemAudioService.shared.drainAccumulatedSamples()
+                    samples16k = mixer.mix(mic: micSamples, sys: sysSamples, inputSampleRate: sampleRate)
+                } else if !micSamples.isEmpty {
+                    samples16k = mixer.micOnly(micSamples, inputSampleRate: sampleRate)
+                } else {
+                    samples16k = []
+                }
 
+                if !samples16k.isEmpty {
+                    session.feedAudio(samples: samples16k)
                     do {
-                        try writer.writeChunk(samples)
+                        try writer.writeChunk(samples16k)
                     } catch {
                         logger.error("Failed to write WAV chunk: \(error, privacy: .public)")
                     }
@@ -278,7 +306,6 @@ class StreamingAudioService: ObservableObject {
 
         defer {
             isStreaming = false
-            isDualTrackMode = false
         }
 
         shouldStopFeeding.withLock { $0 = true }
@@ -287,21 +314,25 @@ class StreamingAudioService: ObservableObject {
         }
         feedTask = nil
 
+        if speakerCaptureActiveForSession {
+            _ = await SystemAudioService.shared.stopCapture()
+        }
+
         let remainingSamples = ringBuffer.withLock { buffer -> [Float] in
             let drained = buffer
             buffer.removeAll()
             return drained
         }
 
-        if let session = streamingSession, !remainingSamples.isEmpty {
-            session.feedAudio(samples: remainingSamples)
-        }
-
-        if !remainingSamples.isEmpty, let writer = wavWriter {
-            do {
-                try writer.writeChunk(remainingSamples)
-            } catch {
-                logger.error("Failed to write final WAV chunk: \(error, privacy: .public)")
+        if !remainingSamples.isEmpty, let mixer = audioMixer {
+            let remaining16k = mixer.micOnly(remainingSamples, inputSampleRate: nativeSampleRate)
+            if let session = streamingSession {
+                session.feedAudio(samples: remaining16k)
+            }
+            if let writer = wavWriter {
+                do { try writer.writeChunk(remaining16k) } catch {
+                    logger.error("Failed to write final WAV chunk: \(error, privacy: .public)")
+                }
             }
         }
 
@@ -339,6 +370,8 @@ class StreamingAudioService: ObservableObject {
 
         logger.info("Streaming stopped, WAV at: \(url?.lastPathComponent ?? "nil", privacy: .public)")
         ringBuffer.withLock { $0.removeAll() }
+        audioMixer = nil
+        speakerCaptureActiveForSession = false
         guard let url else { return nil }
         return (text: finalText, url: url)
     }
@@ -349,7 +382,6 @@ class StreamingAudioService: ObservableObject {
         guard isStreaming else { return }
 
         isStreaming = false
-        isDualTrackMode = false
 
         feedTask?.cancel()
         feedTask = nil
@@ -359,6 +391,11 @@ class StreamingAudioService: ObservableObject {
         streamingSession?.cancel()
         streamingSession = nil
 
+        if speakerCaptureActiveForSession {
+            Task { _ = await SystemAudioService.shared.stopCapture() }
+        }
+        speakerCaptureActiveForSession = false
+
         wavWriter = nil
         if let url = currentWAVURL {
             try? FileManager.default.removeItem(at: url)
@@ -367,31 +404,9 @@ class StreamingAudioService: ObservableObject {
         currentWAVURL = nil
 
         ringBuffer.withLock { $0.removeAll() }
+        audioMixer = nil
 
         clearState()
-    }
-
-    // MARK: - Dual-Track Capture
-
-    func startDualTrackCapture(bundleID: String?) async throws {
-        do {
-            try await SystemAudioService.shared.startCapture(bundleID: bundleID)
-        } catch {
-            logger.warning("System audio capture failed, falling back to mic-only: \(error, privacy: .public)")
-        }
-
-        try startStreaming()
-        isDualTrackMode = true
-    }
-
-    func stopDualTrackCapture() async -> (micAudioURL: URL?, systemAudioURL: URL?) {
-        let systemURL = await SystemAudioService.shared.stopCapture()
-        currentSystemAudioURL = systemURL
-
-        let micResult = await stopStreaming()
-        isDualTrackMode = false
-
-        return (micAudioURL: micResult?.url, systemAudioURL: systemURL)
     }
 
     // MARK: - Finalize Recording

@@ -40,12 +40,6 @@ class IndicatorViewModel: ObservableObject {
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
 
-    // MARK: - Dual-Track State
-
-    private var isDualTrackActive = false
-    private var dualTrackOutputType: OutputType = .unknown
-    private var dualTrackRecordingStart: Date?
-    
     init() {
         self.recordingStore = RecordingStore.shared
         self.transcriptionService = TranscriptionService.shared
@@ -100,41 +94,13 @@ class IndicatorViewModel: ObservableObject {
             state = .recording
             startBlinking()
 
-            let resolved = MicrophoneService.shared.resolveAudioSource()
-            let useDualTrack = DualTrackDecision.shouldUseDualTrack(
-                resolvedSource: resolved,
-                hasScreenRecordingPermission: CGPreflightScreenCaptureAccess()
-            )
-
-            if useDualTrack {
-                isDualTrackActive = true
-                dualTrackOutputType = resolved.outputType
-                dualTrackRecordingStart = Date()
-
-                Task {
-                    do {
-                        try await streamingService.startDualTrackCapture(bundleID: resolved.bundleID)
-                    } catch {
-                        logger.error("Failed to start dual-track capture: \(error, privacy: .public)")
-                        isDualTrackActive = false
-                        state = .idle
-                        isStreamingMode = false
-                        stopBlinking()
-                    }
-                }
-            } else {
-                if resolved.mode == .dualTrack {
-                    logger.warning("Screen Recording permission not granted, falling back to mic-only")
-                }
-
-                do {
-                    try streamingService.startStreaming()
-                } catch {
-                    logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    state = .idle
-                    isStreamingMode = false
-                    stopBlinking()
-                }
+            do {
+                try streamingService.startStreaming()
+            } catch {
+                logger.error("Failed to start streaming: \(error, privacy: .public)")
+                state = .idle
+                isStreamingMode = false
+                stopBlinking()
             }
         } else {
             isStreamingMode = false
@@ -163,19 +129,8 @@ class IndicatorViewModel: ObservableObject {
         if isStreamingMode {
             state = .decoding
 
-            let wasDualTrack = isDualTrackActive
-            let outputType = dualTrackOutputType
-            let recordingStart = dualTrackRecordingStart
-            isDualTrackActive = false
-            dualTrackRecordingStart = nil
-            
             decodingTask = Task { [weak self] in
                 guard let self = self else { return }
-
-                var systemAudioURL: URL?
-                if wasDualTrack {
-                    systemAudioURL = await SystemAudioService.shared.stopCapture()
-                }
 
                 guard let result = await self.streamingService.finalizeRecording(applyCorrection: false) else {
                     self.state = .idle
@@ -183,67 +138,24 @@ class IndicatorViewModel: ObservableObject {
                     self.delegate?.didFinishDecoding()
                     return
                 }
-                
+
                 self.recordingStore.addRecording(result.recording)
-                
+
                 guard let finalText = await self.runLLMCorrectionIfNeeded(on: result.text) else {
                     self.isStreamingMode = false
                     self.delegate?.didFinishDecoding()
                     return
                 }
-                
+
                 if finalText != result.text {
                     var updatedRecording = result.recording
                     updatedRecording.transcription = finalText
                     self.recordingStore.updateRecording(updatedRecording)
                 }
-                
-                let micTextEmpty = finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let shouldProcessDualTrack: Bool
-                if wasDualTrack {
-                    let duration = recordingStart.map { Date().timeIntervalSince($0) } ?? 0
-                    shouldProcessDualTrack = DualTrackDecision.shouldProcessSystemAudio(
-                        recordingDuration: duration,
-                        systemAudioURL: systemAudioURL
-                    )
-                    if !shouldProcessDualTrack {
-                        self.logger.info("Skipping system audio transcription (duration=\(duration, format: .fixed(precision: 1), privacy: .public)s, hasURL=\(systemAudioURL != nil, privacy: .public))")
-                    }
-                } else {
-                    shouldProcessDualTrack = false
-                }
 
-                if wasDualTrack && micTextEmpty && shouldProcessDualTrack {
-                    let recordingId = result.recording.id
-                    if let systemText = await self.transcriptionService.handleDualTrackCompletion(
-                        systemAudioURL: systemAudioURL,
-                        outputType: outputType,
-                        micTranscription: finalText,
-                        recordingId: recordingId
-                    ) {
-                        if let corrected = await self.runLLMCorrectionIfNeeded(on: systemText) {
-                            self.insertText(corrected)
-                            logger.info("Transcription result (system audio): \(corrected.prefix(100), privacy: .public)")
-                        }
-                    }
-                } else {
-                    self.insertText(finalText)
-                    logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
+                self.insertText(finalText)
+                logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
 
-                    if shouldProcessDualTrack {
-                        let recordingId = result.recording.id
-                        let micText = finalText
-                        Task {
-                            await self.transcriptionService.handleDualTrackCompletion(
-                                systemAudioURL: systemAudioURL,
-                                outputType: outputType,
-                                micTranscription: micText,
-                                recordingId: recordingId
-                            )
-                        }
-                    }
-                }
-                
                 self.isStreamingMode = false
                 self.delegate?.didFinishDecoding()
             }
@@ -354,11 +266,6 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
-        if isDualTrackActive {
-            Task { _ = await SystemAudioService.shared.stopCapture() }
-            isDualTrackActive = false
-            dualTrackRecordingStart = nil
-        }
         if isStreamingMode {
             streamingService.cancelStreaming()
             isStreamingMode = false
@@ -370,11 +277,6 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
-        if isDualTrackActive {
-            Task { _ = await SystemAudioService.shared.stopCapture() }
-            isDualTrackActive = false
-            dualTrackRecordingStart = nil
-        }
         if isStreamingMode {
             streamingService.cancelStreaming()
             isStreamingMode = false

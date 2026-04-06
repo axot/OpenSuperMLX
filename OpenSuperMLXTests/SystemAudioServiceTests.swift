@@ -14,12 +14,12 @@ final class SystemAudioServiceTests: XCTestCase {
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
-        config.sampleRate = 16000
+        config.sampleRate = 44100
         config.channelCount = 1
 
         XCTAssertTrue(config.capturesAudio)
         XCTAssertTrue(config.excludesCurrentProcessAudio)
-        XCTAssertEqual(config.sampleRate, 16000)
+        XCTAssertEqual(config.sampleRate, 44100)
         XCTAssertEqual(config.channelCount, 1)
     }
 
@@ -71,7 +71,7 @@ final class SystemAudioServiceTests: XCTestCase {
 
         XCTAssertTrue(config.capturesAudio)
         XCTAssertTrue(config.excludesCurrentProcessAudio)
-        XCTAssertEqual(config.sampleRate, 16000)
+        XCTAssertEqual(config.sampleRate, 44100)
         XCTAssertEqual(config.channelCount, 1)
     }
 
@@ -93,6 +93,23 @@ final class SystemAudioServiceTests: XCTestCase {
         let service = SystemAudioService.shared
         let result = service.extractFloatSamples(from: nil)
         XCTAssertTrue(result.isEmpty)
+    }
+
+    // MARK: - drainAccumulatedSamples
+
+    @MainActor
+    func testDrainAccumulatedSamplesReturnsEmptyWhenNothingAccumulated() {
+        let service = SystemAudioService.shared
+        let drained = service.drainAccumulatedSamples()
+        XCTAssertTrue(drained.isEmpty)
+    }
+
+    @MainActor
+    func testDrainAccumulatedSamplesClearsAfterDrain() {
+        let service = SystemAudioService.shared
+        _ = service.drainAccumulatedSamples()
+        let second = service.drainAccumulatedSamples()
+        XCTAssertTrue(second.isEmpty)
     }
 
     // MARK: - Per-App Filter
