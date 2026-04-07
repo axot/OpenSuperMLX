@@ -99,6 +99,23 @@ class StreamingAudioService: ObservableObject {
         if !isVirtual {
             do {
                 try inputNode.setVoiceProcessingEnabled(true)
+
+                var duckingConfig = AUVoiceIOOtherAudioDuckingConfiguration(
+                    mEnableAdvancedDucking: DarwinBoolean(false),
+                    mDuckingLevel: .min
+                )
+                let status = AudioUnitSetProperty(
+                    inputNode.audioUnit!,
+                    kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
+                    kAudioUnitScope_Global,
+                    0,
+                    &duckingConfig,
+                    UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size)
+                )
+                if status != noErr {
+                    logger.warning("Warm-up: failed to disable VPIO ducking (status \(status, privacy: .public))")
+                }
+
                 logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
             } catch {
                 logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
