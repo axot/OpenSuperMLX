@@ -96,4 +96,42 @@ final class StreamingTextCommitterTests: XCTestCase {
         XCTAssertTrue(result.provisionalTokens.isEmpty)
         XCTAssertTrue(result.newlyEmittedTokens.isEmpty)
     }
+
+    // MARK: - Reanchor (Periodic Reset)
+
+    func testReanchorPreservesChunkCount() {
+        var committer = StreamingTextCommitter(rollbackTokens: 5, coldStartChunks: 2)
+        for i in 0..<10 {
+            _ = committer.processChunkTokens(Array(0...(i + 10)), isFinal: false)
+        }
+        XCTAssertEqual(committer.chunkCount, 10)
+
+        committer.reanchor(from: committer.emittedTokens, keepLast: 24)
+        XCTAssertEqual(committer.chunkCount, 10)
+    }
+
+    func testReanchorKeepsEmittedHistory() {
+        var committer = StreamingTextCommitter(rollbackTokens: 5, coldStartChunks: 2)
+        for i in 0..<5 {
+            _ = committer.processChunkTokens(Array(0...(i + 20)), isFinal: false)
+        }
+        let emittedBefore = committer.emittedTokens
+
+        committer.reanchor(from: committer.emittedTokens, keepLast: 24)
+        XCTAssertEqual(committer.emittedTokens, emittedBefore)
+    }
+
+    func testProcessChunkAfterReanchorSkipsColdStart() {
+        var committer = StreamingTextCommitter(rollbackTokens: 5, coldStartChunks: 2)
+        for i in 0..<10 {
+            _ = committer.processChunkTokens(Array(0...(i + 10)), isFinal: false)
+        }
+
+        committer.reanchor(from: committer.emittedTokens, keepLast: 24)
+
+        let newTokens = Array(100..<120)
+        let result = committer.processChunkTokens(newTokens, isFinal: false)
+        XCTAssertFalse(result.confirmedTokens.isEmpty,
+                       "After reanchor, should emit confirmed tokens immediately (no cold start)")
+    }
 }

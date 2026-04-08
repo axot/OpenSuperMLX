@@ -89,6 +89,37 @@ final class ContinuousChunkProcessorTests: XCTestCase {
         )
     }
 
+    // MARK: - Filter Text Tokens
+
+    func testFilterTextTokensNoMarker() {
+        let tokens = [100, 200, 300]
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens(tokens), [100, 200, 300])
+    }
+
+    func testFilterTextTokensMarkerAtStart() {
+        let tokens = [151704, 100, 200]
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens(tokens), [100, 200])
+    }
+
+    func testFilterTextTokensMarkerInMiddle() {
+        let tokens = [50, 60, 151704, 100, 200]
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens(tokens), [100, 200])
+    }
+
+    func testFilterTextTokensMarkerAtEnd() {
+        let tokens = [100, 200, 151704]
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens(tokens), [])
+    }
+
+    func testFilterTextTokensMultipleMarkers() {
+        let tokens = [151704, 100, 151704, 200]
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens(tokens), [100, 151704, 200])
+    }
+
+    func testFilterTextTokensEmpty() {
+        XCTAssertEqual(ContinuousChunkProcessor.filterTextTokens([]), [])
+    }
+
     // MARK: - StreamingConfig Defaults
 
     func testStreamingConfigPastTextConditioningDefaultOn() {

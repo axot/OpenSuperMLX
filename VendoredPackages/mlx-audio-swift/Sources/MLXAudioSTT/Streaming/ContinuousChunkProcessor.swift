@@ -176,35 +176,37 @@ class ContinuousChunkProcessor {
                 keepLast: config.resetCarryTokens
             )
             allDecodedTokens = Array(textCommitter.emittedTokens.suffix(config.resetCarryTokens))
+            let langLower = config.language.trimmingCharacters(in: .whitespaces).lowercased()
+            if langLower.isEmpty || langLower == "auto" {
+                allDecodedTokens.insert(Self.asrTextTokenId, at: 0)
+            }
+
+            let windowSize = config.encoderWindowSizeMelFrames
+            let fullEnd = encodedWindowCount * windowSize
+            if fullEnd > 0 && fullEnd < accumulatedMelFrameCount {
+                let tail = accumulatedMel![fullEnd..<accumulatedMelFrameCount]
+                eval(tail)
+                accumulatedMel = tail
+                accumulatedMelFrameCount = tail.dim(0)
+            } else if fullEnd >= accumulatedMelFrameCount {
+                accumulatedMel = nil
+                accumulatedMelFrameCount = 0
+            }
         } else {
             textCommitter = StreamingTextCommitter(
                 rollbackTokens: config.rollbackTokens,
                 coldStartChunks: config.coldStartChunks
             )
             allDecodedTokens = []
+            accumulatedMel = nil
+            accumulatedMelFrameCount = 0
+            chunkIndex = 0
         }
 
         encoderCache.clear()
         encodedWindowCount = 0
-
-        if !keepEmittedTokens {
-            accumulatedMel = nil
-            accumulatedMelFrameCount = 0
-        } else {
-            let windowSize = config.encoderWindowSizeMelFrames
-            let keepFrames = config.maxEncoderWindows * windowSize
-            if accumulatedMelFrameCount > keepFrames {
-                let trimStart = accumulatedMelFrameCount - keepFrames
-                let truncated = accumulatedMel![trimStart..<accumulatedMelFrameCount]
-                eval(truncated)
-                accumulatedMel = truncated
-                accumulatedMelFrameCount = keepFrames
-            }
-        }
-
         decoderCache = nil
         prevPrefillEmbeds = nil
-        chunkIndex = 0
         degenerationGuard.resetStagnation()
         Memory.clearCache()
     }

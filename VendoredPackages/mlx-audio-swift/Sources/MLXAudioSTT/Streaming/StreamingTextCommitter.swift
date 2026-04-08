@@ -85,7 +85,6 @@ public struct StreamingTextCommitter: Sendable {
         rawTokens = kept
         stableTokens = kept
         emittedTokens = emitted
-        chunkCount = 0
     }
 
     // MARK: - Private
