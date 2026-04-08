@@ -88,4 +88,23 @@ final class ContinuousChunkProcessorTests: XCTestCase {
             ContinuousChunkProcessor.computeCompleteWindowCount(totalMelFrames: 100, windowSize: 0), 0
         )
     }
+
+    // MARK: - StreamingConfig Defaults
+
+    func testStreamingConfigPastTextConditioningDefaultOn() {
+        let config = StreamingConfig()
+        XCTAssertTrue(config.pastTextConditioning,
+                      "pastTextConditioning should default to true (matching C --stream behavior)")
+    }
+
+    func testStreamingConfigDefaultValues() {
+        let config = StreamingConfig()
+        XCTAssertEqual(config.maxEncoderWindows, 4)
+        XCTAssertEqual(config.encoderWindowSizeMelFrames, 800)
+        XCTAssertEqual(config.resetIntervalChunks, 45)
+        XCTAssertEqual(config.resetCarryTokens, 24)
+        XCTAssertEqual(config.rollbackTokens, 5)
+        XCTAssertEqual(config.coldStartChunks, 2)
+        XCTAssertEqual(config.maxNewTokensPerChunk, 32)
+    }
 }

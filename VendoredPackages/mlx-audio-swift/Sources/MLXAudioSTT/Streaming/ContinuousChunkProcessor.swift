@@ -5,7 +5,10 @@ import Foundation
 import MLX
 import MLXNN
 import MLXLMCommon
+import os.log
 import Tokenizers
+
+private let cpLogger = Logger(subsystem: "MLXAudioSTT", category: "ChunkProcessor")
 
 // MARK: - ChunkProcessingResult
 
@@ -29,6 +32,7 @@ enum ChunkAction {
 
 class ContinuousChunkProcessor {
     private static let eosTokenIds = [151645, 151643]
+    private static let asrTextTokenId = 151704
 
     private let config: StreamingConfig
     private let model: Qwen3ASRModel
@@ -105,7 +109,9 @@ class ContinuousChunkProcessor {
         eval(inputsEmbeds)
 
         let logits = prefillWithEmbeddingDiff(inputsEmbeds, inputIds: inputIds)
-        let (newTokenIds, hitMaxTokens) = decodeTokens(initialLogits: logits)
+        let (rawNewTokenIds, hitMaxTokens) = decodeTokens(initialLogits: logits)
+
+        let newTokenIds = Self.filterTextTokens(rawNewTokenIds)
 
         let prefixTokensFull = allDecodedTokens
         let guardAction = degenerationGuard.evaluateChunk(
@@ -119,6 +125,7 @@ class ContinuousChunkProcessor {
         switch guardAction {
         case .recoveryReset:
             let stable = textCommitter.stableTokens
+            cpLogger.warning("chunk[\(self.chunkIndex)] RECOVERY RESET stableTokens=\(stable.count)")
             reset(keepEmittedTokens: true)
             return ChunkProcessingResult(
                 confirmedTokens: stable, provisionalTokens: [],
@@ -126,10 +133,13 @@ class ContinuousChunkProcessor {
             )
 
         case .ok(let filteredNewTokens):
-            // Discard old rollback zone, replace with model's re-decoded version (antirez approach)
-            let rollback = min(config.rollbackTokens, prefixTokensFull.count)
-            let stablePrefix = Array(prefixTokensFull.dropLast(rollback))
-            allDecodedTokens = stablePrefix + filteredNewTokens
+            if config.pastTextConditioning {
+                let rollback = min(config.rollbackTokens, prefixTokensFull.count)
+                let stablePrefix = Array(prefixTokensFull.dropLast(rollback))
+                allDecodedTokens = stablePrefix + filteredNewTokens
+            } else {
+                allDecodedTokens = filteredNewTokens
+            }
 
             let commitResult = textCommitter.processChunkTokens(allDecodedTokens, isFinal: isFinal)
 
@@ -138,6 +148,7 @@ class ContinuousChunkProcessor {
                 && chunkIndex >= config.coldStartChunks
                 && (chunkIndex + 1) % config.resetIntervalChunks == 0
             {
+                cpLogger.info("chunk[\(self.chunkIndex)] PERIODIC RESET")
                 reset(keepEmittedTokens: true)
                 return ChunkProcessingResult(
                     confirmedTokens: commitResult.confirmedTokens,
@@ -181,16 +192,13 @@ class ContinuousChunkProcessor {
             accumulatedMelFrameCount = 0
         } else {
             let windowSize = config.encoderWindowSizeMelFrames
-            let tailStart = (accumulatedMelFrameCount / windowSize) * windowSize
-            if tailStart > 0 {
-                if tailStart < accumulatedMelFrameCount {
-                    let truncated = accumulatedMel![tailStart..<accumulatedMelFrameCount]
-                    eval(truncated)
-                    accumulatedMel = truncated
-                } else {
-                    accumulatedMel = nil
-                }
-                accumulatedMelFrameCount = accumulatedMel?.dim(0) ?? 0
+            let keepFrames = config.maxEncoderWindows * windowSize
+            if accumulatedMelFrameCount > keepFrames {
+                let trimStart = accumulatedMelFrameCount - keepFrames
+                let truncated = accumulatedMel![trimStart..<accumulatedMelFrameCount]
+                eval(truncated)
+                accumulatedMel = truncated
+                accumulatedMelFrameCount = keepFrames
             }
         }
 
@@ -374,5 +382,12 @@ class ContinuousChunkProcessor {
     static func computeCompleteWindowCount(totalMelFrames: Int, windowSize: Int) -> Int {
         guard windowSize > 0 else { return 0 }
         return totalMelFrames / windowSize
+    }
+
+    static func filterTextTokens(_ tokens: [Int]) -> [Int] {
+        guard let markerIndex = tokens.firstIndex(of: asrTextTokenId) else {
+            return tokens
+        }
+        return Array(tokens.suffix(from: markerIndex + 1))
     }
 }

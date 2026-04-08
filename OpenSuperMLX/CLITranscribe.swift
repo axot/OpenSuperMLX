@@ -65,8 +65,8 @@ enum CLITranscribe {
                 case .ended(let fullText):
                     fputs("\n", stderr)
                     print(RepetitionCleaner.clean(fullText))
-                case .stats(let stats):
-                    logger.info("CLI stats: \(stats.tokensPerSecond, format: .fixed(precision: 1), privacy: .public) tok/s")
+                case .stats:
+                    break
                 default:
                     break
                 }

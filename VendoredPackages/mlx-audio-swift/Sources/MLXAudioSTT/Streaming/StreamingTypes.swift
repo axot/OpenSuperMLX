@@ -56,21 +56,23 @@ public struct StreamingStats: Sendable {
     public var encodedWindowCount: Int
     public var totalAudioSeconds: Double
     public var tokensPerSecond: Double
-    /// Real-time factor (< 1.0 means faster than real-time)
     public var realTimeFactor: Double
     public var peakMemoryGB: Double
+    public var chunkElapsedSeconds: Double
 
     public init(
         encodedWindowCount: Int = 0,
         totalAudioSeconds: Double = 0,
         tokensPerSecond: Double = 0,
         realTimeFactor: Double = 0,
-        peakMemoryGB: Double = 0
+        peakMemoryGB: Double = 0,
+        chunkElapsedSeconds: Double = 0
     ) {
         self.encodedWindowCount = encodedWindowCount
         self.totalAudioSeconds = totalAudioSeconds
         self.tokensPerSecond = tokensPerSecond
         self.realTimeFactor = realTimeFactor
         self.peakMemoryGB = peakMemoryGB
+        self.chunkElapsedSeconds = chunkElapsedSeconds
     }
 }

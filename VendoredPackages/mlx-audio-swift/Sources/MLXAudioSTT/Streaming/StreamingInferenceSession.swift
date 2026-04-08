@@ -148,6 +148,14 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 provisionalText = ""
             }
 
+            let newlyEmittedText: String
+            if !result.newlyEmittedTokens.isEmpty {
+                let raw = tokenizer.decode(tokens: result.newlyEmittedTokens)
+                newlyEmittedText = TextMergeUtilities.parseASROutput(raw).text
+            } else {
+                newlyEmittedText = ""
+            }
+
             let displayConfirmed: String = shared.withLock { state in
                 state.committedTokenIds = result.confirmedTokens
                 state.chunkCount = currentChunkIndex
@@ -168,11 +176,18 @@ public class StreamingInferenceSession: @unchecked Sendable {
                     state.mergedCommittedText = merged
 
                 case .normal, .coldStart:
-                    if state.preResetTextPrefix.isEmpty {
-                        state.mergedCommittedText = parsedConfirmed.text
+                    if config.pastTextConditioning {
+                        if state.preResetTextPrefix.isEmpty {
+                            state.mergedCommittedText = parsedConfirmed.text
+                        } else {
+                            state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
+                                prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
+                        }
                     } else {
-                        state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
-                            prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
+                        if !newlyEmittedText.isEmpty {
+                            state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
+                                prefix: state.mergedCommittedText, newText: newlyEmittedText)
+                        }
                     }
                 }
                 return state.mergedCommittedText
@@ -190,7 +205,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
             totalAudioSeconds: Double(totalSamplesFed) / 16000.0,
             tokensPerSecond: decodeTime > 0 ? Double(result.newlyEmittedTokens.count) / decodeTime : 0,
             realTimeFactor: 0,
-            peakMemoryGB: Double(Memory.peakMemory) / 1e9
+            peakMemoryGB: Double(Memory.peakMemory) / 1e9,
+            chunkElapsedSeconds: decodeTime
         )))
     }
 
