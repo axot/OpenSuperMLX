@@ -94,22 +94,28 @@ public struct StreamingTextCommitter: Sendable {
         guard !emitted.isEmpty else { return newStable }
 
         let prefixLen = commonPrefixLength(emitted, newStable)
+        if prefixLen >= newStable.count {
+            return []
+        }
         if prefixLen == emitted.count {
             return Array(newStable.suffix(from: prefixLen))
         }
 
         let maxCheck = min(maxOverlapCheck, emitted.count, newStable.count)
         for overlapLen in stride(from: maxCheck, through: minOverlapMatch, by: -1) {
-            let emittedTail = emitted.suffix(overlapLen)
-            let newHead = newStable.prefix(overlapLen)
-            if Array(emittedTail) == Array(newHead) {
+            if Array(emitted.suffix(overlapLen)) == Array(newStable.prefix(overlapLen)) {
                 return Array(newStable.suffix(from: overlapLen))
             }
         }
 
-        if newStable.count > emitted.count,
-           Array(newStable.prefix(emitted.count)) == emitted {
-            return Array(newStable.suffix(from: emitted.count))
+        let searchDepth = min(maxOverlapCheck, emitted.count)
+        for offset in stride(from: emitted.count - searchDepth, to: emitted.count, by: 1) {
+            let maxLen = min(emitted.count - offset, newStable.count)
+            for checkLen in stride(from: maxLen, through: minOverlapMatch, by: -1) {
+                if Array(emitted[offset..<(offset + checkLen)]) == Array(newStable.prefix(checkLen)) {
+                    return Array(newStable.suffix(from: checkLen))
+                }
+            }
         }
 
         return newStable
