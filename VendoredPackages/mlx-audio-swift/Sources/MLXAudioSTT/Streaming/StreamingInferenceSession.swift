@@ -19,7 +19,7 @@ private struct SessionState: Sendable {
     var chunkCount: Int = 0
     var mergedCommittedText: String = ""
     var detectedLanguage: String = ""
-    var preResetTextPrefix: String = ""
+    var preResetTokenIds: [Int] = []
 }
 
 // MARK: - StreamingInferenceSession
@@ -168,20 +168,24 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
                 switch result.action {
                 case .periodicReset, .recoveryReset:
-                    let merged = state.preResetTextPrefix.isEmpty
-                        ? parsedConfirmed.text
-                        : TextMergeUtilities.mergeWithOverlapRemoval(
-                            prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
-                    state.preResetTextPrefix = merged
-                    state.mergedCommittedText = merged
+                    let textTokens = TextMergeUtilities.extractTextTokenIds(result.confirmedTokens)
+                    let trimmed = Array(textTokens.dropLast(config.rollbackTokens))
+                    let merged = TextMergeUtilities.mergeTokensWithOverlapRemoval(
+                        prefix: state.preResetTokenIds, newTokens: trimmed)
+                    state.preResetTokenIds = merged
+                    let decoded = tokenizer.decode(tokens: merged)
+                    state.mergedCommittedText = TextMergeUtilities.parseASROutput(decoded).text
 
                 case .normal, .coldStart:
                     if config.pastTextConditioning {
-                        if state.preResetTextPrefix.isEmpty {
+                        if state.preResetTokenIds.isEmpty {
                             state.mergedCommittedText = parsedConfirmed.text
                         } else {
-                            state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
-                                prefix: state.preResetTextPrefix, newText: parsedConfirmed.text)
+                            let textTokens = TextMergeUtilities.extractTextTokenIds(result.confirmedTokens)
+                            let merged = TextMergeUtilities.mergeTokensWithOverlapRemoval(
+                                prefix: state.preResetTokenIds, newTokens: textTokens)
+                            let decoded = tokenizer.decode(tokens: merged)
+                            state.mergedCommittedText = TextMergeUtilities.parseASROutput(decoded).text
                         }
                     } else {
                         if !newlyEmittedText.isEmpty {
@@ -243,7 +247,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
             $0.committedTokenIds = []
             $0.chunkCount = 0
             $0.mergedCommittedText = ""
-            $0.preResetTextPrefix = ""
+            $0.preResetTokenIds = []
         }
         Memory.clearCache()
     }
