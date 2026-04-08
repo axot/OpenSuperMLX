@@ -167,25 +167,17 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 }
 
                 switch result.action {
-                case .periodicReset, .recoveryReset:
-                    let textTokens = TextMergeUtilities.extractTextTokenIds(result.confirmedTokens)
-                    let trimmed = Array(textTokens.dropLast(config.rollbackTokens))
-                    let merged = TextMergeUtilities.mergeTokensWithOverlapRemoval(
-                        prefix: state.preResetTokenIds, newTokens: trimmed)
-                    state.preResetTokenIds = merged
-                    let decoded = tokenizer.decode(tokens: merged)
-                    state.mergedCommittedText = TextMergeUtilities.parseASROutput(decoded).text
-
-                case .normal, .coldStart:
+                case .periodicReset, .recoveryReset, .normal, .coldStart:
                     if config.pastTextConditioning {
-                        if state.preResetTokenIds.isEmpty {
-                            state.mergedCommittedText = parsedConfirmed.text
-                        } else {
-                            let textTokens = TextMergeUtilities.extractTextTokenIds(result.confirmedTokens)
-                            let merged = TextMergeUtilities.mergeTokensWithOverlapRemoval(
-                                prefix: state.preResetTokenIds, newTokens: textTokens)
-                            let decoded = tokenizer.decode(tokens: merged)
+                        if !result.newlyEmittedTokens.isEmpty {
+                            let newTextTokens = TextMergeUtilities.extractTextTokenIds(result.newlyEmittedTokens)
+                            state.preResetTokenIds.append(contentsOf: newTextTokens)
+                        }
+                        if !state.preResetTokenIds.isEmpty {
+                            let decoded = tokenizer.decode(tokens: state.preResetTokenIds)
                             state.mergedCommittedText = TextMergeUtilities.parseASROutput(decoded).text
+                        } else {
+                            state.mergedCommittedText = parsedConfirmed.text
                         }
                     } else {
                         if !newlyEmittedText.isEmpty {

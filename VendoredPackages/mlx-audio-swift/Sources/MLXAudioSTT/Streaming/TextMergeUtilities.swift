@@ -63,25 +63,10 @@ enum TextMergeUtilities {
         return prefix + newText
     }
 
-    // MARK: - Token-Level Merge
+    // MARK: - Token-Level
 
     static func extractTextTokenIds(_ tokens: [Int], asrTextTokenId: Int = 151704) -> [Int] {
         guard let idx = tokens.firstIndex(of: asrTextTokenId) else { return tokens }
         return Array(tokens.suffix(from: tokens.index(after: idx)))
-    }
-
-    static func mergeTokensWithOverlapRemoval(
-        prefix: [Int],
-        newTokens: [Int],
-        maxOverlap: Int = 48
-    ) -> [Int] {
-        guard !prefix.isEmpty, !newTokens.isEmpty else { return prefix + newTokens }
-        let maxCheck = min(maxOverlap, prefix.count, newTokens.count)
-        for len in stride(from: maxCheck, through: 1, by: -1) {
-            if Array(prefix.suffix(len)) == Array(newTokens.prefix(len)) {
-                return prefix + Array(newTokens.dropFirst(len))
-            }
-        }
-        return prefix + newTokens
     }
 }

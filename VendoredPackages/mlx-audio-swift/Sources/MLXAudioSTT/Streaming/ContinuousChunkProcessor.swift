@@ -176,10 +176,6 @@ class ContinuousChunkProcessor {
                 keepLast: config.resetCarryTokens
             )
             allDecodedTokens = Array(textCommitter.emittedTokens.suffix(config.resetCarryTokens))
-            let langLower = config.language.trimmingCharacters(in: .whitespaces).lowercased()
-            if langLower.isEmpty || langLower == "auto" {
-                allDecodedTokens.insert(Self.asrTextTokenId, at: 0)
-            }
 
             let windowSize = config.encoderWindowSizeMelFrames
             let fullEnd = encodedWindowCount * windowSize
@@ -280,7 +276,12 @@ class ContinuousChunkProcessor {
         )
         guard !range.isEmpty else { return [] }
 
-        return Array(allDecodedTokens[range])
+        var prefix = Array(allDecodedTokens[range])
+        let langLower = config.language.trimmingCharacters(in: .whitespaces).lowercased()
+        if langLower.isEmpty || langLower == "auto" {
+            prefix.insert(Self.asrTextTokenId, at: 0)
+        }
+        return prefix
     }
 
     // MARK: - KV Cache Reuse via Embedding Diff
