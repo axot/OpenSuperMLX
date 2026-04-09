@@ -80,9 +80,8 @@ OpenSuperMLX/                    # Main app target
 │   ├── TranscriptionEngine.swift  # Protocol definition
 │   └── MLXEngine.swift            # MLX-based implementation
 ├── Services/
-│   ├── AECService.swift           # Acoustic echo cancellation
+│   ├── AudioMixer.swift           # Multi-source audio mixing
 │   ├── BedrockLLMProvider.swift   # AWS Bedrock LLM provider
-│   ├── CallDetectionService.swift # Audio call detection
 │   ├── LLMCorrectionService.swift # Post-transcription LLM correction
 │   ├── LLMProvider.swift          # LLM provider protocol
 │   ├── OpenAICompatibleLLMProvider.swift # OpenAI-compatible LLM provider
@@ -93,17 +92,20 @@ OpenSuperMLX/                    # Main app target
 ├── Onboarding/                  # First-launch onboarding flow
 ├── Utils/
 │   ├── AppPreferences.swift     # UserDefaults wrappers (@UserDefault, @OptionalUserDefault)
-│   ├── ClipboardUtil.swift      # Paste-via-CGEvent, keyboard layout detection
 │   ├── AutocorrectWrapper.swift # Bridge to Rust autocorrect dylib
-│   ├── ITNProcessor.swift       # Chinese inverse text normalization (WeTextProcessing)
-│   ├── NemoTextProcessing.swift # English inverse text normalization (text-processing-rs)
+│   ├── ClipboardUtil.swift      # Paste-via-CGEvent, keyboard layout detection
 │   ├── DevConfig.swift          # #if DEBUG toggles
 │   ├── FocusUtils.swift         # Accessibility API caret/cursor position
+│   ├── ITNProcessor.swift       # Chinese inverse text normalization (WeTextProcessing)
+│   ├── KeyboardLayoutProvider.swift # Keyboard layout detection for paste routing
 │   ├── LanguageUtil.swift       # Language code ↔ display name mapping
-│   └── NotificationName+App.swift  # Typed Notification.Name extensions
+│   ├── NemoTextProcessing.swift # English inverse text normalization (text-processing-rs)
+│   ├── NotificationName+App.swift  # Typed Notification.Name extensions
+│   ├── RepetitionCleaner.swift  # Remove repeated text from transcription output
+│   └── RMSNormalizer.swift      # Audio RMS level normalization
 ├── Bridge.h                     # Bridging header (autocorrect + text-processing-rs)
-OpenSuperMLXTests/               # Unit tests (XCTest) — primary test target
-OpenSuperMLXUnitTests/           # Integration tests (streaming inference)
+OpenSuperMLXTests/               # Hosted tests (XCTest) — majority of unit + integration tests
+OpenSuperMLXUnitTests/           # Hostless tests (streaming inference, no host app)
 OpenSuperMLXUITests/             # UI tests
 asian-autocorrect/               # Git submodule — Rust autocorrect library
 text-processing-rs/              # Git submodule — Rust English ITN library (NeMo port)
@@ -120,7 +122,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 - **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
 - **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
-- **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`
+- **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`; `WeTextProcessing` (C++ Chinese ITN processor, built via cmake)
 
 ## Code Style
 
@@ -241,7 +243,15 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 
 ## CI
 
-GitHub Actions: `.github/workflows/build.yml` runs `./run.sh build` on `macos-latest` for pushes and PRs. `.github/workflows/release.yml` handles tagged releases with dedicated build steps for text-processing-rs, WeTextProcessing (`processor_main`), and the Xcode project.
+GitHub Actions on `master` branch and PRs (`.github/workflows/build.yml`):
+
+1. `./run.sh build` — full build
+2. Unit tests (hostless): `-only-testing:OpenSuperMLXUnitTests`
+3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `KeyboardLayoutProviderTests`
+
+The default test plan (`OpenSuperMLX.xctestplan`) passes `--skip-model-load` and skips `BenchmarkTests` + `JapaneseGarblingRegressionTests`. Separate `OpenSuperMLXBenchmarks.xctestplan` exists for benchmark runs.
+
+`.github/workflows/release.yml` handles tagged releases (`X.Y.Z` format) with dedicated build steps for each native library, Release xcodebuild, DMG creation, and Homebrew tap update.
 
 ## Plan Conventions
 
