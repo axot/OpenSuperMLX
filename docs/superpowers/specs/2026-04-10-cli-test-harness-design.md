@@ -53,6 +53,23 @@ All subcommands share global flags:
 
 Detailed error types are in the JSON `error.code` field, not in exit codes.
 
+**Error codes** (for JSON `error.code` field):
+
+| Code | When |
+|---|---|
+| `model_not_found` | Specified model repo-id not in catalog |
+| `model_not_cached` | Model not downloaded locally; run `model download` first |
+| `model_load_failed` | Model files exist but failed to initialize |
+| `audio_file_not_found` | Input audio file path doesn't exist |
+| `audio_format_unsupported` | Audio file format cannot be decoded |
+| `transcription_failed` | Inference produced an error |
+| `stream_timeout` | `stream-simulate` didn't receive `.ended` event within 60s |
+| `llm_correction_failed` | LLM provider returned an error or timed out |
+| `database_error` | RecordingStore / GRDB operation failed |
+| `audio_file_missing` | Recording exists in DB but audio file missing from disk |
+| `invalid_config_key` | `config get/set` with unknown key |
+| `invalid_config_value` | `config set` value doesn't match expected type |
+
 ## Commands
 
 ### `transcribe`
@@ -64,6 +81,22 @@ transcribe <file> [--language <lang>] [--model <repo-id>] [--no-correction] [--t
 ```
 
 **Code path**: `TranscriptionService.transcribeAudio(url:settings:)` → `MLXEngine.transcribeAudio()` → ITN → Autocorrect → LLM correction (if enabled).
+
+**JSON output (`transcribe --json`):**
+```json
+{
+  "status": "success",
+  "command": "transcribe",
+  "data": {
+    "text": "transcription result",
+    "language": "en",
+    "model": "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "audio_duration_s": 12.3,
+    "processing_time_s": 3.2,
+    "corrections_applied": ["itn", "autocorrect", "llm"]
+  }
+}
+```
 
 ### `stream-simulate`
 
@@ -97,6 +130,28 @@ stream-simulate <file> [--language <lang>] [--model <repo-id>] [--chunk-duration
 
 **CI compatibility**: Skips AVAudioEngine initialization. Works on headless CI.
 
+**`--chunk-duration`**: Controls how the file audio is sliced before writing to the ring buffer. Default 500ms = 8000 samples at 16kHz. The entire file is sliced into chunks of this size, and all chunks are written to the ring buffer sequentially at full speed. This does NOT affect the feedTask polling interval (which remains 100ms). Smaller chunks = more granular ring buffer writes; larger chunks = fewer writes.
+
+**Completion semantics**: The command waits for a `.ended(finalText)` event from the `StreamingInferenceSession` event stream. On receiving `.ended`, it outputs the final text and exits 0. If no `.ended` event arrives within 60 seconds after the last chunk is written, the command exits 1 with error code `stream_timeout`. During streaming, `.displayUpdate` events are printed to stderr (unless `--quiet`).
+
+**JSON output (`stream-simulate --json`):**
+```json
+{
+  "status": "success",
+  "command": "stream-simulate",
+  "data": {
+    "text": "transcription result",
+    "language": "zh",
+    "model": "mlx-community/Qwen3-ASR-1.7B-8bit",
+    "audio_duration_s": 12.3,
+    "processing_time_s": 2.1,
+    "chunks_fed": 25,
+    "chunk_duration_s": 0.5,
+    "intermediate_updates": 6
+  }
+}
+```
+
 ### `correct`
 
 Test LLM correction in isolation.
@@ -115,6 +170,16 @@ config get <key>
 config set <key> <value>
 ```
 
+**Key naming**: Uses the `AppPreferences` UserDefaults key names directly (e.g., `mlxLanguage`, `mlxTemperature`, `llmCorrectionEnabled`). No CLI-friendly aliases — keeps a 1:1 mapping with the code to avoid an extra translation layer.
+
+**Type coercion**: `config set` parses the value string based on the property's declared type in `AppPreferences`:
+- `String` → used as-is
+- `Bool` → accepts `true`/`false` (case-insensitive)
+- `Double`/`Float` → parsed via `Double(value)`; error if not a valid number
+- `Optional` types → accepts `null` to clear
+
+`config list` outputs all keys with: key name, current value, default value, and type.
+
 ### `recordings`
 
 Manage recordings in the database.
@@ -126,6 +191,8 @@ recordings show <id>
 recordings delete <id|--all>
 recordings regenerate <id>
 ```
+
+**Code path**: `RecordingStore` (GRDB). **`regenerate`** re-transcribes an existing recording using the **current** model and settings (not the original ones). Applies LLM correction if currently enabled. If the recording's audio file is missing from disk, fails with error code `audio_file_missing`.
 
 ### `queue`
 
@@ -158,6 +225,10 @@ model remove <repo-id>
 model download <repo-id>
 ```
 
+**`model add`** registers a custom model in the catalog (adds to `MLXModelManager.customModels`). Does NOT download. **`model download`** eagerly downloads the model files from HuggingFace to local cache. **`model select`** switches the active model (must already be registered via built-in catalog or `model add`).
+
+**`--model` flag on `transcribe`/`stream-simulate`/`benchmark`**: If the specified model is not cached locally, the command **fails immediately** with error code `model_not_cached` and a message suggesting `model download <repo-id>` first. It does NOT auto-download. Rationale: CI pipelines should explicitly download models in a setup step, not silently block for minutes during a test.
+
 ### `benchmark`
 
 Measure transcription accuracy, speed, and memory.
@@ -177,7 +248,11 @@ benchmark <file|--suite> \
 | Speed | RTF = processing_time / audio_duration. 1 warm-up + 3 timed runs, report mean | WhisperKit, mlx-lm benchmark pattern |
 | Memory | `phys_footprint` from `task_info()` — total process memory (CPU + GPU on Apple Silicon unified memory) | WhisperKit `AppMemoryChecker` |
 
-**WER/CER implementation**: Vendor WhisperKit's 4 standalone Swift files (MIT license).
+**WER/CER implementation**: Vendor these 4 specific files from WhisperKit's `Tests/WhisperKitTests/Evaluate/` directory (MIT license, no WhisperKit dependencies):
+- `DistanceCalculation.swift` — Levenshtein/Hirschberg edit distance algorithms
+- `WERUtils.swift` — WER formula, word-to-char mapping, diff output
+- `NormalizeEn.swift` — English text normalization (number expansion, case folding, punctuation removal)
+- `SpellingMapping.swift` — British/American spelling equivalence
 
 **CER for Chinese/Japanese**: Character-level comparison, no jieba segmentation. Industry standard.
 
