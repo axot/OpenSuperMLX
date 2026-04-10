@@ -563,7 +563,6 @@ struct ContentView: View {
                             .frame(height: 20)
                     }
 
-                    // MARK: - Streaming transcription text
                     if viewModel.isStreamingMode && viewModel.state == .recording {
                         ScrollViewReader { proxy in
                             ScrollView {

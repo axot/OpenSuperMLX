@@ -6,8 +6,6 @@ import MLXAudioSTT
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionService")
 
-// MARK: -
-
 @MainActor
 class TranscriptionService: ObservableObject {
     static let shared = TranscriptionService()

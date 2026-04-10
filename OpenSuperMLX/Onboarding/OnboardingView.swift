@@ -118,7 +118,6 @@ struct OnboardingView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header with gradient background
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Welcome to")
@@ -134,7 +133,6 @@ struct OnboardingView: View {
                 }
                 .padding(.bottom, 8)
                 
-                // Language Selection
                 HStack(spacing: 8) {
                     
                     Picker("Language", selection: $viewModel.selectedLanguage) {
@@ -171,10 +169,8 @@ struct OnboardingView: View {
             
             Divider()
             
-            // Content - Scrollable area
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Model Selection
                     VStack(alignment: .leading, spacing: 12) {
                         Text("MLX Model")
                             .font(.headline)
@@ -197,7 +193,6 @@ struct OnboardingView: View {
             
             Divider()
             
-            // Footer with Continue button
             HStack {
                 Spacer()
                 Button(action: {
@@ -220,8 +215,6 @@ struct OnboardingView: View {
         .background(
             ZStack {
                 Color(.windowBackgroundColor)
-                
-                // Subtle gradient overlay
                 LinearGradient(
                     colors: [
                         Color.blue.opacity(0.02),
