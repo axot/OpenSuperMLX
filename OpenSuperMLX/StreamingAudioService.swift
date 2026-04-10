@@ -6,6 +6,7 @@ import AppKit
 import Foundation
 import os.log
 
+import MLX
 import MLXAudioCore
 import MLXAudioSTT
 
@@ -550,6 +551,134 @@ class StreamingAudioService: ObservableObject {
             ?? supplementalLanguageNames[code]
             ?? code
     }
+
+    // MARK: - File Injection (CLI stream-simulate)
+
+    struct FileInjectionResult {
+        let text: String
+        let chunksFed: Int
+        let intermediateUpdates: Int
+        let audioDurationS: Double
+    }
+
+    var ringBufferSampleCount: Int {
+        ringBuffer.withLock { $0.count }
+    }
+
+    var isAudioEngineInitialized: Bool {
+        audioEngine != nil
+    }
+
+    func clearRingBuffer() {
+        ringBuffer.withLock { $0.removeAll() }
+    }
+
+    func writeRawSamplesToRingBuffer(_ samples: [Float], chunkDuration: Double) -> Int {
+        let chunkSize = max(1, Int(chunkDuration * 16000))
+        var offset = 0
+        var chunksFed = 0
+        while offset < samples.count {
+            let end = min(offset + chunkSize, samples.count)
+            ringBuffer.withLock { $0.append(contentsOf: Array(samples[offset..<end])) }
+            offset = end
+            chunksFed += 1
+        }
+        ringBuffer.withLock { $0.append(contentsOf: [Float](repeating: 0, count: 10560)) }
+        return chunksFed
+    }
+
+    func injectAudioFromFile(
+        url: URL,
+        language: String = "auto",
+        temperature: Float = 0.0,
+        chunkDuration: Double = 0.5,
+        onEvent: @escaping @Sendable (TranscriptionEvent) -> Void
+    ) async throws -> FileInjectionResult {
+        guard let model = TranscriptionService.shared.streamingModel else {
+            throw StreamingAudioError.modelNotLoaded
+        }
+
+        let (_, audio) = try loadAudioArray(from: url, sampleRate: 16000)
+        let samples = audio.asArray(Float.self)
+        let audioDurationS = Double(samples.count) / 16000.0
+
+        let mappedLanguage = Self.mapLanguageCode(language)
+        let config = StreamingConfig(language: mappedLanguage, temperature: temperature)
+        let session = StreamingInferenceSession(model: model, config: config)
+
+        shouldStopFeeding.withLock { $0 = false }
+
+        let intermediateCount = OSAllocatedUnfairLock(initialState: 0)
+        let collectedFinalText = OSAllocatedUnfairLock(initialState: "")
+        let collectedConfirmedText = OSAllocatedUnfairLock(initialState: "")
+
+        let eventTask = Task.detached {
+            for await event in session.events {
+                onEvent(event)
+                switch event {
+                case .displayUpdate(let confirmed, _):
+                    intermediateCount.withLock { $0 += 1 }
+                    collectedConfirmedText.withLock { $0 = confirmed }
+                case .ended(let text):
+                    collectedFinalText.withLock { $0 = text }
+                default:
+                    break
+                }
+            }
+        }
+
+        let chunksFed = writeRawSamplesToRingBuffer(samples, chunkDuration: chunkDuration)
+
+        let ringBufferRef = self.ringBuffer
+        let localFeedTask = Task.detached {
+            while true {
+                let drained = ringBufferRef.withLock { buffer -> [Float] in
+                    guard !buffer.isEmpty else { return [] }
+                    let d = buffer
+                    buffer.removeAll(keepingCapacity: true)
+                    return d
+                }
+
+                if drained.isEmpty {
+                    break
+                }
+
+                session.feedAudio(samples: drained)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+
+        await localFeedTask.value
+        session.stop()
+
+        let completed = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await eventTask.value; return true }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(60))
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+
+        ringBuffer.withLock { $0.removeAll() }
+
+        guard completed else {
+            throw StreamingAudioError.streamTimeout
+        }
+
+        let finalText = collectedFinalText.withLock { $0 }
+        let confirmedFallback = collectedConfirmedText.withLock { $0 }
+        let resultText = finalText.isEmpty ? confirmedFallback : finalText
+
+        return FileInjectionResult(
+            text: resultText,
+            chunksFed: chunksFed,
+            intermediateUpdates: intermediateCount.withLock { $0 },
+            audioDurationS: audioDurationS
+        )
+    }
 }
 
 // MARK: - Errors
@@ -557,6 +686,7 @@ class StreamingAudioService: ObservableObject {
 enum StreamingAudioError: LocalizedError {
     case modelNotLoaded
     case audioFormatCreationFailed
+    case streamTimeout
 
     var errorDescription: String? {
         switch self {
@@ -564,6 +694,8 @@ enum StreamingAudioError: LocalizedError {
             return "No transcription model loaded. Please wait for the model to finish loading."
         case .audioFormatCreationFailed:
             return "Failed to create the target audio format for streaming."
+        case .streamTimeout:
+            return "Stream simulation timed out waiting for completion."
         }
     }
 }
