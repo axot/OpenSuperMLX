@@ -35,21 +35,21 @@ class MLXModelManager: ObservableObject {
             id: "qwen3-asr-0.6b-4bit",
             name: "Qwen3-ASR-0.6B-4bit",
             repoID: "mlx-community/Qwen3-ASR-0.6B-4bit",
-            size: "~400MB",
+            size: "~700MB",
             description: "Smallest model, fastest inference"
         ),
         MLXModel(
             id: "qwen3-asr-1.7b-8bit",
             name: "Qwen3-ASR-1.7B-8bit",
             repoID: "mlx-community/Qwen3-ASR-1.7B-8bit",
-            size: "~900MB",
+            size: "~2.3GB",
             description: "Recommended model, balanced accuracy and speed"
         ),
         MLXModel(
             id: "qwen3-asr-1.7b-bf16",
             name: "Qwen3-ASR-1.7B-bf16",
             repoID: "mlx-community/Qwen3-ASR-1.7B-bf16",
-            size: "~3.4GB",
+            size: "~3.8GB",
             description: "Highest quality model, best accuracy but slower inference"
         )
     ]
