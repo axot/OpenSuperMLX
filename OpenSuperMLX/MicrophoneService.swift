@@ -4,6 +4,13 @@ import CoreAudio
 import Foundation
 import os
 
+// MARK: - AudioDeviceChangeObserver
+
+protocol AudioDeviceChangeObserver: AnyObject {
+    func onDeviceDisappeared(deviceID: AudioDeviceID)
+    func onEngineConfigurationChanged()
+}
+
 // MARK: - MicrophoneService
 
 final class MicrophoneService: ObservableObject {
@@ -18,6 +25,17 @@ final class MicrophoneService: ObservableObject {
     private var deviceChangeObserver: Any?
     private var timer: Timer?
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "MicrophoneService")
+    
+    var isDeviceAlive: ((AudioDeviceID) -> Bool) = { deviceID in
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size)
+        return status == noErr
+    }
     
     struct AudioDevice: Identifiable, Equatable, Codable {
         let id: String
@@ -595,5 +613,21 @@ final class MicrophoneService: ObservableObject {
 
 extension Notification.Name {
     static let microphoneDidChange = Notification.Name("microphoneDidChange")
+}
+
+// MARK: - AudioDeviceChangeObserver
+
+extension MicrophoneService: AudioDeviceChangeObserver {
+    func onDeviceDisappeared(deviceID: AudioDeviceID) {
+        logger.warning("Device disappeared: \(deviceID, privacy: .public)")
+        refreshAvailableMicrophones()
+        updateCurrentMicrophone()
+    }
+    
+    func onEngineConfigurationChanged() {
+        logger.info("Engine configuration changed, refreshing devices")
+        refreshAvailableMicrophones()
+        updateCurrentMicrophone()
+    }
 }
 
