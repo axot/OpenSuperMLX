@@ -31,7 +31,8 @@ public enum ModelUtils {
         repoID: Repo.ID,
         requiredExtension: String,
         hfToken: String? = nil,
-        cache: HubCache = .default
+        cache: HubCache = .default,
+        progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> URL {
         let client: HubClient
         if let token = hfToken, !token.isEmpty {
@@ -45,7 +46,8 @@ public enum ModelUtils {
             client: client,
             cache: resolvedCache,
             repoID: repoID,
-            requiredExtension: requiredExtension
+            requiredExtension: requiredExtension,
+            progressHandler: progressHandler
         )
     }
 
@@ -60,7 +62,8 @@ public enum ModelUtils {
         client: HubClient,
         cache: HubCache = .default,
         repoID: Repo.ID,
-        requiredExtension: String
+        requiredExtension: String,
+        progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> URL {
         let normalizedRequiredExtension = requiredExtension.hasPrefix(".")
             ? String(requiredExtension.dropFirst())
@@ -113,7 +116,11 @@ public enum ModelUtils {
             revision: "main",
             matching: Array(allowedExtensions),
             progressHandler: { progress in
-                print("\(progress.completedUnitCount)/\(progress.totalUnitCount) files")
+                if let handler = progressHandler {
+                    handler(progress)
+                } else {
+                    print("\(progress.completedUnitCount)/\(progress.totalUnitCount) files")
+                }
             }
         )
 
