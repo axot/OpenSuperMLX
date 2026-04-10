@@ -754,11 +754,23 @@ struct ContentView: View {
                 ZStack {
                     Color.black.opacity(0.3)
                     VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Loading Model...")
-                            .foregroundColor(.white)
-                            .font(.headline)
+                        if let downloadProgress = viewModel.transcriptionService.downloadProgress {
+                            ProgressView(value: downloadProgress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 200)
+                            Text("\(Int(downloadProgress * 100))%")
+                                .foregroundColor(.white)
+                                .font(.subheadline)
+                            Text("Downloading Model...")
+                                .foregroundColor(.white)
+                                .font(.headline)
+                        } else {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Loading Model...")
+                                .foregroundColor(.white)
+                                .font(.headline)
+                        }
                     }
                 }
                 .ignoresSafeArea()
