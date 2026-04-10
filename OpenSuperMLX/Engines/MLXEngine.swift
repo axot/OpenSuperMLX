@@ -1,10 +1,11 @@
-import Foundation
 import AVFoundation
-import MLXAudioSTT
-import MLXAudioCore
-import MLX
-import HuggingFace
+import Foundation
 import os.log
+
+import HuggingFace
+import MLX
+import MLXAudioCore
+import MLXAudioSTT
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "MLXEngine")
 
@@ -20,6 +21,7 @@ class MLXEngine: TranscriptionEngine {
     }
 
     var onProgressUpdate: ((Float) -> Void)?
+    var downloadProgressHandler: (@Sendable @MainActor (Progress) -> Void)?
 
     var qwen3Model: Qwen3ASRModel? { model }
 
@@ -31,7 +33,7 @@ class MLXEngine: TranscriptionEngine {
         let modelId = AppPreferences.shared.selectedMLXModel
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
-        let model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache)
+        let model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache, progressHandler: downloadProgressHandler)
         self.model = model
         logger.info("MLX model initialized")
         if AppPreferences.shared.debugMode {

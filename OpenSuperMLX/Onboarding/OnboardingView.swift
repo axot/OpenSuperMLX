@@ -43,6 +43,7 @@ class OnboardingViewModel: ObservableObject {
     @Published var selectedModelId: String?
     @Published var isDownloading: Bool = false
     @Published var downloadingModelName: String?
+    @Published var downloadProgress: Double? = nil
 
     private var downloadTask: Task<Void, Error>?
 
@@ -78,10 +79,13 @@ class OnboardingViewModel: ObservableObject {
         defer {
             isDownloading = false
             downloadingModelName = nil
+            downloadProgress = nil
         }
         
         downloadTask = Task {
-            let _ = try await Qwen3ASRModel.fromPretrained(model.repoID)
+            let _ = try await Qwen3ASRModel.fromPretrained(model.repoID, progressHandler: { [weak self] progress in
+                self?.downloadProgress = progress.fractionCompleted
+            })
         }
         
         do {
@@ -102,6 +106,7 @@ class OnboardingViewModel: ObservableObject {
         downloadTask?.cancel()
         isDownloading = false
         downloadingModelName = nil
+        downloadProgress = nil
     }
 }
 
@@ -113,7 +118,6 @@ struct OnboardingView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header with gradient background
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Welcome to")
@@ -129,7 +133,6 @@ struct OnboardingView: View {
                 }
                 .padding(.bottom, 8)
                 
-                // Language Selection
                 HStack(spacing: 8) {
                     
                     Picker("Language", selection: $viewModel.selectedLanguage) {
@@ -166,10 +169,8 @@ struct OnboardingView: View {
             
             Divider()
             
-            // Content - Scrollable area
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Model Selection
                     VStack(alignment: .leading, spacing: 12) {
                         Text("MLX Model")
                             .font(.headline)
@@ -192,7 +193,6 @@ struct OnboardingView: View {
             
             Divider()
             
-            // Footer with Continue button
             HStack {
                 Spacer()
                 Button(action: {
@@ -215,8 +215,6 @@ struct OnboardingView: View {
         .background(
             ZStack {
                 Color(.windowBackgroundColor)
-                
-                // Subtle gradient overlay
                 LinearGradient(
                     colors: [
                         Color.blue.opacity(0.02),
@@ -277,10 +275,20 @@ struct OnboardingMLXModelItemView: View {
                     .foregroundColor(.secondary)
                 
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle())
-                        .scaleEffect(0.7)
-                        .padding(.top, 4)
+                    VStack(spacing: 4) {
+                        if let progress = viewModel.downloadProgress {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                                .scaleEffect(0.7)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
             
