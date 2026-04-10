@@ -4,7 +4,6 @@
 import Foundation
 
 import ArgumentParser
-import GRDB
 
 struct RecordingsCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
