@@ -276,6 +276,7 @@
 				845AB70FA56D5D33BA77E028 /* AWSSDKIdentity */,
 				AADD00012DA0B00000000002 /* DTLNAecCoreML */,
 				AADD00012DA0B00000000003 /* DTLNAec256 */,
+				AA0AP0012DA0C00000000002 /* ArgumentParser */,
 			);
 			productName = OpenSuperMLX;
 			productReference = CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */;
@@ -387,6 +388,7 @@
 				CEAC00092D82F60000000000 /* XCLocalSwiftPackageReference "mlx-audio-swift" */,
 				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
 				AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */,
+				AA0AP0012DA0C00000000001 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE57B0292D52C7BB00929AF3 /* Products */;
@@ -933,6 +935,14 @@
 				kind = branch;
 			};
 		};
+		AA0AP0012DA0C00000000001 /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-argument-parser.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -977,6 +987,11 @@
 		AAEE000100000000000A000A /* MLXAudioSTT */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MLXAudioSTT;
+		};
+		AA0AP0012DA0C00000000002 /* ArgumentParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0AP0012DA0C00000000001 /* XCRemoteSwiftPackageReference "swift-argument-parser" */;
+			productName = ArgumentParser;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
