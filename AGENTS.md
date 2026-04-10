@@ -204,6 +204,10 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 - `XCTSkip` for environment-dependent tests (keyboard layouts, hardware)
 - Sections organized with `// MARK: -`; test data: `test_audio.m4a` in test bundle
 
+## Debugging (MANDATORY)
+
+When investigating bugs, you MUST read [`docs/debugging.md`](docs/debugging.md) before proposing any fix — it covers the CLI-first reproduction strategy and diagnostic logging techniques required for all investigations.
+
 ## Test Requirements (MANDATORY)
 
 ### What MUST Be Tested
