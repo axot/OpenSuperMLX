@@ -43,6 +43,7 @@ class OnboardingViewModel: ObservableObject {
     @Published var selectedModelId: String?
     @Published var isDownloading: Bool = false
     @Published var downloadingModelName: String?
+    @Published var downloadProgress: Double? = nil
 
     private var downloadTask: Task<Void, Error>?
 
@@ -78,10 +79,13 @@ class OnboardingViewModel: ObservableObject {
         defer {
             isDownloading = false
             downloadingModelName = nil
+            downloadProgress = nil
         }
         
         downloadTask = Task {
-            let _ = try await Qwen3ASRModel.fromPretrained(model.repoID)
+            let _ = try await Qwen3ASRModel.fromPretrained(model.repoID, progressHandler: { [weak self] progress in
+                self?.downloadProgress = progress.fractionCompleted
+            })
         }
         
         do {
@@ -102,6 +106,7 @@ class OnboardingViewModel: ObservableObject {
         downloadTask?.cancel()
         isDownloading = false
         downloadingModelName = nil
+        downloadProgress = nil
     }
 }
 
@@ -277,10 +282,20 @@ struct OnboardingMLXModelItemView: View {
                     .foregroundColor(.secondary)
                 
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle())
-                        .scaleEffect(0.7)
-                        .padding(.top, 4)
+                    VStack(spacing: 4) {
+                        if let progress = viewModel.downloadProgress {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                                .scaleEffect(0.7)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
             
