@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct ConfigCommand: AsyncParsableCommand {
+struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "config",
         abstract: "Manage application configuration",
@@ -141,7 +141,7 @@ struct ConfigListEntry: Encodable {
     }
 }
 
-struct ConfigListCommand: AsyncParsableCommand {
+struct ConfigListCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List all configuration values"
@@ -149,15 +149,18 @@ struct ConfigListCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        let result = Self.executeList()
+    func run() throws {
+        let json = globalOptions.json
+        runAsync {
+            let result = ConfigListCommand.executeList()
 
-        switch result {
-        case .success(let entries):
-            CLIOutput.printSuccess(command: "config list", data: entries, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "config list", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entries):
+                CLIOutput.printSuccess(command: "config list", data: entries, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "config list", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -182,7 +185,7 @@ struct ConfigGetEntry: Encodable {
     let type: String
 }
 
-struct ConfigGetCommand: AsyncParsableCommand {
+struct ConfigGetCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "get",
         abstract: "Get a configuration value"
@@ -192,15 +195,19 @@ struct ConfigGetCommand: AsyncParsableCommand {
 
     @Argument var key: String
 
-    func run() async throws {
-        let result = Self.executeGet(key: key)
+    func run() throws {
+        let key = self.key
+        let json = globalOptions.json
+        runAsync {
+            let result = ConfigGetCommand.executeGet(key: key)
 
-        switch result {
-        case .success(let entry):
-            CLIOutput.printSuccess(command: "config get", data: entry, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "config get", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entry):
+                CLIOutput.printSuccess(command: "config get", data: entry, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "config get", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -226,7 +233,7 @@ struct ConfigSetResult: Encodable {
     let type: String
 }
 
-struct ConfigSetCommand: AsyncParsableCommand {
+struct ConfigSetCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "set",
         abstract: "Set a configuration value"
@@ -237,15 +244,20 @@ struct ConfigSetCommand: AsyncParsableCommand {
     @Argument var key: String
     @Argument var value: String
 
-    func run() async throws {
-        let result = Self.executeSet(key: key, value: value)
+    func run() throws {
+        let key = self.key
+        let value = self.value
+        let json = globalOptions.json
+        runAsync {
+            let result = ConfigSetCommand.executeSet(key: key, value: value)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "config set", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "config set", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "config set", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "config set", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 

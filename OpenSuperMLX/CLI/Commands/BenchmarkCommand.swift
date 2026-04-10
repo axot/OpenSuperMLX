@@ -58,7 +58,7 @@ struct BenchmarkResult: Encodable {
 
 // MARK: - Command
 
-struct BenchmarkCommand: AsyncParsableCommand {
+struct BenchmarkCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "benchmark",
         abstract: "Run transcription benchmarks with accuracy, speed, and memory metrics"
@@ -89,15 +89,18 @@ struct BenchmarkCommand: AsyncParsableCommand {
 
     // MARK: - Execution
 
-    func run() async throws {
-        let result = await executeBenchmark()
+    func run() throws {
+        let cmd = self
+        runAsync {
+            let result = await cmd.executeBenchmark()
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "benchmark", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "benchmark", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "benchmark", data: data, json: cmd.globalOptions.json)
+            case .failure(let error):
+                CLIOutput.printError(command: "benchmark", error: error, json: cmd.globalOptions.json)
+                throw ExitCode(1)
+            }
         }
     }
 

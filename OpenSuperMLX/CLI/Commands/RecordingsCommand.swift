@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct RecordingsCommand: AsyncParsableCommand {
+struct RecordingsCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "recordings",
         abstract: "Manage recordings",
@@ -70,7 +70,7 @@ private func toEntry(_ r: Recording) -> RecordingEntry {
 
 // MARK: - List Subcommand
 
-struct RecordingsListCommand: AsyncParsableCommand {
+struct RecordingsListCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List all recordings"
@@ -84,15 +84,20 @@ struct RecordingsListCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Number of recordings to skip")
     var offset: Int = 0
 
-    func run() async throws {
-        let result = await Self.executeList(store: RecordingStore.shared, limit: limit, offset: offset)
+    func run() throws {
+        let limit = self.limit
+        let offset = self.offset
+        let json = globalOptions.json
+        runAsync {
+            let result = await RecordingsListCommand.executeList(store: RecordingStore.shared, limit: limit, offset: offset)
 
-        switch result {
-        case .success(let entries):
-            CLIOutput.printSuccess(command: "recordings list", data: entries, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "recordings list", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entries):
+                CLIOutput.printSuccess(command: "recordings list", data: entries, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "recordings list", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -109,7 +114,7 @@ struct RecordingsListCommand: AsyncParsableCommand {
 
 // MARK: - Search Subcommand
 
-struct RecordingsSearchCommand: AsyncParsableCommand {
+struct RecordingsSearchCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "search",
         abstract: "Search recordings"
@@ -125,15 +130,21 @@ struct RecordingsSearchCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Number of results to skip")
     var offset: Int = 0
 
-    func run() async throws {
-        let result = await Self.executeSearch(store: RecordingStore.shared, query: query, limit: limit, offset: offset)
+    func run() throws {
+        let query = self.query
+        let limit = self.limit
+        let offset = self.offset
+        let json = globalOptions.json
+        runAsync {
+            let result = await RecordingsSearchCommand.executeSearch(store: RecordingStore.shared, query: query, limit: limit, offset: offset)
 
-        switch result {
-        case .success(let entries):
-            CLIOutput.printSuccess(command: "recordings search", data: entries, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "recordings search", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entries):
+                CLIOutput.printSuccess(command: "recordings search", data: entries, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "recordings search", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -146,7 +157,7 @@ struct RecordingsSearchCommand: AsyncParsableCommand {
 
 // MARK: - Show Subcommand
 
-struct RecordingsShowCommand: AsyncParsableCommand {
+struct RecordingsShowCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "show",
         abstract: "Show recording details"
@@ -156,15 +167,19 @@ struct RecordingsShowCommand: AsyncParsableCommand {
 
     @Argument var id: String
 
-    func run() async throws {
-        let result = await Self.executeShow(store: RecordingStore.shared, id: id)
+    func run() throws {
+        let id = self.id
+        let json = globalOptions.json
+        runAsync {
+            let result = await RecordingsShowCommand.executeShow(store: RecordingStore.shared, id: id)
 
-        switch result {
-        case .success(let entry):
-            CLIOutput.printSuccess(command: "recordings show", data: entry, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "recordings show", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entry):
+                CLIOutput.printSuccess(command: "recordings show", data: entry, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "recordings show", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -187,7 +202,7 @@ struct RecordingsShowCommand: AsyncParsableCommand {
 
 // MARK: - Delete Subcommand
 
-struct RecordingsDeleteCommand: AsyncParsableCommand {
+struct RecordingsDeleteCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",
         abstract: "Delete a recording"
@@ -200,15 +215,20 @@ struct RecordingsDeleteCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Delete all recordings")
     var all = false
 
-    func run() async throws {
-        let result = await Self.executeDelete(store: RecordingStore.shared, id: id, all: all)
+    func run() throws {
+        let id = self.id
+        let all = self.all
+        let json = globalOptions.json
+        runAsync {
+            let result = await RecordingsDeleteCommand.executeDelete(store: RecordingStore.shared, id: id, all: all)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "recordings delete", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "recordings delete", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "recordings delete", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "recordings delete", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -238,7 +258,7 @@ struct RecordingsDeleteCommand: AsyncParsableCommand {
 
 // MARK: - Regenerate Subcommand
 
-struct RecordingsRegenerateCommand: AsyncParsableCommand {
+struct RecordingsRegenerateCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "regenerate",
         abstract: "Regenerate transcription for a recording"
@@ -248,15 +268,19 @@ struct RecordingsRegenerateCommand: AsyncParsableCommand {
 
     @Argument var id: String
 
-    func run() async throws {
-        let result = await Self.executeRegenerate(store: RecordingStore.shared, id: id)
+    func run() throws {
+        let id = self.id
+        let json = globalOptions.json
+        runAsync {
+            let result = await RecordingsRegenerateCommand.executeRegenerate(store: RecordingStore.shared, id: id)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "recordings regenerate", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "recordings regenerate", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "recordings regenerate", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "recordings regenerate", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 

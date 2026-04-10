@@ -6,7 +6,7 @@ import Foundation
 
 import ArgumentParser
 
-struct TranscribeCommand: AsyncParsableCommand {
+struct TranscribeCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcribe",
         abstract: "Transcribe an audio file"
@@ -31,16 +31,19 @@ struct TranscribeCommand: AsyncParsableCommand {
 
     // MARK: - Execution
 
-    func run() async throws {
-        let service = await TranscriptionService.shared
-        let result = await executeTranscription(service: service)
+    func run() throws {
+        let cmd = self
+        runAsync {
+            let service = TranscriptionService.shared
+            let result = await cmd.executeTranscription(service: service)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "transcribe", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "transcribe", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "transcribe", data: data, json: cmd.globalOptions.json)
+            case .failure(let error):
+                CLIOutput.printError(command: "transcribe", error: error, json: cmd.globalOptions.json)
+                throw ExitCode(1)
+            }
         }
     }
 

@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct StreamSimulateCommand: AsyncParsableCommand {
+struct StreamSimulateCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "stream-simulate",
         abstract: "Simulate streaming transcription from an audio file"
@@ -27,16 +27,19 @@ struct StreamSimulateCommand: AsyncParsableCommand {
 
     // MARK: - Execution
 
-    func run() async throws {
-        let service = await StreamingAudioService.shared
-        let result = await executeStreamSimulate(service: service)
+    func run() throws {
+        let cmd = self
+        runAsync {
+            let service = StreamingAudioService.shared
+            let result = await cmd.executeStreamSimulate(service: service)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "stream-simulate", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "stream-simulate", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "stream-simulate", data: data, json: cmd.globalOptions.json)
+            case .failure(let error):
+                CLIOutput.printError(command: "stream-simulate", error: error, json: cmd.globalOptions.json)
+                throw ExitCode(1)
+            }
         }
     }
 

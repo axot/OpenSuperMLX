@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct QueueCommand: AsyncParsableCommand {
+struct QueueCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "queue",
         abstract: "Manage the transcription queue",
@@ -44,7 +44,7 @@ struct QueueProcessResult: Encodable {
 
 // MARK: - Add Subcommand
 
-struct QueueAddCommand: AsyncParsableCommand {
+struct QueueAddCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "add",
         abstract: "Add files to the transcription queue"
@@ -54,19 +54,23 @@ struct QueueAddCommand: AsyncParsableCommand {
 
     @Argument var files: [String]
 
-    func run() async throws {
-        let result = Self.executeAdd(files: files)
+    func run() throws {
+        let files = self.files
+        let json = globalOptions.json
+        runAsync {
+            let result = QueueAddCommand.executeAdd(files: files)
 
-        switch result {
-        case .success(let data):
-            for file in files {
-                let url = URL(fileURLWithPath: file)
-                await TranscriptionQueue.shared.addFileToQueue(url: url)
+            switch result {
+            case .success(let data):
+                for file in files {
+                    let url = URL(fileURLWithPath: file)
+                    await TranscriptionQueue.shared.addFileToQueue(url: url)
+                }
+                CLIOutput.printSuccess(command: "queue add", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "queue add", error: error, json: json)
+                throw ExitCode(1)
             }
-            CLIOutput.printSuccess(command: "queue add", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "queue add", error: error, json: globalOptions.json)
-            throw ExitCode(1)
         }
     }
 
@@ -82,7 +86,7 @@ struct QueueAddCommand: AsyncParsableCommand {
 
 // MARK: - Status Subcommand
 
-struct QueueStatusCommand: AsyncParsableCommand {
+struct QueueStatusCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
         abstract: "Show queue status"
@@ -90,15 +94,18 @@ struct QueueStatusCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        let result = await Self.executeStatus()
+    func run() throws {
+        let json = globalOptions.json
+        runAsync {
+            let result = await QueueStatusCommand.executeStatus()
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "queue status", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "queue status", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "queue status", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "queue status", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -126,7 +133,7 @@ struct QueueStatusCommand: AsyncParsableCommand {
 
 // MARK: - Process Subcommand
 
-struct QueueProcessCommand: AsyncParsableCommand {
+struct QueueProcessCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "process",
         abstract: "Process the transcription queue"
@@ -134,15 +141,17 @@ struct QueueProcessCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        CLIOutput.printProgress("Starting queue processing...", quiet: globalOptions.quiet)
-        await MainActor.run {
+    func run() throws {
+        let json = globalOptions.json
+        let quiet = globalOptions.quiet
+        runAsync {
+            CLIOutput.printProgress("Starting queue processing...", quiet: quiet)
             TranscriptionQueue.shared.startProcessingQueue()
+            CLIOutput.printSuccess(
+                command: "queue process",
+                data: QueueProcessResult(message: "Queue processing started"),
+                json: json
+            )
         }
-        CLIOutput.printSuccess(
-            command: "queue process",
-            data: QueueProcessResult(message: "Queue processing started"),
-            json: globalOptions.json
-        )
     }
 }

@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct CorrectCommand: AsyncParsableCommand {
+struct CorrectCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "correct",
         abstract: "Apply post-transcription correction to text"
@@ -27,16 +27,19 @@ struct CorrectCommand: AsyncParsableCommand {
 
     // MARK: - Execution
 
-    func run() async throws {
-        let service = await LLMCorrectionService.shared
-        let result = await executeCorrection(service: service)
+    func run() throws {
+        let cmd = self
+        runAsync {
+            let service = LLMCorrectionService.shared
+            let result = await cmd.executeCorrection(service: service)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "correct", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "correct", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "correct", data: data, json: cmd.globalOptions.json)
+            case .failure(let error):
+                CLIOutput.printError(command: "correct", error: error, json: cmd.globalOptions.json)
+                throw ExitCode(1)
+            }
         }
     }
 

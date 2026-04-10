@@ -48,7 +48,7 @@ struct DiagnoseResult: Encodable {
 
 // MARK: - Command
 
-struct DiagnoseCommand: AsyncParsableCommand {
+struct DiagnoseCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "diagnose",
         abstract: "Collect environment snapshot for diagnostics"
@@ -56,9 +56,12 @@ struct DiagnoseCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        let result = Self.collectDiagnostics()
-        CLIOutput.printSuccess(command: "diagnose", data: result, json: globalOptions.json)
+    func run() throws {
+        let json = globalOptions.json
+        runAsync {
+            let result = DiagnoseCommand.collectDiagnostics()
+            CLIOutput.printSuccess(command: "diagnose", data: result, json: json)
+        }
     }
 
     // MARK: - Data Collection

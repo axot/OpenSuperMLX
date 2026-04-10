@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct ModelCommand: AsyncParsableCommand {
+struct ModelCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "model",
         abstract: "Manage transcription models",
@@ -70,7 +70,7 @@ struct ModelDownloadResult: Encodable {
 
 // MARK: - List Subcommand
 
-struct ModelListCommand: AsyncParsableCommand {
+struct ModelListCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List available models"
@@ -78,15 +78,18 @@ struct ModelListCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        let result = await Self.executeList()
+    func run() throws {
+        let json = globalOptions.json
+        runAsync {
+            let result = ModelListCommand.executeList()
 
-        switch result {
-        case .success(let entries):
-            CLIOutput.printSuccess(command: "model list", data: entries, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "model list", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entries):
+                CLIOutput.printSuccess(command: "model list", data: entries, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "model list", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -112,7 +115,7 @@ struct ModelListCommand: AsyncParsableCommand {
 
 // MARK: - Select Subcommand
 
-struct ModelSelectCommand: AsyncParsableCommand {
+struct ModelSelectCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "select",
         abstract: "Select the active model"
@@ -122,15 +125,19 @@ struct ModelSelectCommand: AsyncParsableCommand {
 
     @Argument var name: String
 
-    func run() async throws {
-        let result = await Self.executeSelect(name: name)
+    func run() throws {
+        let name = self.name
+        let json = globalOptions.json
+        runAsync {
+            let result = ModelSelectCommand.executeSelect(name: name)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "model select", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "model select", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "model select", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "model select", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -156,7 +163,7 @@ struct ModelSelectCommand: AsyncParsableCommand {
 
 // MARK: - Add Subcommand
 
-struct ModelAddCommand: AsyncParsableCommand {
+struct ModelAddCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "add",
         abstract: "Add a custom model"
@@ -166,15 +173,19 @@ struct ModelAddCommand: AsyncParsableCommand {
 
     @Argument var repoId: String
 
-    func run() async throws {
-        let result = await Self.executeAdd(repoId: repoId)
+    func run() throws {
+        let repoId = self.repoId
+        let json = globalOptions.json
+        runAsync {
+            let result = ModelAddCommand.executeAdd(repoId: repoId)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "model add", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "model add", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "model add", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "model add", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -199,7 +210,7 @@ struct ModelAddCommand: AsyncParsableCommand {
 
 // MARK: - Remove Subcommand
 
-struct ModelRemoveCommand: AsyncParsableCommand {
+struct ModelRemoveCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "remove",
         abstract: "Remove a model"
@@ -209,15 +220,19 @@ struct ModelRemoveCommand: AsyncParsableCommand {
 
     @Argument var name: String
 
-    func run() async throws {
-        let result = await Self.executeRemove(name: name)
+    func run() throws {
+        let name = self.name
+        let json = globalOptions.json
+        runAsync {
+            let result = ModelRemoveCommand.executeRemove(name: name)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "model remove", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "model remove", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "model remove", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "model remove", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -239,7 +254,7 @@ struct ModelRemoveCommand: AsyncParsableCommand {
 
 // MARK: - Download Subcommand
 
-struct ModelDownloadCommand: AsyncParsableCommand {
+struct ModelDownloadCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "download",
         abstract: "Download a model"
@@ -249,22 +264,27 @@ struct ModelDownloadCommand: AsyncParsableCommand {
 
     @Argument var name: String
 
-    func run() async throws {
-        let manager = await MLXModelManager.shared
-        let match = await manager.availableModels.first { model in
-            model.id == name || model.name == name || model.repoID == name
-        }
+    func run() throws {
+        let name = self.name
+        let json = globalOptions.json
+        let quiet = globalOptions.quiet
+        runAsync {
+            let manager = MLXModelManager.shared
+            let match = manager.availableModels.first { model in
+                model.id == name || model.name == name || model.repoID == name
+            }
 
-        guard let model = match else {
-            CLIOutput.printError(command: "model download", error: .modelNotFound, json: globalOptions.json)
-            throw ExitCode(1)
-        }
+            guard let model = match else {
+                CLIOutput.printError(command: "model download", error: .modelNotFound, json: json)
+                throw ExitCode(1)
+            }
 
-        CLIOutput.printProgress("Download of \(model.name) would start here (not implemented in CLI harness)", quiet: globalOptions.quiet)
-        CLIOutput.printSuccess(
-            command: "model download",
-            data: ModelDownloadResult(id: model.id, message: "Model download not yet implemented in CLI"),
-            json: globalOptions.json
-        )
+            CLIOutput.printProgress("Download of \(model.name) would start here (not implemented in CLI harness)", quiet: quiet)
+            CLIOutput.printSuccess(
+                command: "model download",
+                data: ModelDownloadResult(id: model.id, message: "Model download not yet implemented in CLI"),
+                json: json
+            )
+        }
     }
 }

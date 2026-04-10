@@ -16,8 +16,7 @@ struct GlobalOptions: ParsableArguments {
     var verbose = false
 }
 
-@available(macOS 14.0, *)
-struct OpenSuperMLXCLI: AsyncParsableCommand {
+struct OpenSuperMLXCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "OpenSuperMLX",
         abstract: "CLI test harness for OpenSuperMLX",
@@ -34,4 +33,22 @@ struct OpenSuperMLXCLI: AsyncParsableCommand {
             DiagnoseCommand.self,
         ]
     )
+}
+
+// MARK: - Async Bridge
+
+func runAsync(_ block: @escaping @MainActor @Sendable () async throws -> Void) -> Never {
+    Task { @MainActor in
+        do {
+            try await block()
+            Foundation.exit(0)
+        } catch let error as ExitCode {
+            Foundation.exit(error.rawValue)
+        } catch {
+            fputs("Error: \(error.localizedDescription)\n", stderr)
+            Foundation.exit(1)
+        }
+    }
+    RunLoop.main.run()
+    fatalError()
 }

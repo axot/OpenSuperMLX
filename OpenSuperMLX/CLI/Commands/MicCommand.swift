@@ -5,7 +5,7 @@ import Foundation
 
 import ArgumentParser
 
-struct MicCommand: AsyncParsableCommand {
+struct MicCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mic",
         abstract: "Manage microphone selection",
@@ -41,7 +41,7 @@ struct MicSelectResult: Encodable {
 
 // MARK: - List Subcommand
 
-struct MicListCommand: AsyncParsableCommand {
+struct MicListCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List available microphones"
@@ -49,15 +49,18 @@ struct MicListCommand: AsyncParsableCommand {
 
     @OptionGroup var globalOptions: GlobalOptions
 
-    func run() async throws {
-        let result = Self.executeList()
+    func run() throws {
+        let json = globalOptions.json
+        runAsync {
+            let result = MicListCommand.executeList()
 
-        switch result {
-        case .success(let entries):
-            CLIOutput.printSuccess(command: "mic list", data: entries, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "mic list", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let entries):
+                CLIOutput.printSuccess(command: "mic list", data: entries, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "mic list", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
@@ -79,7 +82,7 @@ struct MicListCommand: AsyncParsableCommand {
 
 // MARK: - Select Subcommand
 
-struct MicSelectCommand: AsyncParsableCommand {
+struct MicSelectCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "select",
         abstract: "Select a microphone"
@@ -89,15 +92,19 @@ struct MicSelectCommand: AsyncParsableCommand {
 
     @Argument var device: String
 
-    func run() async throws {
-        let result = Self.executeSelect(deviceIdentifier: device)
+    func run() throws {
+        let device = self.device
+        let json = globalOptions.json
+        runAsync {
+            let result = MicSelectCommand.executeSelect(deviceIdentifier: device)
 
-        switch result {
-        case .success(let data):
-            CLIOutput.printSuccess(command: "mic select", data: data, json: globalOptions.json)
-        case .failure(let error):
-            CLIOutput.printError(command: "mic select", error: error, json: globalOptions.json)
-            throw ExitCode(1)
+            switch result {
+            case .success(let data):
+                CLIOutput.printSuccess(command: "mic select", data: data, json: json)
+            case .failure(let error):
+                CLIOutput.printError(command: "mic select", error: error, json: json)
+                throw ExitCode(1)
+            }
         }
     }
 
