@@ -54,6 +54,79 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 
 `ClipboardUtilPasteIntegrationTests` require accessibility permissions and an active display — they `XCTSkip` when unavailable.
 
+## CLI Test Harness
+
+The binary doubles as a CLI test harness. When launched with a subcommand it runs headlessly; with no subcommand it launches the GUI as usual.
+
+```bash
+# Binary location after build
+BINARY=build/Build/Products/Debug/OpenSuperMLX.app/Contents/MacOS/OpenSuperMLX
+```
+
+### Available Commands
+
+| Command | Purpose | Example |
+|---|---|---|
+| `transcribe` | Batch file transcription (same path as drag-and-drop) | `$BINARY transcribe audio.wav --language zh --json` |
+| `stream-simulate` | Streaming pipeline via ring buffer injection (same path as record hotkey) | `$BINARY stream-simulate audio.wav --chunk-duration 0.5 --json` |
+| `correct` | LLM correction in isolation | `$BINARY correct "raw text" --provider bedrock --json` |
+| `config` | Read/write AppPreferences | `$BINARY config list --json` |
+| `recordings` | CRUD on recording database | `$BINARY recordings list --limit 10 --json` |
+| `queue` | Manage file transcription queue | `$BINARY queue add file1.wav file2.wav --json` |
+| `mic` | List and select audio devices | `$BINARY mic list --json` |
+| `model` | Manage model catalog | `$BINARY model list --json` |
+| `benchmark` | WER/CER accuracy + RTF speed + memory | `$BINARY benchmark audio.wav --expected-text "ref" --json` |
+| `diagnose` | Environment snapshot | `$BINARY diagnose --json` |
+
+### Global Flags
+
+All commands accept these flags **after** the subcommand name:
+
+- `--json` — structured JSON output to stdout (default: human-readable)
+- `--quiet` — suppress progress/status on stderr
+- `--verbose` — detailed logging on stderr
+
+### Output Convention
+
+- **stdout**: final result only (text or JSON) — safe to pipe to `jq` or capture in scripts
+- **stderr**: progress, logs, diagnostics
+- **Exit codes**: `0` success, `1` runtime failure, `64` bad arguments
+
+### Running CLI Tests
+
+```bash
+# All CLI command tests
+xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  CODE_SIGNING_ALLOWED=NO \
+  -only-testing:OpenSuperMLXTests/CLIRootCommandTests \
+  -only-testing:OpenSuperMLXTests/CLIOutputTests \
+  -only-testing:OpenSuperMLXTests/TranscribeCommandTests \
+  -only-testing:OpenSuperMLXTests/StreamSimulateCommandTests \
+  -only-testing:OpenSuperMLXTests/CorrectCommandTests \
+  -only-testing:OpenSuperMLXTests/ConfigCommandTests \
+  -only-testing:OpenSuperMLXTests/RecordingsCommandTests \
+  -only-testing:OpenSuperMLXTests/QueueCommandTests \
+  -only-testing:OpenSuperMLXTests/MicCommandTests \
+  -only-testing:OpenSuperMLXTests/ModelCommandTests \
+  -only-testing:OpenSuperMLXTests/BenchmarkCommandTests \
+  -only-testing:OpenSuperMLXTests/DiagnoseCommandTests
+
+# Single CLI command test class
+xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  CODE_SIGNING_ALLOWED=NO -only-testing:OpenSuperMLXTests/ConfigCommandTests
+
+# Smoke test (quick sanity check after build)
+$BINARY diagnose --json 2>/dev/null | python3 -m json.tool
+$BINARY config list --json 2>/dev/null | python3 -m json.tool
+$BINARY model list --json 2>/dev/null | python3 -m json.tool
+```
+
+### Error Codes (JSON `error.code` field)
+
+`model_not_found`, `model_not_cached`, `model_load_failed`, `audio_file_not_found`, `audio_format_unsupported`, `transcription_failed`, `stream_timeout`, `llm_correction_failed`, `database_error`, `audio_file_missing`, `invalid_config_key`, `invalid_config_value`
+
 ## Patches
 
 `run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
@@ -79,6 +152,21 @@ OpenSuperMLX/                    # Main app target
 ├── Engines/
 │   ├── TranscriptionEngine.swift  # Protocol definition
 │   └── MLXEngine.swift            # MLX-based implementation
+├── CLI/
+│   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
+│   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation
+│   ├── CLIError.swift             # 12 enumerated error codes
+│   └── Commands/                  # 10 subcommand implementations
+│       ├── TranscribeCommand.swift
+│       ├── StreamSimulateCommand.swift
+│       ├── CorrectCommand.swift
+│       ├── ConfigCommand.swift
+│       ├── RecordingsCommand.swift
+│       ├── QueueCommand.swift
+│       ├── MicCommand.swift
+│       ├── ModelCommand.swift
+│       ├── BenchmarkCommand.swift
+│       └── DiagnoseCommand.swift
 ├── Services/
 │   ├── AudioMixer.swift           # Multi-source audio mixing
 │   ├── BedrockLLMProvider.swift   # AWS Bedrock LLM provider
@@ -119,7 +207,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 
 ## Dependencies
 
-- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
+- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime, ArgumentParser
 - **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`; `WeTextProcessing` (C++ Chinese ITN processor, built via cmake)
@@ -244,6 +332,33 @@ When investigating bugs, you MUST read [`docs/debugging.md`](docs/debugging.md) 
 
 - `#if DEBUG ... #endif` for debug-only code (see `DevConfig.swift`)
 - File headers: `// FileName.swift // OpenSuperMLX // Created by ...`
+
+### Pre-Commit CLI Verification (MANDATORY)
+
+Before committing any feature or bug fix that touches transcription, streaming, settings, recording, model, or audio pipeline code, you MUST verify the change via CLI. This is not optional — UI-only testing is insufficient because UI bugs are hard to reproduce.
+
+**Rule: If a CLI command can exercise the code path you changed, run it before committing.**
+
+| What you changed | CLI verification required |
+|---|---|
+| Transcription logic, model loading, ITN, autocorrect | `transcribe <test-audio> --json` — verify output text is correct |
+| Streaming pipeline, ring buffer, feedTask, events | `stream-simulate <test-audio> --json` — verify streaming produces text |
+| LLM correction, provider config | `correct "test text" --json` — verify correction runs |
+| AppPreferences, settings, defaults | `config get <key>` / `config set <key> <value>` — verify read/write |
+| RecordingStore, database migrations | `recordings list --json` — verify DB operations work |
+| TranscriptionQueue, file processing | `queue status --json` — verify queue state |
+| MicrophoneService, device handling | `mic list --json` — verify device enumeration |
+| MLXModelManager, model catalog | `model list --json` — verify catalog |
+| Any change at all (minimum bar) | `diagnose --json` — verify environment snapshot still works |
+
+**Workflow:**
+1. Make your code change
+2. Run the relevant CLI command(s) from the table above
+3. Verify the JSON output is valid and correct
+4. Run the relevant unit tests (`-only-testing:OpenSuperMLXTests/<TestClass>`)
+5. Only then commit
+
+**For bug fixes:** reproduce the bug via CLI first, fix, then verify the fix via the same CLI command. Include the CLI reproduction steps in the commit message.
 
 ## CI
 
