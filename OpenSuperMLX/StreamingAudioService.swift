@@ -39,6 +39,7 @@ class StreamingAudioService: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var recordingStartTime: Date?
     private var microphoneChangeObserver: NSObjectProtocol?
+    private var microphoneDisconnectObserver: NSObjectProtocol?
 
     /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
@@ -47,6 +48,7 @@ class StreamingAudioService: ObservableObject {
 
     private let preBufferCapacity = 22050
     private var isEngineWarmed = false
+    private var hasBeenWarmedOnce = false
 
     // MARK: - Init
 
@@ -63,6 +65,24 @@ class StreamingAudioService: ObservableObject {
                 } else if self.isEngineWarmed {
                     self.coolDown()
                     self.warmUp()
+                } else if self.hasBeenWarmedOnce {
+                    self.warmUp()
+                }
+            }
+        }
+
+        microphoneDisconnectObserver = NotificationCenter.default.addObserver(
+            forName: .microphoneDisconnected,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.isStreaming {
+                    logger.info("Active microphone disconnected during streaming — deferring to IndicatorViewModel")
+                } else if self.isEngineWarmed {
+                    logger.info("Active microphone disconnected — stopping engine (no fallback)")
+                    self.coolDown()
                 }
             }
         }
@@ -77,26 +97,23 @@ class StreamingAudioService: ObservableObject {
 
         let activeMic = MicrophoneService.shared.activateForRecording()
 
-        if let activeMic,
-           let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
-            var deviceID = coreAudioID
-            let status = AudioUnitSetProperty(
-                engine.inputNode.audioUnit!,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global, 0,
-                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
-            if status == noErr {
-                logger.info("Warm-up: bound input to \(activeMic.displayName, privacy: .public)")
-            } else {
-                logger.error("Warm-up: failed to bind input device (status \(status, privacy: .public))")
-            }
-        }
-
         let inputNode = engine.inputNode
-
         let isVirtual = activeMic.map { MicrophoneService.shared.isVirtualDevice($0) } ?? false
+
         if !isVirtual {
+            // VPIO reads kAudioHardwarePropertyDefaultInputDevice at aggregate creation time.
+            // Temporarily set system default to our target device so VPIO's aggregate includes it.
+            var savedDefaultInput: AudioDeviceID?
+            if let activeMic,
+               let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
+                let current = getSystemDefaultInputDevice()
+                if current != coreAudioID {
+                    savedDefaultInput = current
+                    setSystemDefaultInputDevice(coreAudioID)
+                    usleep(50_000)
+                }
+            }
+
             do {
                 try inputNode.setVoiceProcessingEnabled(true)
 
@@ -104,7 +121,7 @@ class StreamingAudioService: ObservableObject {
                     mEnableAdvancedDucking: DarwinBoolean(false),
                     mDuckingLevel: .min
                 )
-                let status = AudioUnitSetProperty(
+                let duckStatus = AudioUnitSetProperty(
                     inputNode.audioUnit!,
                     kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
                     kAudioUnitScope_Global,
@@ -112,15 +129,29 @@ class StreamingAudioService: ObservableObject {
                     &duckingConfig,
                     UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size)
                 )
-                if status != noErr {
-                    logger.warning("Warm-up: failed to disable VPIO ducking (status \(status, privacy: .public))")
+                if duckStatus != noErr {
+                    logger.warning("Warm-up: failed to disable VPIO ducking (status \(duckStatus, privacy: .public))")
                 }
 
                 logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
             } catch {
                 logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
             }
+
+            if let savedDefaultInput {
+                setSystemDefaultInputDevice(savedDefaultInput)
+            }
         } else {
+            if let activeMic,
+               let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
+                var deviceID = coreAudioID
+                AudioUnitSetProperty(
+                    inputNode.audioUnit!,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global, 0,
+                    &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
+            }
             logger.info("Warm-up: VoiceProcessingIO skipped for virtual device \(activeMic?.displayName ?? "unknown", privacy: .public)")
         }
 
@@ -149,20 +180,62 @@ class StreamingAudioService: ObservableObject {
             try engine.start()
             audioEngine = engine
             isEngineWarmed = true
+            hasBeenWarmedOnce = true
             logger.info("Audio engine warmed up")
         } catch {
             logger.error("Warm-up failed: \(error, privacy: .public)")
         }
     }
 
+    private func getSystemDefaultInputDevice() -> AudioDeviceID {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
+        return deviceID
+    }
+
+    private func setSystemDefaultInputDevice(_ deviceID: AudioDeviceID) {
+        var mutableID = deviceID
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size),
+            &mutableID
+        )
+        if status != noErr {
+            logger.warning("Failed to set system default input device (status \(status, privacy: .public))")
+        }
+    }
+
+    private var retiredEngines: [AVAudioEngine] = []
+
     func coolDown() {
         guard isEngineWarmed else { return }
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        retireEngine(audioEngine)
         audioEngine = nil
         isEngineWarmed = false
         ringBuffer.withLock { $0.removeAll() }
         logger.info("Audio engine cooled down")
+    }
+
+    private func retireEngine(_ engine: AVAudioEngine?) {
+        guard let engine else { return }
+        retiredEngines.append(engine)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.retiredEngines.removeAll { $0 === engine }
+        }
     }
 
     // MARK: - Mic Hot-Swap
@@ -178,6 +251,7 @@ class StreamingAudioService: ObservableObject {
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        retireEngine(engine)
         audioEngine = nil
         isEngineWarmed = false
 

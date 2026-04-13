@@ -39,6 +39,7 @@ class IndicatorViewModel: ObservableObject {
     private let streamingService = StreamingAudioService.shared
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
+    private var micDisconnectObserver: NSObjectProtocol?
 
     init() {
         self.recordingStore = RecordingStore.shared
@@ -66,6 +67,20 @@ class IndicatorViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        micDisconnectObserver = NotificationCenter.default.addObserver(
+            forName: .microphoneDisconnected,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isStreamingMode, self.state == .recording else { return }
+                self.logger.info("Microphone disconnected during streaming — finalizing recording")
+                self.startDecoding()
+                self.streamingService.coolDown()
+                ErrorToastManager.shared.show("Microphone disconnected — recording saved")
+            }
+        }
     }
     
     var isTranscriptionBusy: Bool {
@@ -269,6 +284,10 @@ class IndicatorViewModel: ObservableObject {
         if isStreamingMode {
             streamingService.cancelStreaming()
             isStreamingMode = false
+        }
+        if let obs = micDisconnectObserver {
+            NotificationCenter.default.removeObserver(obs)
+            micDisconnectObserver = nil
         }
         cancellables.removeAll()
     }

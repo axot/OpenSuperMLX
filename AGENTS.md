@@ -163,6 +163,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 - **Protocol abstraction**: `TranscriptionEngine` protocol, `MLXEngine` implementation
 - **Communication**: `NotificationCenter` with typed `Notification.Name` extensions
 - **Recording flow**: ShortcutManager → IndicatorViewModel.startRecording() → StreamingAudioService or AudioRecorder
+- **User-facing notifications**: `ErrorToastManager.shared.show("message")` — floating toast at top of screen. Use for any user-facing warning or status message (mic disconnected, LLM errors, etc.). Defined in `Indicator/ErrorToastManager.swift`. Auto-dismissable with close button.
 
 ### Concurrency
 

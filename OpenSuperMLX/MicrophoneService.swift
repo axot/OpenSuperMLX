@@ -67,8 +67,21 @@ final class MicrophoneService: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshAvailableMicrophones()
-            self?.updateCurrentMicrophone()
+            guard let self else { return }
+            let wasSelectedAvailable = self.selectedMicrophone.map { self.isDeviceAvailable($0) } ?? false
+            self.refreshAvailableMicrophones()
+            self.updateCurrentMicrophone()
+
+            if let selected = self.selectedMicrophone,
+               !wasSelectedAvailable,
+               self.isDeviceAvailable(selected) {
+                self.logger.info("Selected microphone reconnected: \(selected.name, privacy: .public)")
+                NotificationCenter.default.post(
+                    name: .microphoneDidChange,
+                    object: nil,
+                    userInfo: ["device": selected]
+                )
+            }
         }
         
         NotificationCenter.default.addObserver(
@@ -116,9 +129,11 @@ final class MicrophoneService: ObservableObject {
                     isBuiltIn: isBuiltIn
                 )
             }
+
         availableMicrophones = allDevices.filter { device in
             !isAggregateDevice(device) && hasRealInputStream(device)
         }
+
         if AppPreferences.shared.debugMode {
             logger.debug("[DEBUG] Discovered \(self.availableMicrophones.count, privacy: .public) microphones: \(self.availableMicrophones.map { $0.name }.joined(separator: ", "), privacy: .public)")
         }
