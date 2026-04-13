@@ -54,6 +54,18 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 
 `ClipboardUtilPasteIntegrationTests` require accessibility permissions and an active display — they `XCTSkip` when unavailable.
 
+## CLI Test Harness
+
+The binary doubles as a CLI test harness — subcommand runs headlessly, no subcommand launches the GUI. 10 commands: `transcribe`, `stream-simulate`, `correct`, `config`, `recordings`, `queue`, `mic`, `model`, `benchmark`, `diagnose`. All accept `--json`, `--quiet`, `--verbose` flags after the subcommand.
+
+```bash
+BINARY=build/Build/Products/Debug/OpenSuperMLX.app/Contents/MacOS/OpenSuperMLX
+$BINARY diagnose --json          # environment snapshot
+$BINARY help <command>            # per-command usage
+```
+
+For full command reference, test commands, and error codes, see [`docs/cli.md`](docs/cli.md).
+
 ## Patches
 
 `run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
@@ -79,6 +91,21 @@ OpenSuperMLX/                    # Main app target
 ├── Engines/
 │   ├── TranscriptionEngine.swift  # Protocol definition
 │   └── MLXEngine.swift            # MLX-based implementation
+├── CLI/
+│   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
+│   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation
+│   ├── CLIError.swift             # 12 enumerated error codes
+│   └── Commands/                  # 10 subcommand implementations
+│       ├── TranscribeCommand.swift
+│       ├── StreamSimulateCommand.swift
+│       ├── CorrectCommand.swift
+│       ├── ConfigCommand.swift
+│       ├── RecordingsCommand.swift
+│       ├── QueueCommand.swift
+│       ├── MicCommand.swift
+│       ├── ModelCommand.swift
+│       ├── BenchmarkCommand.swift
+│       └── DiagnoseCommand.swift
 ├── Services/
 │   ├── AudioMixer.swift           # Multi-source audio mixing
 │   ├── BedrockLLMProvider.swift   # AWS Bedrock LLM provider
@@ -119,7 +146,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 
 ## Dependencies
 
-- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime
+- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime, ArgumentParser
 - **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`; `WeTextProcessing` (C++ Chinese ITN processor, built via cmake)
@@ -246,6 +273,10 @@ When investigating bugs, you MUST read [`docs/debugging.md`](docs/debugging.md) 
 - `#if DEBUG ... #endif` for debug-only code (see `DevConfig.swift`)
 - File headers: `// FileName.swift // OpenSuperMLX // Created by ...`
 
+### Pre-Commit CLI Verification (MANDATORY)
+
+**If a CLI command can exercise the code path you changed, run it before committing.** UI-only testing is insufficient — UI bugs are hard to reproduce. For bug fixes: reproduce via CLI first, fix, verify via CLI, include CLI repro steps in commit message. See [`docs/cli.md`](docs/cli.md) for the full verification lookup table.
+
 ## CI
 
 GitHub Actions on `master` branch and PRs (`.github/workflows/build.yml`):
@@ -309,6 +340,7 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 | [`docs/learnings.md`](docs/learnings.md) | **Before any release, or when touching native libraries.** Past mistakes and the New Native Library Checklist. |
 | [`docs/memory.md`](docs/memory.md) | **Profiling memory or touching streaming pipeline.** MLX GPU memory budget, encoder dtype, streaming memory invariants, and red flags for memory regressions. |
 | [`docs/release_build.md`](docs/release_build.md) | **Building a release.** Notarization command (`notarize_app.sh`). |
+| [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
 
 ## Release
 
