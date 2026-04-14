@@ -34,17 +34,19 @@ public enum ModelUtils {
         cache: HubCache = .default,
         progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> URL {
+        // Hub blobs go to /tmp (OS-managed cleanup); permanent model files go to cache via downloadSnapshot(to:)
+        let tmpCacheDir = FileManager.default.temporaryDirectory.appendingPathComponent("mlx-hub-download")
+        let tmpHubCache = HubCache(cacheDirectory: tmpCacheDir)
         let client: HubClient
         if let token = hfToken, !token.isEmpty {
             print("Using HuggingFace token from configuration")
-            client = HubClient(host: HubClient.defaultHost, bearerToken: token, cache: cache)
+            client = HubClient(host: HubClient.defaultHost, bearerToken: token, cache: tmpHubCache)
         } else {
-            client = HubClient(cache: cache)
+            client = HubClient(cache: tmpHubCache)
         }
-        let resolvedCache = client.cache ?? cache
         return try await resolveOrDownloadModel(
             client: client,
-            cache: resolvedCache,
+            cache: cache,
             repoID: repoID,
             requiredExtension: requiredExtension,
             progressHandler: progressHandler
