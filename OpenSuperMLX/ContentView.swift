@@ -753,7 +753,8 @@ struct ContentView: View {
                 ZStack {
                     Color.black.opacity(0.3)
                     VStack(spacing: 16) {
-                        if let downloadProgress = viewModel.transcriptionService.downloadProgress {
+                        if let downloadProgress = viewModel.transcriptionService.downloadProgress,
+                           downloadProgress > 0, downloadProgress < 1 {
                             ProgressView(value: downloadProgress)
                                 .progressViewStyle(.linear)
                                 .frame(width: 200)

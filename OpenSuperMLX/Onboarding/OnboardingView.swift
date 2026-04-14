@@ -276,7 +276,8 @@ struct OnboardingMLXModelItemView: View {
                 
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                     VStack(spacing: 4) {
-                        if let progress = viewModel.downloadProgress {
+                        if let progress = viewModel.downloadProgress,
+                           progress > 0, progress < 1 {
                             ProgressView(value: progress)
                                 .progressViewStyle(.linear)
                             Text("\(Int(progress * 100))%")

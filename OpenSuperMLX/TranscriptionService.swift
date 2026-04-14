@@ -63,6 +63,7 @@ class TranscriptionService: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let engine = await MLXEngine()
             engine.downloadProgressHandler = { [weak self] progress in
+                logger.debug("Download progress: \(progress.fractionCompleted, privacy: .public) (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
                 self?.downloadProgress = progress.fractionCompleted
             }
             
