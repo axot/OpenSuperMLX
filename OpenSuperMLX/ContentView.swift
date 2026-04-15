@@ -15,23 +15,25 @@ import KeyboardShortcuts
 
 @MainActor
 class ContentViewModel: ObservableObject {
+    // MARK: - State
+
     @Published var state: RecordingState = .idle
     @Published var isBlinking = false
-    let recorder: AudioRecorder = .shared
     let transcriptionService = TranscriptionService.shared
     let transcriptionQueue = TranscriptionQueue.shared
-    let recordingStore = RecordingStore.shared
+    let microphoneService = MicrophoneService.shared
     @Published var recordings: [Recording] = []
     @Published var isLoadingMore = false
     @Published var canLoadMore = true
     @Published var recordingDuration: TimeInterval = 0
-    let microphoneService = MicrophoneService.shared
     @Published var shouldClearSearch = false
     @Published var streamingConfirmedText = ""
     @Published var streamingProvisionalText = ""
     @Published var isSpeechDetected = false
     @Published private(set) var isStreamingMode = false
-    
+
+    private let recorder: AudioRecorder = .shared
+    private let recordingStore = RecordingStore.shared
     private let streamingService = StreamingAudioService.shared
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "ContentView")
     private var currentPage = 0
@@ -41,7 +43,9 @@ class ContentViewModel: ObservableObject {
     private var recordingStartTime: Date?
     private var durationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
-    
+
+    // MARK: - Init
+
     init() {
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -95,6 +99,8 @@ class ContentViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
+    // MARK: - Data Loading
+
     func loadInitialData() {
         currentSearchQuery = ""
         currentPage = 0
@@ -176,6 +182,8 @@ class ContentViewModel: ObservableObject {
         recordingStore.deleteAllRecordings()
         recordings.removeAll()
     }
+
+    // MARK: - Recording Control
 
     var isRecording: Bool {
         if isStreamingMode {
@@ -328,6 +336,8 @@ class ContentViewModel: ObservableObject {
         streamingConfirmedText = ""
         streamingProvisionalText = ""
     }
+
+    // MARK: - Private Helpers
 
     private func stopDurationTimer() {
         durationTimer?.invalidate()

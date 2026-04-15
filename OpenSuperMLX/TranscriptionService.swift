@@ -51,6 +51,8 @@ class TranscriptionService: ObservableObject {
         progress = 0.0
     }
     
+    // MARK: - Engine Management
+
     private func loadEngine() {
         logger.info("Loading MLX engine")
         if AppPreferences.shared.debugMode {
@@ -100,6 +102,8 @@ class TranscriptionService: ObservableObject {
         reloadEngine()
     }
     
+    // MARK: - Transcription
+
     func transcribeAudio(url: URL, settings: Settings, applyCorrection: Bool = true, forceLLM: Bool = false) async throws -> String {
         logger.info("Starting transcription for: \(url.lastPathComponent, privacy: .public)")
         if AppPreferences.shared.debugMode {

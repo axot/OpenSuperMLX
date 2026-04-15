@@ -6,15 +6,16 @@
 //
 
 import Foundation
-import MLX
-import MLXNN
 import os
 
-private let logger = Logger(subsystem: "MLXAudioSTT", category: "Qwen3ASR")
+import HuggingFace
+import MLX
 import MLXAudioCore
 import MLXLMCommon
-import HuggingFace
+import MLXNN
 import Tokenizers
+
+private let logger = Logger(subsystem: "MLXAudioSTT", category: "Qwen3ASR")
 
 /// Wrapper to pass non-Sendable values across concurrency boundaries when safety is managed externally.
 struct UncheckedSendableBox<T>: @unchecked Sendable {
