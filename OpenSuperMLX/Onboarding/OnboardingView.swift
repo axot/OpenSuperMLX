@@ -43,7 +43,7 @@ class OnboardingViewModel: ObservableObject {
     @Published var selectedModelId: String?
     @Published var isDownloading: Bool = false
     @Published var downloadingModelName: String?
-    @Published var downloadProgress: Progress?
+    @Published var downloadProgress: Double?
 
     private var downloadTask: Task<Void, Error>?
 
@@ -84,7 +84,7 @@ class OnboardingViewModel: ObservableObject {
         
         downloadTask = Task {
             let _ = try await Qwen3ASRModel.fromPretrained(model.repoID, progressHandler: { [weak self] progress in
-                self?.downloadProgress = progress
+                self?.downloadProgress = progress.fractionCompleted
             })
         }
         
@@ -277,10 +277,10 @@ struct OnboardingMLXModelItemView: View {
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                     VStack(spacing: 4) {
                         if let progress = viewModel.downloadProgress,
-                           !progress.isFinished {
-                            ProgressView(value: progress.fractionCompleted)
+                           progress > 0, progress < 1 {
+                            ProgressView(value: progress)
                                 .progressViewStyle(.linear)
-                            Text("\(Int(progress.fractionCompleted * 100))%")
+                            Text("\(Int(progress * 100))%")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         } else {
