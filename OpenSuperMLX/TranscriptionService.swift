@@ -16,7 +16,7 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var loadError: Error?
     @Published private(set) var progress: Float = 0.0
-    @Published private(set) var downloadProgress: Double? = nil
+    @Published private(set) var downloadProgress: Progress?
     
     private var currentEngine: TranscriptionEngine?
 
@@ -63,8 +63,8 @@ class TranscriptionService: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let engine = await MLXEngine()
             engine.downloadProgressHandler = { [weak self] progress in
-                logger.debug("Download progress: \(progress.fractionCompleted, privacy: .public) (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
-                self?.downloadProgress = progress.fractionCompleted
+                logger.info("Download: \(Int(progress.fractionCompleted * 100))% (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
+                self?.downloadProgress = progress
             }
             
             do {

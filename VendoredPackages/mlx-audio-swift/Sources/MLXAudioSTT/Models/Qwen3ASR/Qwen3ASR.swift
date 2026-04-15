@@ -8,6 +8,9 @@
 import Foundation
 import MLX
 import MLXNN
+import os
+
+private let logger = Logger(subsystem: "MLXAudioSTT", category: "Qwen3ASR")
 import MLXAudioCore
 import MLXLMCommon
 import HuggingFace
@@ -1066,8 +1069,13 @@ public class Qwen3ASRModel: Module {
         eval(logits)
 
         var generatedTokens: [Int] = []
+        var consecutiveRepeatCount = 0
+        var lastToken: Int = -1
+        var maxConsecutiveRepeat = 0
+        var repetitionLogged = false
+        var blockPatternDetected = false
 
-        for _ in 0..<maxTokens {
+        for i in 0..<maxTokens {
             var lastLogits = logits[0..., -1, 0...]
             if temperature > 0 {
                 lastLogits = lastLogits / temperature
@@ -1075,10 +1083,50 @@ public class Qwen3ASRModel: Module {
             let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
 
             if eosTokenIds.contains(nextToken) {
+                logger.warning("[generateSingleChunk] EOS at token \(i, privacy: .public), total=\(generatedTokens.count, privacy: .public)")
                 break
             }
 
+            if nextToken == lastToken {
+                consecutiveRepeatCount += 1
+                if consecutiveRepeatCount > maxConsecutiveRepeat {
+                    maxConsecutiveRepeat = consecutiveRepeatCount
+                }
+                if consecutiveRepeatCount == 20 && !repetitionLogged {
+                    let repeatingText = tokenizer.decode(tokens: [nextToken])
+                    logger.warning("[generateSingleChunk] SINGLE-TOKEN LOOP at token \(i, privacy: .public): id=\(nextToken, privacy: .public) (\"\(repeatingText, privacy: .public)\") repeated 20+ times")
+                    repetitionLogged = true
+                }
+            } else {
+                consecutiveRepeatCount = 1
+                lastToken = nextToken
+                repetitionLogged = false
+            }
+
             generatedTokens.append(nextToken)
+
+            if !blockPatternDetected && generatedTokens.count >= 20 && i % 50 == 0 {
+                for period in 2...6 {
+                    let tailLen = period * 8
+                    if generatedTokens.count >= tailLen {
+                        let tail = Array(generatedTokens.suffix(tailLen))
+                        let pattern = Array(tail.prefix(period))
+                        var isRepeating = true
+                        for j in stride(from: period, to: tailLen, by: period) {
+                            if Array(tail[j..<min(j + period, tailLen)]) != pattern {
+                                isRepeating = false
+                                break
+                            }
+                        }
+                        if isRepeating {
+                            let patternText = tokenizer.decode(tokens: pattern)
+                            logger.warning("[generateSingleChunk] BLOCK PATTERN at token \(i, privacy: .public): period=\(period, privacy: .public), reps=\(tailLen / period, privacy: .public), pattern=\"\(patternText, privacy: .public)\", tokenIds=\(pattern.map(String.init).joined(separator: ","), privacy: .public)")
+                            blockPatternDetected = true
+                            break
+                        }
+                    }
+                }
+            }
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
@@ -1088,8 +1136,16 @@ public class Qwen3ASRModel: Module {
             }
         }
 
+        if maxConsecutiveRepeat >= 5 {
+            logger.warning("[generateSingleChunk] maxConsecutiveRepeat=\(maxConsecutiveRepeat, privacy: .public), totalTokens=\(generatedTokens.count, privacy: .public)")
+        }
+
         let rawText = tokenizer.decode(tokens: generatedTokens)
         let parsed = TextMergeUtilities.parseASROutput(rawText)
+        let hitMaxTokens = generatedTokens.count >= maxTokens
+        if hitMaxTokens {
+            logger.warning("[generateSingleChunk] HIT maxTokens limit (\(maxTokens, privacy: .public)), output likely truncated or degenerate")
+        }
         return (parsed.text.trimmingCharacters(in: .whitespacesAndNewlines), promptTokenCount, generatedTokens.count)
     }
 
@@ -1124,6 +1180,7 @@ public class Qwen3ASRModel: Module {
             if remainingTokens <= 0 { break }
 
             let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
+            logger.warning("[generate] chunk \(chunks.firstIndex(where: { $0.1 == offsetSec }) ?? -1, privacy: .public)/\(chunks.count, privacy: .public): offset=\(String(format: "%.1f", offsetSec), privacy: .public)s, duration=\(String(format: "%.1f", actualChunkDuration), privacy: .public)s, remainingTokens=\(remainingTokens, privacy: .public)")
 
             let result = generateSingleChunk(
                 audio: chunkAudio,
@@ -1131,6 +1188,10 @@ public class Qwen3ASRModel: Module {
                 temperature: temperature,
                 language: language
             )
+
+            let textPreview = String(result.text.prefix(80))
+            let textSuffix = result.text.count > 80 ? String(result.text.suffix(40)) : ""
+            logger.warning("[generate] chunk result: genTokens=\(result.generationTokens, privacy: .public), textLen=\(result.text.count, privacy: .public), preview=\"\(textPreview, privacy: .public)...\(textSuffix, privacy: .public)\"")
 
             allTexts.append(result.text)
             totalPromptTokens += result.promptTokens

@@ -1,6 +1,96 @@
 import Foundation
 import HuggingFace
 
+// MARK: - Direct Download Progress Delegate
+
+/// Reports byte-level progress directly to a standalone Progress object,
+/// bypassing Foundation.Progress parent-child KVO (which is broken for large downloads).
+private final class DirectDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    let progress: Progress
+    let offset: Int64
+    let destination: URL
+    let continuation: CheckedContinuation<Void, Error>
+    var session: URLSession?
+
+    private let lock = NSLock()
+    private var resumed = false
+
+    init(
+        progress: Progress,
+        offset: Int64,
+        destination: URL,
+        continuation: CheckedContinuation<Void, Error>
+    ) {
+        self.progress = progress
+        self.offset = offset
+        self.destination = destination
+        self.continuation = continuation
+        super.init()
+    }
+
+    func urlSession(
+        _: URLSession,
+        downloadTask _: URLSessionDownloadTask,
+        didWriteData _: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        if totalBytesExpectedToWrite > 0 {
+            progress.totalUnitCount = max(progress.totalUnitCount, offset + totalBytesExpectedToWrite)
+        }
+        progress.completedUnitCount = offset + totalBytesWritten
+    }
+
+    func urlSession(
+        _: URLSession,
+        downloadTask _: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: location, to: destination)
+        } catch {
+            resumeOnce(throwing: error)
+        }
+    }
+
+    func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        session?.finishTasksAndInvalidate()
+        if let error {
+            resumeOnce(throwing: error)
+            return
+        }
+        guard let httpResponse = task.response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            let statusCode = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+            let path = task.originalRequest?.url?.lastPathComponent ?? "unknown"
+            resumeOnce(throwing: ModelUtilsError.downloadFailed("\(path) (HTTP \(statusCode))"))
+            return
+        }
+        resumeOnce(throwing: nil)
+    }
+
+    private func resumeOnce(throwing error: Error?) {
+        lock.lock()
+        let shouldResume = !resumed
+        resumed = true
+        lock.unlock()
+        guard shouldResume else { return }
+        if let error {
+            continuation.resume(throwing: error)
+        } else {
+            continuation.resume()
+        }
+    }
+}
+
+private final class ProgressBox: @unchecked Sendable {
+    let value: Progress
+    init(_ value: Progress) { self.value = value }
+}
+
+// MARK: - ModelUtils
+
 public enum ModelUtils {
     public static func resolveModelType(
         repoID: Repo.ID,
@@ -34,15 +124,15 @@ public enum ModelUtils {
         cache: HubCache = .default,
         progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> URL {
-        // Hub blobs go to /tmp (OS-managed cleanup); permanent model files go to cache via downloadSnapshot(to:)
-        let tmpCacheDir = FileManager.default.temporaryDirectory.appendingPathComponent("mlx-hub-download")
-        let tmpHubCache = HubCache(cacheDirectory: tmpCacheDir)
+        let downloadCache = HubCache(
+            cacheDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("mlx-hub-download")
+        )
         let client: HubClient
         if let token = hfToken, !token.isEmpty {
             print("Using HuggingFace token from configuration")
-            client = HubClient(host: HubClient.defaultHost, bearerToken: token, cache: tmpHubCache)
+            client = HubClient(host: HubClient.defaultHost, bearerToken: token, cache: downloadCache)
         } else {
-            client = HubClient(cache: tmpHubCache)
+            client = HubClient(cache: downloadCache)
         }
         return try await resolveOrDownloadModel(
             client: client,
@@ -111,20 +201,91 @@ public enum ModelUtils {
         let allowedExtensions: Set<String> = ["*.\(normalizedRequiredExtension)", "*.safetensors", "*.json", "*.txt", "*.wav"]
 
         print("Downloading model \(repoID)...")
-        _ = try await client.downloadSnapshot(
-            of: repoID,
-            kind: .model,
-            to: modelDir,
-            revision: "main",
-            matching: Array(allowedExtensions),
-            progressHandler: { progress in
-                if let handler = progressHandler {
-                    handler(progress)
-                } else {
-                    print("\(progress.completedUnitCount)/\(progress.totalUnitCount) files")
+
+        // List files to determine sizes and split into small/large for download strategy.
+        // Large files are downloaded with our own URLSessionDownloadDelegate for real-time
+        // byte-level progress, avoiding Foundation.Progress parent-child KVO staleness.
+        let allEntries = try await client.listFiles(
+            in: repoID, kind: .model, revision: "main", recursive: true
+        )
+        let entries = allEntries.filter { entry in
+            guard entry.type == .file else { return false }
+            return allowedExtensions.contains { glob in
+                fnmatch(glob, entry.path, 0) == 0
+            }
+        }
+
+        let largeFileThreshold = 50 * 1024 * 1024
+        let totalBytes = entries.reduce(Int64(0)) { $0 + max(Int64($1.size ?? 0), 1) }
+
+        // Standalone Progress — no parent-child relationship, updated directly by our delegate
+        let progress = Progress(totalUnitCount: max(totalBytes, 1))
+        if let progressHandler {
+            await progressHandler(progress)
+        }
+
+        // Periodically call progressHandler to trigger SwiftUI re-renders
+        let progressBox = ProgressBox(progress)
+        let samplingTask: Task<Void, Never>? = progressHandler.map { handler in
+            Task {
+                while !Task.isCancelled {
+                    await handler(progressBox.value)
+                    try? await Task.sleep(for: .milliseconds(200))
                 }
             }
-        )
+        }
+
+        var downloadedBytes: Int64 = 0
+
+        do {
+            for entry in entries {
+                let fileSize = max(Int64(entry.size ?? 0), 1)
+                let destination = modelDir.appendingPathComponent(entry.path)
+
+                try FileManager.default.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+
+                if fileSize < largeFileThreshold {
+                    _ = try await client.downloadFile(
+                        at: entry.path,
+                        from: repoID,
+                        to: destination,
+                        kind: .model,
+                        revision: "main"
+                    )
+                    downloadedBytes += fileSize
+                    progress.completedUnitCount = downloadedBytes
+                } else {
+                    try await downloadLargeFile(
+                        host: client.host,
+                        bearerToken: await client.bearerToken,
+                        repoID: repoID,
+                        filePath: entry.path,
+                        destination: destination,
+                        progress: progress,
+                        offset: downloadedBytes
+                    )
+                    downloadedBytes += fileSize
+                }
+            }
+        } catch {
+            samplingTask?.cancel()
+            throw error
+        }
+
+        samplingTask?.cancel()
+        progress.completedUnitCount = progress.totalUnitCount
+        if let progressHandler {
+            await progressHandler(progress)
+        }
+
+        // Clean /tmp download cache after successful download
+        if let tmpCache = client.cache {
+            let tmpRepoDir = tmpCache.repoDirectory(repo: repoID, kind: .model)
+            try? FileManager.default.removeItem(at: tmpRepoDir)
+        }
 
         // Post-download validation: ensure required files are non-zero
         let downloadedFiles = try? FileManager.default.contentsOfDirectory(
@@ -145,6 +306,46 @@ public enum ModelUtils {
         return modelDir
     }
 
+    // MARK: - Large File Download
+
+    /// Downloads a large file directly with our own URLSessionDownloadDelegate,
+    /// providing real-time byte-level progress via the delegate's didWriteData callback.
+    private static func downloadLargeFile(
+        host: URL,
+        bearerToken: String?,
+        repoID: Repo.ID,
+        filePath: String,
+        destination: URL,
+        progress: Progress,
+        offset: Int64
+    ) async throws {
+        // Construct the same resolve URL that HubClient uses
+        let url = host
+            .appending(path: repoID.namespace)
+            .appending(path: repoID.name)
+            .appending(path: "resolve")
+            .appending(component: "main")
+            .appending(path: filePath)
+
+        var request = URLRequest(url: url)
+        if let token = bearerToken {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let delegate = DirectDownloadDelegate(
+                progress: progress, offset: offset,
+                destination: destination, continuation: continuation
+            )
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            delegate.session = session
+            let task = session.downloadTask(with: request)
+            task.resume()
+        }
+    }
+
+    // MARK: - Cache Management
+
     private static func clearCaches(modelDir: URL, repoID: Repo.ID, hubCache: HubCache) {
         try? FileManager.default.removeItem(at: modelDir)
         let hubRepoDir = hubCache.repoDirectory(repo: repoID, kind: .model)
@@ -155,14 +356,19 @@ public enum ModelUtils {
     }
 }
 
+// MARK: - Errors
+
 public enum ModelUtilsError: LocalizedError {
     case incompleteDownload(String)
+    case downloadFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .incompleteDownload(let repo):
             return "Downloaded model '\(repo)' has missing or zero-byte weight files. "
                 + "The cache has been cleared — please try again."
+        case .downloadFailed(let detail):
+            return "Failed to download file: \(detail)"
         }
     }
 }

@@ -753,12 +753,12 @@ struct ContentView: View {
                 ZStack {
                     Color.black.opacity(0.3)
                     VStack(spacing: 16) {
-                        if let downloadProgress = viewModel.transcriptionService.downloadProgress,
-                           downloadProgress > 0, downloadProgress < 1 {
-                            ProgressView(value: downloadProgress)
+                        if let progress = viewModel.transcriptionService.downloadProgress,
+                           !progress.isFinished {
+                            ProgressView(value: progress.fractionCompleted)
                                 .progressViewStyle(.linear)
                                 .frame(width: 200)
-                            Text("\(Int(downloadProgress * 100))%")
+                            Text("\(Int(progress.fractionCompleted * 100))%")
                                 .foregroundColor(.white)
                                 .font(.subheadline)
                             Text("Downloading Model...")
