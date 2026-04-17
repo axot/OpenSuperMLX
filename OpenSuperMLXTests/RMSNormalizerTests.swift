@@ -45,12 +45,12 @@ final class RMSNormalizerTests: XCTestCase {
     // MARK: - Gain Limit
 
     func testGainLimitRespected() {
-        let normalizer = RMSNormalizer(targetRMS: 0.126, maxGainDB: 24)
+        let normalizer = RMSNormalizer(targetRMS: 0.126, maxGainDB: 12)
         var samples = [Float](repeating: 0.0001, count: 4410)
         for _ in 0..<50 {
             normalizer.process(&samples)
         }
-        let maxGainLinear = pow(Float(10), 24.0 / 20.0)
+        let maxGainLinear = pow(Float(10), 12.0 / 20.0)
         XCTAssertLessThanOrEqual(normalizer.smoothedGain, maxGainLinear + 0.01)
     }
 

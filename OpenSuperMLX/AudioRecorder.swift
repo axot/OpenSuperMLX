@@ -107,6 +107,7 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     func startRecording() {
+        PipelineTrace.shared.log("RECORDER", "AudioRecorder.startRecording() called")
         guard canRecord else {
             print("Cannot start recording - no audio input available")
             return

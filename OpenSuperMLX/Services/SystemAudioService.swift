@@ -16,9 +16,12 @@ final class SystemAudioService: NSObject, ObservableObject {
     static let shared = SystemAudioService()
 
     @Published private(set) var isCapturing = false
+    nonisolated(unsafe) private(set) var activeSampleRate: Double = 48000
 
     private var stream: SCStream?
     private let accumulatedSamples = OSAllocatedUnfairLock(initialState: [Float]())
+    private let audioOutputQueue = DispatchQueue(label: "OpenSuperMLX.systemAudio", qos: .userInteractive)
+    private let nextExpectedAudioTime = OSAllocatedUnfairLock<CMTime?>(initialState: nil)
 
     private override init() {
         super.init()
@@ -26,12 +29,13 @@ final class SystemAudioService: NSObject, ObservableObject {
 
     // MARK: - Configuration
 
-    func makeStreamConfiguration() -> SCStreamConfiguration {
+    func makeStreamConfiguration(sampleRate: Double) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
-        config.sampleRate = 44100
+        config.sampleRate = Int(sampleRate)
         config.channelCount = 1
+        activeSampleRate = sampleRate
 
         // Minimize video overhead — ScreenCaptureKit requires a display but we only want audio
         config.width = 2
@@ -60,21 +64,23 @@ final class SystemAudioService: NSObject, ObservableObject {
 
     // MARK: - Capture Lifecycle
 
-    func startCapture(bundleID: String? = nil) async throws {
+    func startCapture(bundleID: String? = nil, sampleRate: Double = 48000) async throws {
         guard !isCapturing else { return }
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         let filter = try makeContentFilter(bundleID: bundleID, content: content)
-        let config = makeStreamConfiguration()
+        let config = makeStreamConfiguration(sampleRate: sampleRate)
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInitiated))
+        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioOutputQueue)
 
         accumulatedSamples.withLock { $0.removeAll() }
+        nextExpectedAudioTime.withLock { $0 = nil }
 
         try await stream.startCapture()
         self.stream = stream
         isCapturing = true
+        PipelineTrace.shared.log("SCK", "capture started")
         logger.info("System audio capture started (bundleID: \(bundleID ?? "all", privacy: .public))")
     }
 
@@ -97,6 +103,8 @@ final class SystemAudioService: NSObject, ObservableObject {
 
         self.stream = nil
         isCapturing = false
+        nextExpectedAudioTime.withLock { $0 = nil }
+        PipelineTrace.shared.log("SCK", "capture stopped")
 
         let samples = accumulatedSamples.withLock { buf -> [Float] in
             let result = buf
@@ -127,7 +135,7 @@ final class SystemAudioService: NSObject, ObservableObject {
     private func writeSamplesToWAV(_ samples: [Float], url: URL) throws {
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 44100,
+            sampleRate: activeSampleRate,
             channels: 1,
             interleaved: false
         ) else {
@@ -199,11 +207,43 @@ extension SystemAudioService: SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
-        guard type == .audio else { return }
+        guard type == .audio,
+              CMSampleBufferIsValid(sampleBuffer),
+              CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let samples = extractFloatSamples(from: sampleBuffer)
-        if !samples.isEmpty {
-            accumulatedSamples.withLock { $0.append(contentsOf: samples) }
+
+        let computedDuration = CMTime(
+            value: CMTimeValue(samples.count),
+            timescale: CMTimeScale(activeSampleRate)
+        )
+
+        let silenceSamples: [Float]? = nextExpectedAudioTime.withLock { expected in
+            defer {
+                if pts != .invalid {
+                    expected = CMTimeAdd(pts, computedDuration)
+                }
+            }
+            guard let exp = expected, pts != .invalid, exp != .invalid else { return nil }
+            let gapSeconds = CMTimeGetSeconds(pts) - CMTimeGetSeconds(exp)
+            guard gapSeconds > 0.001 else { return nil }
+            let gapSampleCount = Int(gapSeconds * activeSampleRate)
+            guard gapSampleCount > 0, gapSampleCount < Int(activeSampleRate) else { return nil }
+            return [Float](repeating: 0, count: gapSampleCount)
+        }
+
+        if let silence = silenceSamples {
+            logger.warning("[SCK-GAP] inserting \(silence.count) silence samples")
+        }
+
+        if silenceSamples != nil || !samples.isEmpty {
+            accumulatedSamples.withLock { buffer in
+                if let silence = silenceSamples {
+                    buffer.append(contentsOf: silence)
+                }
+                buffer.append(contentsOf: samples)
+            }
         }
     }
 }
@@ -212,7 +252,6 @@ extension SystemAudioService: SCStreamOutput {
 
 enum SystemAudioCaptureError: Error {
     case noDisplayAvailable
-    case captureNotSupported
     case applicationNotFound(String)
     case audioFileWriteFailed
 }

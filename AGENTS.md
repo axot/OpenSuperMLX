@@ -341,6 +341,7 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 | [`docs/memory.md`](docs/memory.md) | **Profiling memory or touching streaming pipeline.** MLX GPU memory budget, encoder dtype, streaming memory invariants, and red flags for memory regressions. |
 | [`docs/release_build.md`](docs/release_build.md) | **Building a release.** Notarization command (`notarize_app.sh`). |
 | [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
+| [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality issues.** Pipeline trace, WAV analysis, known issue patterns (clipping, pops, gaps). |
 
 ## Release
 
