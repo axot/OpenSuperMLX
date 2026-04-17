@@ -46,7 +46,6 @@ class StreamingAudioService: ObservableObject {
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
-    private let preBufferCapacity = 22050
     private var isEngineWarmed = false
     private var hasBeenWarmedOnce = false
 
@@ -159,20 +158,16 @@ class StreamingAudioService: ObservableObject {
         self.nativeSampleRate = nativeFormat.sampleRate
 
         let ringBufferLock = self.ringBuffer
-        let preCapacity = self.preBufferCapacity
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) {
             [weak self] buffer, _ in
+            guard self?.isStreaming ?? false else { return }
             let floats = Array(UnsafeBufferPointer(
                 start: buffer.floatChannelData![0],
                 count: Int(buffer.frameLength)
             ))
             ringBufferLock.withLock { buf in
                 buf.append(contentsOf: floats)
-                let isCurrentlyStreaming = self?.isStreaming ?? false
-                if !isCurrentlyStreaming && buf.count > preCapacity {
-                    buf.removeFirst(buf.count - preCapacity)
-                }
             }
         }
 
@@ -320,7 +315,7 @@ class StreamingAudioService: ObservableObject {
         isStreaming = true
         recordingStartTime = Date()
         playNotificationSound()
-        logger.info("Streaming started (engine pre-warmed, pre-buffer available)")
+        logger.info("Streaming started (engine pre-warmed)")
 
         let speakerEnabled = MicrophoneService.shared.speakerCaptureEnabled
         speakerCaptureActiveForSession = speakerEnabled
