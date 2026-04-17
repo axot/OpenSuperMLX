@@ -105,10 +105,11 @@ Releases are driven by `.github/workflows/release.yml`, triggered by pushing a t
 
 ### Rules
 
-- **Never amend a pushed commit to add version bumps.** The version bump is always a separate commit.
-- **Never force-push master.** If you forgot the version bump, add a new commit — do not rewrite history.
+- **Never amend a pushed commit.** Every change is a new, standalone commit. Do not rewrite shared history.
+- **Never force-push master.** If you made a mistake, fix it in a new commit.
+- **Never push to remote without explicit user approval.** Always ask before `git push`.
 - **Push the tag exactly once.** Do not delete and re-push tags to "retry" — cancel the workflow and re-run it from the GitHub Actions UI instead.
-- **One commit per logical change.** A bug fix is one commit. A version bump is another. Do not combine unrelated changes.
+- **One commit per logical change.** A bug fix is one commit. A version bump is another. Deleting a file is another. Do not combine unrelated changes.
 
 ### Incident: CJK Repetition Fix Release (2026-04)
 
