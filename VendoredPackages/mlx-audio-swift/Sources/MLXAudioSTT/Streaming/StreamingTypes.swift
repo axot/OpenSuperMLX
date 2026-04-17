@@ -22,9 +22,10 @@ public struct StreamingConfig: Sendable {
     public var resetIntervalChunks: Int = 45
     public var resetCarryTokens: Int = 24
     public var singleTokenRunThreshold: Int = 12
-    public var blockPatternMaxPeriod: Int = 6
+    public var blockPatternMaxPeriod: Int = 15
     public var blockPatternMinReps: Int = 4
     public var stagnationChunkThreshold: Int = 4
+    public var prefixDiversityThreshold: Double = 0.3
     public var pastTextConditioning: Bool = true
 
     public init(

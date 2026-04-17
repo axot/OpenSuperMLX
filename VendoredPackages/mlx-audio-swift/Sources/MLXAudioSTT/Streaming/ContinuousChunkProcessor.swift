@@ -277,6 +277,14 @@ class ContinuousChunkProcessor {
         guard !range.isEmpty else { return [] }
 
         var prefix = Array(allDecodedTokens[range])
+
+        let uniqueCount = Set(prefix).count
+        let diversity = Double(uniqueCount) / Double(prefix.count)
+        if diversity < config.prefixDiversityThreshold {
+            cpLogger.warning("chunk[\(self.chunkIndex)] LOW PREFIX DIVERSITY \(String(format: "%.2f", diversity)) (\(uniqueCount)/\(prefix.count) unique)")
+            return []
+        }
+
         let langLower = config.language.trimmingCharacters(in: .whitespaces).lowercased()
         if langLower.isEmpty || langLower == "auto" {
             prefix.insert(Self.asrTextTokenId, at: 0)
