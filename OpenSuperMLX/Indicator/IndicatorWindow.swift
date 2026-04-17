@@ -99,6 +99,12 @@ class IndicatorViewModel: ObservableObject {
     }
     
     func startRecording() {
+        if AppPreferences.shared.debugMode {
+            let traceDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
+            try? FileManager.default.createDirectory(at: traceDir, withIntermediateDirectories: true)
+            PipelineTrace.shared.start(directory: traceDir)
+        }
+        PipelineTrace.shared.log("UI", "IndicatorWindow.startRecording()")
         if isTranscriptionBusy {
             showBusyMessage()
             return

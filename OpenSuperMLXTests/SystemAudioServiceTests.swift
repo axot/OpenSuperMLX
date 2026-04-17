@@ -67,11 +67,11 @@ final class SystemAudioServiceTests: XCTestCase {
     @MainActor
     func testSystemAudioServiceConfiguration() throws {
         let service = SystemAudioService.shared
-        let config = service.makeStreamConfiguration()
+        let config = service.makeStreamConfiguration(sampleRate: 48000)
 
         XCTAssertTrue(config.capturesAudio)
         XCTAssertTrue(config.excludesCurrentProcessAudio)
-        XCTAssertEqual(config.sampleRate, 44100)
+        XCTAssertEqual(config.sampleRate, 48000)
         XCTAssertEqual(config.channelCount, 1)
     }
 

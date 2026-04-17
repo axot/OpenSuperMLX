@@ -34,7 +34,6 @@ class StreamingAudioService: ObservableObject {
     private var streamingSession: StreamingInferenceSession?
     private var wavWriter: StreamingWAVWriter?
     private var currentWAVURL: URL?
-    private var currentSystemAudioURL: URL?
 
     private var feedTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
@@ -272,12 +271,16 @@ class StreamingAudioService: ObservableObject {
     // MARK: - Start Streaming
 
     func startStreaming() throws {
+        PipelineTrace.shared.log("STREAM", "startStreaming() called")
+
         guard !isStreaming else {
+            PipelineTrace.shared.log("STREAM", "already streaming, skipped")
             logger.warning("Already streaming, ignoring startStreaming()")
             return
         }
 
         guard let model = TranscriptionService.shared.streamingModel else {
+            PipelineTrace.shared.log("STREAM", "no model available")
             logger.error("No model available for streaming")
             throw StreamingAudioError.modelNotLoaded
         }
@@ -324,12 +327,20 @@ class StreamingAudioService: ObservableObject {
         let mixer = AudioMixer(inputSampleRate: nativeSampleRate)
         self.audioMixer = mixer
 
+        PipelineTrace.shared.log("STREAM", "streaming started speakerEnabled=\(speakerEnabled) sampleRate=\(nativeSampleRate)")
+
         if speakerEnabled {
+            if AppPreferences.shared.debugMode {
+                let traceURL = tempDir.appendingPathComponent("\(timestamp)_mix_trace.log")
+                mixer.startTrace(url: traceURL)
+            }
             Task {
                 do {
-                    try await SystemAudioService.shared.startCapture()
+                    try await SystemAudioService.shared.startCapture(sampleRate: nativeSampleRate)
+                    PipelineTrace.shared.log("STREAM", "speaker capture started")
                     logger.info("Speaker capture started")
                 } catch {
+                    PipelineTrace.shared.log("STREAM", "speaker capture FAILED: \(error)")
                     logger.warning("Speaker capture failed: \(error, privacy: .public)")
                 }
             }
@@ -362,9 +373,11 @@ class StreamingAudioService: ObservableObject {
                 let samples16k: [Float]
                 if speakerEnabled {
                     let sysSamples = await SystemAudioService.shared.drainAccumulatedSamples()
-                    samples16k = mixer.mix(mic: micSamples, sys: sysSamples, inputSampleRate: sampleRate)
+                    samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples)
+                    PipelineTrace.shared.log("FEED", "mic=\(micSamples.count) sys=\(sysSamples.count) out=\(samples16k.count)")
                 } else if !micSamples.isEmpty {
                     samples16k = mixer.micOnly(micSamples, inputSampleRate: sampleRate)
+                    PipelineTrace.shared.log("FEED", "micOnly=\(micSamples.count) out=\(samples16k.count)")
                 } else {
                     samples16k = []
                 }
@@ -373,13 +386,15 @@ class StreamingAudioService: ObservableObject {
                     session.feedAudio(samples: samples16k)
                     do {
                         try writer.writeChunk(samples16k)
+                        PipelineTrace.shared.log("WAV", "wrote \(samples16k.count) samples")
                     } catch {
+                        PipelineTrace.shared.log("WAV", "write FAILED: \(error)")
                         logger.error("Failed to write WAV chunk: \(error, privacy: .public)")
                     }
                 }
 
                 let speechActive = session.isSpeechActive
-                await MainActor.run { [weak self] in
+                Task { @MainActor [weak self] in
                     self?.isSpeechDetected = speechActive
                 }
 
@@ -391,6 +406,7 @@ class StreamingAudioService: ObservableObject {
     // MARK: - Stop Streaming
 
     func stopStreaming() async -> (text: String, url: URL)? {
+        PipelineTrace.shared.log("STREAM", "stopStreaming() called")
         guard isStreaming else {
             logger.warning("Not streaming, ignoring stopStreaming()")
             return nil
@@ -405,6 +421,8 @@ class StreamingAudioService: ObservableObject {
             _ = await feedTask.value
         }
         feedTask = nil
+        audioMixer?.stopTrace()
+        PipelineTrace.shared.log("STREAM", "feed loop stopped")
 
         if speakerCaptureActiveForSession {
             _ = await SystemAudioService.shared.stopCapture()
@@ -464,6 +482,7 @@ class StreamingAudioService: ObservableObject {
         ringBuffer.withLock { $0.removeAll() }
         audioMixer = nil
         speakerCaptureActiveForSession = false
+        PipelineTrace.shared.stop()
         guard let url else { return nil }
         return (text: finalText, url: url)
     }
@@ -497,6 +516,7 @@ class StreamingAudioService: ObservableObject {
 
         ringBuffer.withLock { $0.removeAll() }
         audioMixer = nil
+        PipelineTrace.shared.stop()
 
         clearState()
     }
