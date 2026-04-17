@@ -87,3 +87,31 @@ On Apple Silicon, Metal buffers are `StorageModeShared` — mmap'd into process 
 ### Reference Implementation
 
 antirez's C implementation ([antirez/qwen-asr](https://github.com/antirez/qwen-asr)) achieves flat O(1) memory by: never persisting mel (computed and freed per-chunk), hard-resetting the KV cache cursor each chunk, and compacting the raw audio buffer on reset. When porting streaming inference, follow this memory model.
+
+## Release Flow (2026-04)
+
+Releases are driven by `.github/workflows/release.yml`, triggered by pushing a tag matching `X.Y.Z`. There is no local release script — CI handles build, DMG creation, and GitHub Release.
+
+### Steps
+
+1. Create the feature/fix commit(s) and push to `master`.
+2. Create a **separate** version bump commit:
+   - Update `MARKETING_VERSION` to the new version in `project.pbxproj`.
+   - Increment `CURRENT_PROJECT_VERSION` by 1 in `project.pbxproj`.
+   - Commit message: `chore: bump version to X.Y.Z`.
+3. Push the version bump commit.
+4. Create and push the tag: `git tag -a X.Y.Z -m "Release X.Y.Z" && git push origin X.Y.Z`.
+5. Wait for the Release workflow to complete on GitHub Actions.
+
+### Rules
+
+- **Never amend a pushed commit to add version bumps.** The version bump is always a separate commit.
+- **Never force-push master.** If you forgot the version bump, add a new commit — do not rewrite history.
+- **Push the tag exactly once.** Do not delete and re-push tags to "retry" — cancel the workflow and re-run it from the GitHub Actions UI instead.
+- **One commit per logical change.** A bug fix is one commit. A version bump is another. Do not combine unrelated changes.
+
+### Incident: CJK Repetition Fix Release (2026-04)
+
+Version bump was amend-ed into the fix commit and force-pushed to master, then the tag was deleted and re-pushed 3 times, triggering 3 cancelled release workflows. Root cause: not knowing the release steps and panicking.
+
+**Rule**: Read this section before every release. Follow the steps exactly. When in doubt, stop and ask.
