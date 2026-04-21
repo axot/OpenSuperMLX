@@ -96,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/smithy-lang/smithy-swift",
       "state" : {
-        "revision" : "98bab6c210f5e67fa32441f53983efe1599bf69f",
-        "version" : "0.192.0"
+        "revision" : "d2f4f4fc57fa3751143aaea052db28d8cff10ee1",
+        "version" : "0.199.0"
       }
     },
     {
