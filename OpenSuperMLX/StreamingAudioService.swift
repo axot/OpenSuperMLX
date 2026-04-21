@@ -132,6 +132,19 @@ class StreamingAudioService: ObservableObject {
                     logger.warning("Warm-up: failed to disable VPIO ducking (status \(duckStatus, privacy: .public))")
                 }
 
+                var disableAGC: UInt32 = 0
+                let agcStatus = AudioUnitSetProperty(
+                    inputNode.audioUnit!,
+                    kAUVoiceIOProperty_VoiceProcessingEnableAGC,
+                    kAudioUnitScope_Global,
+                    1,
+                    &disableAGC,
+                    UInt32(MemoryLayout<UInt32>.size)
+                )
+                if agcStatus != noErr {
+                    logger.warning("Warm-up: failed to disable VPIO AGC (status \(agcStatus, privacy: .public))")
+                }
+
                 logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
             } catch {
                 logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
