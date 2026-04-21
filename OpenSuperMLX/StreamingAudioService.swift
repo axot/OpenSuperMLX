@@ -334,6 +334,7 @@ class StreamingAudioService: ObservableObject {
         speakerCaptureActiveForSession = speakerEnabled
         let mixer = AudioMixer(inputSampleRate: nativeSampleRate)
         self.audioMixer = mixer
+        let systemCaptureRate: Double = 48000
 
         PipelineTrace.shared.log("STREAM", "streaming started speakerEnabled=\(speakerEnabled) sampleRate=\(nativeSampleRate)")
 
@@ -344,7 +345,7 @@ class StreamingAudioService: ObservableObject {
             }
             Task {
                 do {
-                    try await SystemAudioService.shared.startCapture(sampleRate: nativeSampleRate)
+                    try await SystemAudioService.shared.startCapture(sampleRate: systemCaptureRate)
                     PipelineTrace.shared.log("STREAM", "speaker capture started")
                     logger.info("Speaker capture started")
                 } catch {
@@ -381,7 +382,7 @@ class StreamingAudioService: ObservableObject {
                 let samples16k: [Float]
                 if speakerEnabled {
                     let sysSamples = await SystemAudioService.shared.drainAccumulatedSamples()
-                    samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples)
+                    samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples, sysSampleRate: systemCaptureRate)
                     PipelineTrace.shared.log("FEED", "mic=\(micSamples.count) sys=\(sysSamples.count) out=\(samples16k.count)")
                 } else if !micSamples.isEmpty {
                     samples16k = mixer.micOnly(micSamples, inputSampleRate: sampleRate)

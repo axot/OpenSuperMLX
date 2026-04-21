@@ -8,7 +8,6 @@ import Foundation
 final class AudioMixer: @unchecked Sendable {
     private let sysAGC: RMSNormalizer
     private static let sysPeakCeiling: Float = 0.7
-    private static let systemAudioRate: Double = 48000
     private var traceFile: FileHandle?
     private var traceCounter = 0
     private var micCarryOver = [Float]()
@@ -41,7 +40,7 @@ final class AudioMixer: @unchecked Sendable {
         arr.isEmpty ? 0 : sqrt(arr.reduce(Float(0)) { $0 + $1 * $1 } / Float(arr.count))
     }
 
-    func mix(mic: [Float], micSampleRate: Double, sys: [Float], sysSampleRate: Double = systemAudioRate,
+    func mix(mic: [Float], micSampleRate: Double, sys: [Float], sysSampleRate: Double,
              outputSampleRate: Double = 16000) -> [Float] {
 
         traceCounter += 1

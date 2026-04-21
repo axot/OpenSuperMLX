@@ -200,4 +200,44 @@ final class AudioMixerTests: XCTestCase {
         let result = mixer.mix(mic: mic, micSampleRate: 16000, sys: sys, sysSampleRate: 16000, outputSampleRate: 16000)
         XCTAssertEqual(result.count, 1600, "After reset, no carry-over should affect output")
     }
+
+    // MARK: - Regression: Bluetooth Earphone Speaker Capture
+
+    func testBluetoothMic16kHzWithSystemAudio48kHzCarryOverStaysBounded() {
+        let mixer = AudioMixer(inputSampleRate: 16000)
+
+        // Simulate 20 feed cycles (~2 seconds) of BT earphone scenario:
+        // mic at 16kHz delivers 4096 samples every ~256ms (alternating non-empty/empty),
+        // sys at 48kHz delivers ~4800 samples per 100ms cycle
+        var totalOutput = 0
+        for i in 0..<20 {
+            let mic: [Float] = (i % 3 == 0)
+                ? [Float](repeating: 0.1, count: 4096)
+                : []
+            let sys: [Float] = [Float](repeating: 0.3, count: 4800)
+            let result = mixer.mix(mic: mic, micSampleRate: 16000, sys: sys, sysSampleRate: 48000, outputSampleRate: 16000)
+            totalOutput += result.count
+        }
+
+        // Over 20 cycles (2s), model should receive approximately 2s * 16000 = 32000 samples
+        // Allow wide tolerance, but must be substantial (not starved like the bug: ~26% of real-time)
+        XCTAssertGreaterThan(totalOutput, 20000, "Model must receive near real-time audio, not be starved by rate mismatch")
+    }
+
+    func testBluetoothScenarioProducesNonGarbageAudio() {
+        let mixer = AudioMixer(inputSampleRate: 16000)
+
+        // mic at 16kHz (BT SCO), sys at 48kHz (SCK) — audio should mix correctly
+        let mic: [Float] = [Float](repeating: 0.0, count: 1600)  // silent mic (user not speaking)
+        let sys: [Float] = (0..<4800).map { Float(sin(Double($0) * 2 * .pi * 440 / 48000)) * 0.5 }  // 440Hz tone from meeting
+
+        let result = mixer.mix(mic: mic, micSampleRate: 16000, sys: sys, sysSampleRate: 48000, outputSampleRate: 16000)
+
+        // sys 4800 samples at 48kHz → 1600 at 16kHz; mic 1600 at 16kHz → 1600
+        XCTAssertEqual(result.count, 1600, "Output should be 1600 samples (100ms at 16kHz)")
+
+        // Output should contain the 440Hz tone, not silence
+        let rms = sqrt(result.reduce(0) { $0 + $1 * $1 } / Float(result.count))
+        XCTAssertGreaterThan(rms, 0.05, "System audio tone should be present in output, not destroyed by wrong downsampling")
+    }
 }
