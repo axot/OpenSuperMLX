@@ -40,6 +40,8 @@ class StreamingAudioService: ObservableObject {
     private var recordingStartTime: Date?
     private var microphoneChangeObserver: NSObjectProtocol?
     private var microphoneDisconnectObserver: NSObjectProtocol?
+    private var configChangeObserver: NSObjectProtocol?
+    private var configDebounceTask: Task<Void, Never>?
 
     /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
@@ -189,9 +191,33 @@ class StreamingAudioService: ObservableObject {
             audioEngine = engine
             isEngineWarmed = true
             hasBeenWarmedOnce = true
+            observeEngineConfigChange(engine)
             logger.info("Audio engine warmed up")
         } catch {
             logger.error("Warm-up failed: \(error, privacy: .public)")
+        }
+    }
+
+    private func observeEngineConfigChange(_ engine: AVAudioEngine) {
+        if let old = configChangeObserver {
+            NotificationCenter.default.removeObserver(old)
+        }
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                logger.warning("AVAudioEngine configuration changed")
+                self.configDebounceTask?.cancel()
+                self.configDebounceTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled, let self, self.isStreaming else { return }
+                    logger.warning("Hot-swapping microphone after config change during streaming")
+                    self.hotSwapMicrophone()
+                }
+            }
         }
     }
 
@@ -229,6 +255,12 @@ class StreamingAudioService: ObservableObject {
 
     func coolDown() {
         guard isEngineWarmed else { return }
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
+        configDebounceTask?.cancel()
+        configDebounceTask = nil
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         retireEngine(audioEngine)
@@ -241,7 +273,7 @@ class StreamingAudioService: ObservableObject {
     private func retireEngine(_ engine: AVAudioEngine?) {
         guard let engine else { return }
         retiredEngines.append(engine)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.retiredEngines.removeAll { $0 === engine }
         }
     }
@@ -250,6 +282,8 @@ class StreamingAudioService: ObservableObject {
 
     private func hotSwapMicrophone() {
         guard let engine = audioEngine else { return }
+        configDebounceTask?.cancel()
+        configDebounceTask = nil
 
         let preserved = ringBuffer.withLock { buffer -> [Float] in
             let saved = buffer
@@ -293,7 +327,8 @@ class StreamingAudioService: ObservableObject {
             throw StreamingAudioError.modelNotLoaded
         }
 
-        if !isEngineWarmed {
+        if !isEngineWarmed || audioEngine?.isRunning != true {
+            coolDown()
             warmUp()
         }
 
