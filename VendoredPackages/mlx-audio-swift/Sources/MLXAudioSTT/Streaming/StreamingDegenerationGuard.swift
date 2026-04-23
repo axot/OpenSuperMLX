@@ -2,6 +2,9 @@
 // MLXAudioSTT
 
 import Foundation
+import os
+
+private let guardLogger = Logger(subsystem: "MLXAudioSTT", category: "DegenerationGuard")
 
 // MARK: - GuardAction
 
@@ -50,12 +53,15 @@ struct StreamingDegenerationGuard: Sendable {
         )
 
         if droppedCount >= droppedTokensRecovery {
+            let threshold = droppedTokensRecovery
+            guardLogger.warning("RECOVERY: singleTokenRun dropped=\(droppedCount) (threshold=\(threshold))")
             stagnantChunkCount = 0
             return .recoveryReset
         }
 
         let candidateTokens = prefixTokens + filteredNew
         if hasBlockPattern(candidateTokens) {
+            guardLogger.warning("RECOVERY: blockPattern detected in \(candidateTokens.count) tokens")
             stagnantChunkCount = 0
             return .recoveryReset
         }
@@ -63,11 +69,20 @@ struct StreamingDegenerationGuard: Sendable {
         let candidateAdvance = candidateTokens.count - stableTokenCount
         if !isFinal && hitMaxTokens && candidateAdvance <= 1 {
             stagnantChunkCount += 1
+            let count = stagnantChunkCount
+            let threshold = stagnationThreshold
+            guardLogger.info("stagnation: advance=\(candidateAdvance) count=\(count)/\(threshold) candidates=\(candidateTokens.count) stable=\(stableTokenCount)")
             if stagnantChunkCount >= stagnationThreshold {
+                let reached = stagnantChunkCount
+                guardLogger.warning("RECOVERY: stagnation threshold reached (\(reached) chunks)")
                 stagnantChunkCount = 0
                 return .recoveryReset
             }
         } else {
+            if stagnantChunkCount > 0 {
+                let prev = stagnantChunkCount
+                guardLogger.info("stagnation reset: advance=\(candidateAdvance) hitMax=\(hitMaxTokens) prev=\(prev)")
+            }
             stagnantChunkCount = 0
         }
 

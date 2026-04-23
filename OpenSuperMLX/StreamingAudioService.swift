@@ -406,7 +406,12 @@ class StreamingAudioService: ObservableObject {
         let shouldStopRef = self.shouldStopFeeding
         let sampleRate = self.nativeSampleRate
         feedTask = Task.detached {
+            var consecutiveEmptyDrains = 0
+            var feedIterationCount = 0
+            var lastStatusLogTime = ContinuousClock.now
+
             while !shouldStopRef.withLock({ $0 }) {
+                feedIterationCount += 1
                 let micSamples = ringBufferRef.withLock { buffer -> [Float] in
                     guard !buffer.isEmpty else { return [] }
                     let drained = buffer
@@ -427,14 +432,48 @@ class StreamingAudioService: ObservableObject {
                 }
 
                 if !samples16k.isEmpty {
-                    session.feedAudio(samples: samples16k)
+                    consecutiveEmptyDrains = 0
+
+                    // Backpressure: if >5s of audio buffered, keep only last 1s
+                    // Prevents cascading failure when inference falls behind real-time
+                    let backpressureThreshold = 80000 // 5 seconds at 16kHz
+                    let backpressureKeep = 16000       // 1 second at 16kHz
+                    var feedSamples = samples16k
+                    if feedSamples.count > backpressureThreshold {
+                        let dropped = feedSamples.count - backpressureKeep
+                        logger.warning("Backpressure: dropping \(dropped, privacy: .public) samples (\(String(format: "%.1f", Double(dropped) / 16000.0), privacy: .public)s), keeping last 1s")
+                        feedSamples = Array(feedSamples.suffix(backpressureKeep))
+                    }
+
+                    let feedStart = ContinuousClock.now
+                    session.feedAudio(samples: feedSamples)
+                    let feedMs = feedStart.duration(to: .now).milliseconds
+                    if feedMs > 500 {
+                        logger.warning("feedAudio took \(feedMs, privacy: .public)ms for \(feedSamples.count, privacy: .public) samples — may be falling behind real-time")
+                    }
                     do {
-                        try writer.writeChunk(samples16k)
-                        PipelineTrace.shared.log("WAV", "wrote \(samples16k.count) samples")
+                        try writer.writeChunk(feedSamples)
+                        PipelineTrace.shared.log("WAV", "wrote \(feedSamples.count) samples")
                     } catch {
                         PipelineTrace.shared.log("WAV", "write FAILED: \(error)")
                         logger.error("Failed to write WAV chunk: \(error, privacy: .public)")
                     }
+                } else {
+                    consecutiveEmptyDrains += 1
+                    // Alert if ring buffer has been empty for >5 seconds — tap may have stopped
+                    if consecutiveEmptyDrains == 50 {
+                        logger.error("Ring buffer empty for ~5s — audio tap may have stopped delivering buffers")
+                    } else if consecutiveEmptyDrains > 0 && consecutiveEmptyDrains % 300 == 0 {
+                        logger.error("Ring buffer empty for ~\(consecutiveEmptyDrains / 10)s — audio tap appears dead")
+                    }
+                }
+
+                // Periodic status log every 30 seconds
+                let now = ContinuousClock.now
+                if lastStatusLogTime.duration(to: now) > .seconds(30) {
+                    let bufferSize = ringBufferRef.withLock { $0.count }
+                    logger.info("Feed loop status: iteration=\(feedIterationCount, privacy: .public) ringBuf=\(bufferSize, privacy: .public) emptyDrains=\(consecutiveEmptyDrains, privacy: .public)")
+                    lastStatusLogTime = now
                 }
 
                 let speechActive = session.isSpeechActive
@@ -765,25 +804,20 @@ class StreamingAudioService: ObservableObject {
             }
         }
 
-        let chunksFed = writeRawSamplesToRingBuffer(samples, chunkDuration: chunkDuration)
+        let chunkSize = max(1, Int(chunkDuration * 16000))
+        let tailSilence = [Float](repeating: 0, count: 10560)
+        let totalChunks = (samples.count + chunkSize - 1) / chunkSize
 
-        let ringBufferRef = self.ringBuffer
         let localFeedTask = Task.detached {
-            while true {
-                let drained = ringBufferRef.withLock { buffer -> [Float] in
-                    guard !buffer.isEmpty else { return [] }
-                    let d = buffer
-                    buffer.removeAll(keepingCapacity: true)
-                    return d
-                }
-
-                if drained.isEmpty {
-                    break
-                }
-
-                session.feedAudio(samples: drained)
-                try? await Task.sleep(for: .milliseconds(100))
+            var offset = 0
+            while offset < samples.count {
+                let end = min(offset + chunkSize, samples.count)
+                let chunk = Array(samples[offset..<end])
+                offset = end
+                session.feedAudio(samples: chunk)
+                try? await Task.sleep(for: .milliseconds(10))
             }
+            session.feedAudio(samples: tailSilence)
         }
 
         await localFeedTask.value
@@ -812,7 +846,7 @@ class StreamingAudioService: ObservableObject {
 
         return FileInjectionResult(
             text: resultText,
-            chunksFed: chunksFed,
+            chunksFed: totalChunks,
             intermediateUpdates: intermediateCount.withLock { $0 },
             audioDurationS: audioDurationS
         )

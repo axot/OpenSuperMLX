@@ -8,6 +8,9 @@
 import Foundation
 import MLX
 import MLXAudioCore
+import os
+
+private let melLogger = Logger(subsystem: "MLXAudioSTT", category: "MelSpectrogram")
 
 /// Computes mel spectrograms incrementally using an overlap-save approach.
 ///
@@ -138,7 +141,11 @@ public class IncrementalMelSpectrogram {
         melSpec = MLX.log10(melSpec)
 
         let chunkMax = melSpec.max().item(Float.self)
+        let prevMax = runningLogMax
         runningLogMax = max(runningLogMax, chunkMax)
+        if runningLogMax != prevMax {
+            melLogger.info("runningLogMax changed: \(prevMax) → \(self.runningLogMax) (chunkMax=\(chunkMax)) totalFrames=\(self.totalFrames)")
+        }
 
         melSpec = MLX.maximum(melSpec, MLXArray(runningLogMax - 8.0))
         melSpec = (melSpec + MLXArray(Float(4.0))) / MLXArray(Float(4.0))
@@ -191,7 +198,11 @@ public class IncrementalMelSpectrogram {
         melSpec = MLX.log10(melSpec)
 
         let chunkMax = melSpec.max().item(Float.self)
+        let prevMax = runningLogMax
         runningLogMax = max(runningLogMax, chunkMax)
+        if runningLogMax != prevMax {
+            melLogger.info("flush runningLogMax changed: \(prevMax) → \(self.runningLogMax)")
+        }
 
         melSpec = MLX.maximum(melSpec, MLXArray(runningLogMax - 8.0))
         melSpec = (melSpec + MLXArray(Float(4.0))) / MLXArray(Float(4.0))

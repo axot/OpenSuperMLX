@@ -75,19 +75,22 @@ class ContinuousChunkProcessor {
 
     func processChunk(melFrames: MLXArray, language: String, isFinal: Bool) -> ChunkProcessingResult {
         defer { chunkIndex += 1 }
+        let chunkStart = ContinuousClock.now
 
         accumulateMel(melFrames)
         encodeCompleteWindows()
 
         guard let audioFeatures = assembleAudioFeatures() else {
+            cpLogger.info("chunk[\(self.chunkIndex)] coldStart: accMel=\(self.accumulatedMelFrameCount) encWin=\(self.encodedWindowCount)")
             return ChunkProcessingResult(
                 confirmedTokens: [], provisionalTokens: [],
                 newlyEmittedTokens: [], action: .coldStart
             )
         }
 
+        let audioFeatureDim = audioFeatures.dim(0)
         let inputIds = model.buildPrompt(
-            numAudioTokens: audioFeatures.dim(0),
+            numAudioTokens: audioFeatureDim,
             language: language,
             context: "",
             prefix: ""
@@ -108,8 +111,15 @@ class ContinuousChunkProcessor {
 
         eval(inputsEmbeds)
 
+        let prefillStart = ContinuousClock.now
         let logits = prefillWithEmbeddingDiff(inputsEmbeds, inputIds: inputIds)
+        let prefillMs = prefillStart.duration(to: .now).milliseconds
+        let decodeStart = ContinuousClock.now
         let (rawNewTokenIds, hitMaxTokens) = decodeTokens(initialLogits: logits)
+        let decodeMs = decodeStart.duration(to: .now).milliseconds
+        let peakMemGB = String(format: "%.2f", Double(Memory.peakMemory) / 1e9)
+
+        cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] accMel=\(self.accumulatedMelFrameCount, privacy: .public) encWin=\(self.encodedWindowCount, privacy: .public) audioFeat=\(audioFeatureDim, privacy: .public) seqLen=\(inputsEmbeds.dim(1), privacy: .public) prefix=\(prefixTokenIds.count, privacy: .public) rawTok=\(rawNewTokenIds.count, privacy: .public) hitMax=\(hitMaxTokens, privacy: .public) prefill=\(prefillMs, privacy: .public)ms decode=\(decodeMs, privacy: .public)ms allDecoded=\(self.allDecodedTokens.count, privacy: .public) peakMem=\(peakMemGB, privacy: .public)GB")
 
         let newTokenIds = Self.filterTextTokens(rawNewTokenIds)
 
@@ -170,6 +180,9 @@ class ContinuousChunkProcessor {
     // MARK: - Reset
 
     func reset(keepEmittedTokens: Bool) {
+        let emittedCount = textCommitter.emittedTokens.count
+        let stableCount = textCommitter.stableTokens.count
+        cpLogger.warning("reset(keep=\(keepEmittedTokens)) chunk=\(self.chunkIndex) accMel=\(self.accumulatedMelFrameCount) encWin=\(self.encodedWindowCount) emitted=\(emittedCount) stable=\(stableCount) allDecoded=\(self.allDecodedTokens.count) peakMem=\(String(format: "%.2f", Double(Memory.peakMemory) / 1e9))GB")
         if keepEmittedTokens {
             textCommitter.reanchor(
                 from: textCommitter.emittedTokens,
@@ -307,7 +320,10 @@ class ContinuousChunkProcessor {
         let logits: MLXArray
 
         if matchedRows > 0, let cache = decoderCache {
-            let trimAmount = cache[0].offset - matchedRows
+            let cacheOffset = cache[0].offset
+            let trimAmount = cacheOffset - matchedRows
+            let newSeqLen = seqLen - matchedRows
+            cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] prefill: reuse matched=\(matchedRows, privacy: .public)/\(seqLen, privacy: .public) cacheOffset=\(cacheOffset, privacy: .public) trim=\(trimAmount, privacy: .public) newSeq=\(newSeqLen, privacy: .public)")
             if trimAmount > 0 {
                 for c in cache {
                     c.trim(trimAmount)
@@ -321,6 +337,7 @@ class ContinuousChunkProcessor {
                 cache: decoderCache
             )
         } else {
+            cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] prefill: full (no reuse) seqLen=\(seqLen, privacy: .public) matched=\(matchedRows, privacy: .public) hadPrev=\(self.prevPrefillEmbeds != nil, privacy: .public)")
             decoderCache = model.makeCache()
             logits = model.callAsFunction(
                 inputIds: inputIds,
@@ -341,12 +358,16 @@ class ContinuousChunkProcessor {
         var logits = initialLogits
         var newTokenIds: [Int] = []
         let maxTokens = config.maxNewTokensPerChunk
+        var eosToken: Int?
 
         for _ in 0..<maxTokens {
             let lastLogits = logits[0..., -1, 0...]
             let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
 
-            if Self.eosTokenIds.contains(nextToken) { break }
+            if Self.eosTokenIds.contains(nextToken) {
+                eosToken = nextToken
+                break
+            }
 
             newTokenIds.append(nextToken)
 
@@ -355,8 +376,15 @@ class ContinuousChunkProcessor {
             eval(logits)
         }
 
+        let hitMax = newTokenIds.count >= maxTokens
+        if hitMax {
+            cpLogger.info("chunk[\(self.chunkIndex)] decode: hitMaxTokens (\(maxTokens)), no EOS found")
+        } else if let eos = eosToken {
+            cpLogger.info("chunk[\(self.chunkIndex)] decode: EOS=\(eos) after \(newTokenIds.count) tokens")
+        }
+
         Memory.clearCache()
-        return (newTokenIds, newTokenIds.count >= maxTokens)
+        return (newTokenIds, hitMax)
     }
 
     // MARK: - Static Helpers (Testable)

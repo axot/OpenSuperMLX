@@ -19,7 +19,6 @@ private struct SessionState: Sendable {
     var chunkCount: Int = 0
     var mergedCommittedText: String = ""
     var detectedLanguage: String = ""
-    var preResetTokenIds: [Int] = []
 }
 
 // MARK: - StreamingInferenceSession
@@ -37,6 +36,11 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     private var isActive: Bool = false
     private var totalSamplesFed: Int = 0
+    private var emptyRecoveryResets: Int = 0
+    private var lastDecodeSampleCount: Int = 0
+    private var hasProducedFirstToken: Bool = false
+    private var lastFullResetSampleCount: Int = 0
+    private var postResetSilenceWarned: Bool = false
 
     private var chunkProcessor: ContinuousChunkProcessor?
     private var chunkMelBuffer: MLXArray?
@@ -79,13 +83,24 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     public func feedAudio(samples: [Float]) {
         sessionLock.withLock { _ in
-            guard isActive else { return }
+            guard isActive else {
+                Self.logger.warning("feedAudio: isActive=false, dropping \(samples.count) samples")
+                return
+            }
             totalSamplesFed += samples.count
 
             _ = vadSegmenter.feedSamples(samples)
             if let newMelFrames = melProcessor.process(samples: samples) {
                 accumulateChunkMel(newMelFrames)
+                let chunksBefore = chunkProcessor?.chunkIndex ?? 0
+                let feedStart = ContinuousClock.now
                 processAccumulatedChunks()
+                let feedMs = feedStart.duration(to: .now).milliseconds
+                let chunksAfter = chunkProcessor?.chunkIndex ?? 0
+                let chunksProcessed = chunksAfter - chunksBefore
+                if chunksProcessed > 0 {
+                    Self.logger.info("feedAudio: processed \(chunksProcessed, privacy: .public) chunk(s) in \(feedMs, privacy: .public)ms totalSamples=\(self.totalSamplesFed, privacy: .public) melBuf=\(self.chunkMelFrameCount, privacy: .public)")
+                }
             }
         }
     }
@@ -136,6 +151,38 @@ public class StreamingInferenceSession: @unchecked Sendable {
             return
 
         case .normal, .recoveryReset, .periodicReset:
+            if !result.newlyEmittedTokens.isEmpty {
+                lastDecodeSampleCount = totalSamplesFed
+                emptyRecoveryResets = 0
+                hasProducedFirstToken = true
+                postResetSilenceWarned = false
+            }
+
+            let postResetSilenceThreshold = 16000 * 30 // 30 seconds at 16kHz
+            if !hasProducedFirstToken
+                && !postResetSilenceWarned
+                && lastFullResetSampleCount > 0
+                && totalSamplesFed - lastFullResetSampleCount > postResetSilenceThreshold {
+                Self.logger.error("Post-reset silence: no tokens produced \(String(format: "%.0f", Double(self.totalSamplesFed - self.lastFullResetSampleCount) / 16000.0), privacy: .public)s after full stream reset")
+                postResetSilenceWarned = true
+            }
+
+            if result.action == .recoveryReset && result.newlyEmittedTokens.isEmpty {
+                emptyRecoveryResets += 1
+                if emptyRecoveryResets >= 2 {
+                    Self.logger.warning("Escalation: \(self.emptyRecoveryResets, privacy: .public) consecutive empty recovery resets — full stream reset")
+                    performFullStreamReset()
+                    return
+                }
+            }
+
+            let noDecodeThreshold = 16000 * 20 // 20 seconds at 16kHz
+            if hasProducedFirstToken
+                && totalSamplesFed - lastDecodeSampleCount > noDecodeThreshold {
+                Self.logger.warning("No-decode watchdog: \(String(format: "%.1f", Double(self.totalSamplesFed - self.lastDecodeSampleCount) / 16000.0), privacy: .public)s without decode output — full stream reset")
+                performFullStreamReset()
+                return
+            }
             let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
             let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
             let currentChunkIndex = processor.chunkIndex
@@ -168,22 +215,11 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
                 switch result.action {
                 case .periodicReset, .recoveryReset, .normal, .coldStart:
-                    if config.pastTextConditioning {
-                        if !result.newlyEmittedTokens.isEmpty {
-                            let newTextTokens = TextMergeUtilities.extractTextTokenIds(result.newlyEmittedTokens)
-                            state.preResetTokenIds.append(contentsOf: newTextTokens)
-                        }
-                        if !state.preResetTokenIds.isEmpty {
-                            let decoded = tokenizer.decode(tokens: state.preResetTokenIds)
-                            state.mergedCommittedText = TextMergeUtilities.parseASROutput(decoded).text
-                        } else {
-                            state.mergedCommittedText = parsedConfirmed.text
-                        }
-                    } else {
-                        if !newlyEmittedText.isEmpty {
-                            state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
-                                prefix: state.mergedCommittedText, newText: newlyEmittedText)
-                        }
+                    if !newlyEmittedText.isEmpty {
+                        state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
+                            prefix: state.mergedCommittedText, newText: newlyEmittedText)
+                    } else if state.mergedCommittedText.isEmpty {
+                        state.mergedCommittedText = parsedConfirmed.text
                     }
                 }
                 return state.mergedCommittedText
@@ -196,6 +232,8 @@ public class StreamingInferenceSession: @unchecked Sendable {
         }
 
         let decodeTime = Date().timeIntervalSince(startTime)
+        let chunkTimeMs = Int(decodeTime * 1000)
+        Self.logger.info("chunk action=\(String(describing: result.action), privacy: .public) newTokens=\(result.newlyEmittedTokens.count, privacy: .public) emptyResets=\(self.emptyRecoveryResets, privacy: .public) chunkTime=\(chunkTimeMs, privacy: .public)ms")
         continuation?.yield(.stats(StreamingStats(
             encodedWindowCount: processor.encodedWindowCount,
             totalAudioSeconds: Double(totalSamplesFed) / 16000.0,
@@ -226,6 +264,20 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     // MARK: - Internal Reset
 
+    private func performFullStreamReset() {
+        resetProcessingState()
+        emptyRecoveryResets = 0
+        lastDecodeSampleCount = totalSamplesFed
+        lastFullResetSampleCount = totalSamplesFed
+        hasProducedFirstToken = false
+        postResetSilenceWarned = false
+        shared.withLock {
+            $0.committedTokenIds = []
+            $0.chunkCount = 0
+        }
+        Memory.clearCache()
+    }
+
     private func resetProcessingState() {
         melProcessor.reset()
         vadSegmenter.reset()
@@ -239,7 +291,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
             $0.committedTokenIds = []
             $0.chunkCount = 0
             $0.mergedCommittedText = ""
-            $0.preResetTokenIds = []
         }
         Memory.clearCache()
     }
