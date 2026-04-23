@@ -59,6 +59,7 @@ final class MicrophoneService: ObservableObject {
         setupDeviceMonitoring()
         updateCurrentMicrophone()
         setupSpeakerCaptureSync()
+        setupOutputDeviceListener()
     }
     
     deinit {
@@ -78,6 +79,33 @@ final class MicrophoneService: ObservableObject {
                 AppPreferences.shared.speakerCaptureEnabled = newValue
             }
     }
+
+    // MARK: - Output Device Listener
+
+    #if os(macOS)
+    private func setupOutputDeviceListener() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            nil
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                guard self != nil else { return }
+                NotificationCenter.default.post(name: .outputDeviceDidChange, object: nil)
+            }
+        }
+        if status != noErr {
+            logger.warning("Failed to register output device change listener (status \(status, privacy: .public))")
+        }
+    }
+    #else
+    private func setupOutputDeviceListener() {}
+    #endif
     
     private func setupDeviceMonitoring() {
         deviceChangeObserver = NotificationCenter.default.addObserver(
@@ -149,7 +177,14 @@ final class MicrophoneService: ObservableObject {
             }
 
         availableMicrophones = allDevices.filter { device in
-            !isAggregateDevice(device) && hasRealInputStream(device)
+            !isAggregateDevice(device) && hasRealInputStream(device) && !isConferencingVirtualDevice(device)
+        }
+
+        var seenKeys = Set<String>()
+        availableMicrophones = availableMicrophones.filter { device in
+            let transport = getTransportType(for: device)
+            let key = "\(device.name)|\(transport)"
+            return seenKeys.insert(key).inserted
         }
 
         if AppPreferences.shared.debugMode {
@@ -355,6 +390,14 @@ final class MicrophoneService: ObservableObject {
         let transportType = UInt32(bitPattern: getTransportType(for: device))
         return transportType == kAudioDeviceTransportTypeAggregate
             || transportType == kAudioDeviceTransportTypeAutoAggregate
+    }
+
+    private func isConferencingVirtualDevice(_ device: AudioDevice) -> Bool {
+        let transportType = UInt32(bitPattern: getTransportType(for: device))
+        guard transportType == kAudioDeviceTransportTypeVirtual else { return false }
+        let nameLower = device.name.lowercased()
+        let conferencingKeywords = ["zoom", "teams", "webex", "meet", "skype", "slack", "discord"]
+        return conferencingKeywords.contains { nameLower.contains($0) }
     }
 
     // MARK: - Stream Inspection
@@ -593,7 +636,10 @@ final class MicrophoneService: ObservableObject {
     
     func getInputChannelCount(for device: AudioDevice) -> Int {
         guard let deviceID = getCoreAudioDeviceID(for: device) else { return 0 }
-        
+        return getInputChannelCount(for: deviceID)
+    }
+
+    private func getInputChannelCount(for deviceID: AudioDeviceID) -> Int {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
             mScope: kAudioDevicePropertyScopeInput,
@@ -622,6 +668,69 @@ final class MicrophoneService: ObservableObject {
         }
         
         return totalChannels
+    }
+
+    func getSystemDefaultOutputDeviceID() -> AudioDeviceID? {
+        var deviceID = AudioDeviceID()
+        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0, nil,
+            &propertySize,
+            &deviceID
+        )
+        guard status == noErr, deviceID != 0 else { return nil }
+        return deviceID
+    }
+
+    func isBluetoothTransport(_ deviceID: AudioDeviceID) -> Bool {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transportType: UInt32 = 0
+        var propertySize = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(
+            deviceID, &propertyAddress, 0, nil, &propertySize, &transportType
+        )
+        guard status == noErr else { return false }
+        return transportType == kAudioDeviceTransportTypeBluetooth
+            || transportType == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    func deviceHasInputStreams(_ deviceID: AudioDeviceID) -> Bool {
+        return getInputChannelCount(for: deviceID) > 0
+    }
+
+    func getDeviceUID(_ deviceID: AudioDeviceID) -> String? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uid: Unmanaged<CFString>?
+        var propertySize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = AudioObjectGetPropertyData(
+            deviceID, &propertyAddress, 0, nil, &propertySize, &uid
+        )
+        guard status == noErr, let cf = uid?.takeRetainedValue() else { return nil }
+        return cf as String
+    }
+
+    func isSamePhysicalBTDevice(_ deviceA: AudioDeviceID, _ deviceB: AudioDeviceID) -> Bool {
+        guard let uidA = getDeviceUID(deviceA),
+              let uidB = getDeviceUID(deviceB) else { return false }
+        // BT device UIDs are "{MAC}:input" / "{MAC}:output" — same MAC = same device
+        let prefixA = uidA.components(separatedBy: ":").dropLast().joined(separator: ":")
+        let prefixB = uidB.components(separatedBy: ":").dropLast().joined(separator: ":")
+        return !prefixA.isEmpty && prefixA == prefixB
     }
     #endif
 }

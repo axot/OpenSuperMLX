@@ -41,7 +41,9 @@ class StreamingAudioService: ObservableObject {
     private var microphoneChangeObserver: NSObjectProtocol?
     private var microphoneDisconnectObserver: NSObjectProtocol?
     private var configChangeObserver: NSObjectProtocol?
+    private var outputChangeObserver: NSObjectProtocol?
     private var configDebounceTask: Task<Void, Never>?
+    private var outputDebounceTask: Task<Void, Never>?
 
     /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
@@ -50,6 +52,7 @@ class StreamingAudioService: ObservableObject {
 
     private var isEngineWarmed = false
     private var hasBeenWarmedOnce = false
+    private var lastWarmUpTime: Date = .distantPast
 
     // MARK: - Init
 
@@ -65,9 +68,9 @@ class StreamingAudioService: ObservableObject {
                     self.hotSwapMicrophone()
                 } else if self.isEngineWarmed {
                     self.coolDown()
-                    self.warmUp()
+                    self.warmUp(fromBackground: true)
                 } else if self.hasBeenWarmedOnce {
-                    self.warmUp()
+                    self.warmUp(fromBackground: true)
                 }
             }
         }
@@ -87,73 +90,158 @@ class StreamingAudioService: ObservableObject {
                 }
             }
         }
+
+        outputChangeObserver = NotificationCenter.default.addObserver(
+            forName: .outputDeviceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.outputDebounceTask?.cancel()
+                self.outputDebounceTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled, let self else { return }
+                    if self.isStreaming {
+                        self.hotSwapMicrophone()
+                    } else if self.isEngineWarmed {
+                        self.coolDown()
+                        self.warmUp(fromBackground: true)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Engine Pre-Warm
 
-    func warmUp() {
+    func warmUp(fromBackground: Bool = false) {
         guard !isEngineWarmed, audioEngine == nil else { return }
+        if fromBackground && Date().timeIntervalSince(lastWarmUpTime) < 1.0 {
+            logger.info("Skipping warmUp — last warmUp was < 1s ago")
+            return
+        }
 
-        let engine = AVAudioEngine()
+        var engine = AVAudioEngine()
 
-        let activeMic = MicrophoneService.shared.activateForRecording()
+        var activeMic = MicrophoneService.shared.activateForRecording()
 
-        let inputNode = engine.inputNode
+        var inputNode = engine.inputNode
         let isVirtual = activeMic.map { MicrophoneService.shared.isVirtualDevice($0) } ?? false
 
         if !isVirtual {
-            // VPIO reads kAudioHardwarePropertyDefaultInputDevice at aggregate creation time.
-            // Temporarily set system default to our target device so VPIO's aggregate includes it.
-            var savedDefaultInput: AudioDeviceID?
-            if let activeMic,
-               let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
-                let current = getSystemDefaultInputDevice()
-                if current != coreAudioID {
-                    savedDefaultInput = current
-                    setSystemDefaultInputDevice(coreAudioID)
-                    usleep(50_000)
+            let micService = MicrophoneService.shared
+            let outputDeviceID = micService.getSystemDefaultOutputDeviceID()
+            let inputDeviceID = activeMic.flatMap { micService.getCoreAudioDeviceID(for: $0) }
+            let outputIsBT = outputDeviceID.map { micService.isBluetoothTransport($0) } ?? false
+            let inputIsBT = inputDeviceID.map { micService.isBluetoothTransport($0) } ?? false
+            let isSplitRoute: Bool
+            if outputIsBT && inputIsBT, let inID = inputDeviceID, let outID = outputDeviceID {
+                isSplitRoute = !micService.isSamePhysicalBTDevice(inID, outID)
+            } else {
+                isSplitRoute = outputIsBT != inputIsBT
+            }
+
+            var vpioInputDeviceID: AudioDeviceID?
+            var skipVPIO = false
+
+            if isSplitRoute {
+                if micService.selectedMicrophone == nil,
+                   let outID = outputDeviceID,
+                   micService.deviceHasInputStreams(outID) {
+                    vpioInputDeviceID = outID
+                    activeMic = micService.availableMicrophones.first { micService.getCoreAudioDeviceID(for: $0) == outID }
+                    logger.info("Split-route (BT mismatch): auto-switching input to output device mic for VPIO compatibility")
+                } else {
+                    skipVPIO = true
+                    ErrorToastManager.shared.show("Noise suppression disabled — mic and speaker on different devices")
+                    logger.info("Split-route: skipping VPIO")
                 }
             }
 
-            do {
-                try inputNode.setVoiceProcessingEnabled(true)
-
-                var duckingConfig = AUVoiceIOOtherAudioDuckingConfiguration(
-                    mEnableAdvancedDucking: DarwinBoolean(false),
-                    mDuckingLevel: .min
-                )
-                let duckStatus = AudioUnitSetProperty(
-                    inputNode.audioUnit!,
-                    kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
-                    kAudioUnitScope_Global,
-                    0,
-                    &duckingConfig,
-                    UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size)
-                )
-                if duckStatus != noErr {
-                    logger.warning("Warm-up: failed to disable VPIO ducking (status \(duckStatus, privacy: .public))")
+            if !skipVPIO {
+                // VPIO reads kAudioHardwarePropertyDefaultInputDevice at aggregate creation time.
+                // Temporarily set system default to our target device so VPIO's aggregate includes it.
+                var savedDefaultInput: AudioDeviceID?
+                let targetInputID = vpioInputDeviceID ?? inputDeviceID
+                if let targetInputID {
+                    let current = getSystemDefaultInputDevice()
+                    if current != targetInputID {
+                        savedDefaultInput = current
+                        setSystemDefaultInputDevice(targetInputID)
+                        usleep(50_000)
+                    }
                 }
 
-                var disableAGC: UInt32 = 0
-                let agcStatus = AudioUnitSetProperty(
-                    inputNode.audioUnit!,
-                    kAUVoiceIOProperty_VoiceProcessingEnableAGC,
-                    kAudioUnitScope_Global,
-                    1,
-                    &disableAGC,
-                    UInt32(MemoryLayout<UInt32>.size)
-                )
-                if agcStatus != noErr {
-                    logger.warning("Warm-up: failed to disable VPIO AGC (status \(agcStatus, privacy: .public))")
+                do {
+                    if fromBackground || isSplitRoute {
+                        // setVoiceProcessingEnabled can deadlock on BT split-route;
+                        // run on background thread with timeout as safety valve
+                        let vpioNode = inputNode
+                        let semaphore = DispatchSemaphore(value: 0)
+                        var vpioError: Error?
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            do { try vpioNode.setVoiceProcessingEnabled(true) }
+                            catch { vpioError = error }
+                            semaphore.signal()
+                        }
+                        let result = semaphore.wait(timeout: .now() + 3.0)
+                        if result == .timedOut {
+                            logger.error("VPIO creation timed out (3s)")
+                            ErrorToastManager.shared.show("Noise suppression unavailable")
+                            let oldEngine = engine
+                            DispatchQueue.global(qos: .utility).async { oldEngine.stop() }
+                            engine = AVAudioEngine()
+                            inputNode = engine.inputNode
+                            skipVPIO = true
+                        } else if let vpioError {
+                            throw vpioError
+                        }
+                    } else {
+                        try inputNode.setVoiceProcessingEnabled(true)
+                    }
+
+                    if !skipVPIO {
+                        var duckingConfig = AUVoiceIOOtherAudioDuckingConfiguration(
+                            mEnableAdvancedDucking: DarwinBoolean(false),
+                            mDuckingLevel: .min
+                        )
+                        let duckStatus = AudioUnitSetProperty(
+                            inputNode.audioUnit!,
+                            kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
+                            kAudioUnitScope_Global,
+                            0,
+                            &duckingConfig,
+                            UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size)
+                        )
+                        if duckStatus != noErr {
+                            logger.warning("Warm-up: failed to disable VPIO ducking (status \(duckStatus, privacy: .public))")
+                        }
+
+                        var disableAGC: UInt32 = 0
+                        let agcStatus = AudioUnitSetProperty(
+                            inputNode.audioUnit!,
+                            kAUVoiceIOProperty_VoiceProcessingEnableAGC,
+                            kAudioUnitScope_Global,
+                            1,
+                            &disableAGC,
+                            UInt32(MemoryLayout<UInt32>.size)
+                        )
+                        if agcStatus != noErr {
+                            logger.warning("Warm-up: failed to disable VPIO AGC (status \(agcStatus, privacy: .public))")
+                        }
+
+                        logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
+                    }
+                } catch {
+                    logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
                 }
 
-                logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
-            } catch {
-                logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
-            }
-
-            if let savedDefaultInput {
-                setSystemDefaultInputDevice(savedDefaultInput)
+                if let savedDefaultInput {
+                    setSystemDefaultInputDevice(savedDefaultInput)
+                }
+            } else {
+                logger.info("Warm-up: VoiceProcessingIO skipped (split-route, no compatible mic)")
             }
         } else {
             if let activeMic,
@@ -191,6 +279,7 @@ class StreamingAudioService: ObservableObject {
             audioEngine = engine
             isEngineWarmed = true
             hasBeenWarmedOnce = true
+            lastWarmUpTime = Date()
             observeEngineConfigChange(engine)
             logger.info("Audio engine warmed up")
         } catch {
@@ -297,7 +386,7 @@ class StreamingAudioService: ObservableObject {
         audioEngine = nil
         isEngineWarmed = false
 
-        warmUp()
+        warmUp(fromBackground: true)
 
         if !isEngineWarmed {
             logger.error("Hot-swap failed: audio engine did not start with new device")
