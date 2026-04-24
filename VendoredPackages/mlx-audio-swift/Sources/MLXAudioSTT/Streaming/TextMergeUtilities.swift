@@ -65,6 +65,12 @@ enum TextMergeUtilities {
 
     // MARK: - Token-Level
 
+    static func stripTrailingReplacementCharacters(_ text: String) -> String {
+        var s = text
+        while s.last == "\u{FFFD}" { s.removeLast() }
+        return s
+    }
+
     static func extractTextTokenIds(_ tokens: [Int], asrTextTokenId: Int = 151704) -> [Int] {
         guard let idx = tokens.firstIndex(of: asrTextTokenId) else { return tokens }
         return Array(tokens.suffix(from: tokens.index(after: idx)))

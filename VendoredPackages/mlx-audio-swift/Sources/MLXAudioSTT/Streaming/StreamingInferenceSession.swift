@@ -41,6 +41,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var hasProducedFirstToken: Bool = false
     private var lastFullResetSampleCount: Int = 0
     private var postResetSilenceWarned: Bool = false
+    private var previousConfirmedText: String = ""
 
     private var chunkProcessor: ContinuousChunkProcessor?
     private var chunkMelBuffer: MLXArray?
@@ -185,22 +186,39 @@ public class StreamingInferenceSession: @unchecked Sendable {
             }
             let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
             let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
+            let safeConfirmedText = TextMergeUtilities.stripTrailingReplacementCharacters(parsedConfirmed.text)
             let currentChunkIndex = processor.chunkIndex
 
             let provisionalText: String
             if result.action == .normal && !result.provisionalTokens.isEmpty {
-                let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
-                provisionalText = TextMergeUtilities.parseASROutput(provisionalRaw).text
+                let allTokens = result.confirmedTokens + result.provisionalTokens
+                let fullRaw = tokenizer.decode(tokens: allTokens)
+                let fullText = TextMergeUtilities.parseASROutput(fullRaw).text
+                if fullText.hasPrefix(safeConfirmedText) {
+                    provisionalText = String(fullText.dropFirst(safeConfirmedText.count))
+                } else {
+                    let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
+                    provisionalText = TextMergeUtilities.parseASROutput(provisionalRaw).text
+                }
             } else {
                 provisionalText = ""
             }
 
             let newlyEmittedText: String
-            if !result.newlyEmittedTokens.isEmpty {
-                let raw = tokenizer.decode(tokens: result.newlyEmittedTokens)
-                newlyEmittedText = TextMergeUtilities.parseASROutput(raw).text
+            if safeConfirmedText.hasPrefix(previousConfirmedText) {
+                newlyEmittedText = String(safeConfirmedText.dropFirst(previousConfirmedText.count))
+            } else if !safeConfirmedText.isEmpty && !previousConfirmedText.isEmpty {
+                let commonLen = zip(safeConfirmedText, previousConfirmedText)
+                    .prefix(while: { $0 == $1 }).count
+                let divergent = String(safeConfirmedText.dropFirst(commonLen))
+                Self.logger.warning("Confirmed text prefix changed at offset \(commonLen, privacy: .public) — emitting from divergence point")
+                newlyEmittedText = divergent
             } else {
-                newlyEmittedText = ""
+                newlyEmittedText = safeConfirmedText
+            }
+            previousConfirmedText = safeConfirmedText
+            if result.action == .periodicReset || result.action == .recoveryReset {
+                previousConfirmedText = ""
             }
 
             let displayConfirmed: String = shared.withLock { state in
@@ -219,7 +237,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
                         state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
                             prefix: state.mergedCommittedText, newText: newlyEmittedText)
                     } else if state.mergedCommittedText.isEmpty {
-                        state.mergedCommittedText = parsedConfirmed.text
+                        state.mergedCommittedText = safeConfirmedText
                     }
                 }
                 return state.mergedCommittedText
@@ -271,6 +289,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         lastFullResetSampleCount = totalSamplesFed
         hasProducedFirstToken = false
         postResetSilenceWarned = false
+        previousConfirmedText = ""
         shared.withLock {
             $0.committedTokenIds = []
             $0.chunkCount = 0
