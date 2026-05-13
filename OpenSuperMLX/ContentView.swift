@@ -684,8 +684,8 @@ struct ContentView: View {
                             HStack(spacing: 12) {
                                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
 
-                                if viewModel.isRecording && viewModel.microphoneService.speakerCaptureEnabled {
-                                    DualTrackBadge()
+                                if viewModel.isRecording {
+                                    DualTrackBadge(micPlusSystem: viewModel.microphoneService.effectiveSpeakerCaptureActive)
                                         .transition(.opacity.combined(with: .scale))
                                 }
                                 
@@ -1309,14 +1309,38 @@ struct MicrophonePickerIconView: View {
     @ObservedObject var microphoneService: MicrophoneService
     @StateObject private var permissionsManager = PermissionsManager()
     @State private var showMenu = false
+    @State private var classificationsTick: Int = 0
     @Environment(\.colorScheme) private var colorScheme
-    
+
     private var builtInMicrophones: [MicrophoneService.AudioDevice] {
         microphoneService.availableMicrophones.filter { $0.isBuiltIn }
     }
-    
+
     private var externalMicrophones: [MicrophoneService.AudioDevice] {
         microphoneService.availableMicrophones.filter { !$0.isBuiltIn }
+    }
+
+    private var currentOutputClassification: DeviceClassification? {
+        _ = classificationsTick // depend on the tick so SwiftUI re-evaluates after a flip
+        return MicrophoneService.shared.getCurrentOutputUID()
+            .flatMap { OutputDeviceClassifier.shared.classification(for: $0) }
+    }
+
+    private var speakerToggleTitle: String {
+        if currentOutputClassification == .speaker {
+            return "Audio Output (unavailable on speaker)"
+        }
+        return "Audio Output"
+    }
+
+    private var recentDevices: [(uid: String, entry: ClassificationEntry)] {
+        _ = classificationsTick
+        return OutputDeviceClassifier.shared.recentDevices(limit: 3)
+    }
+
+    private var currentOutputUID: String? {
+        _ = classificationsTick
+        return MicrophoneService.shared.getCurrentOutputUID()
     }
     
     var body: some View {
@@ -1348,14 +1372,9 @@ struct MicrophonePickerIconView: View {
                 }) {
                     HStack {
                         Image(systemName: "speaker.wave.2")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Audio Output")
-                            Text("Auto-detect")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                        Text(speakerToggleTitle)
                         Spacer()
-                        if microphoneService.speakerCaptureEnabled {
+                        if microphoneService.effectiveSpeakerCaptureActive {
                             Image(systemName: "checkmark")
                         }
                     }
@@ -1365,6 +1384,60 @@ struct MicrophonePickerIconView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Capture system audio output")
+
+                if !recentDevices.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    Text("AUDIO OUTPUTS")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 2)
+
+                    ForEach(recentDevices, id: \.uid) { item in
+                        HStack(spacing: 8) {
+                            let displayName = item.entry.displayName.isEmpty
+                                ? String(item.uid.prefix(16))
+                                : item.entry.displayName
+                            Text(displayName)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            if item.uid == currentOutputUID {
+                                Image(systemName: "checkmark")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Button(action: {
+                                let newClassification: DeviceClassification =
+                                    (item.entry.classification == .headphone) ? .speaker : .headphone
+                                OutputDeviceClassifier.shared.set(
+                                    newClassification,
+                                    for: item.uid,
+                                    displayName: item.entry.displayName
+                                )
+                                if item.uid == currentOutputUID {
+                                    StreamingAudioService.shared.applyClassificationChange()
+                                }
+                                classificationsTick &+= 1
+                            }) {
+                                Text(item.entry.classification == .headphone ? "Headphone" : "Speaker")
+                                    .font(.caption)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color.secondary.opacity(0.15))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Click to flip classification")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                    }
+                }
 
                 Divider()
                     .padding(.vertical, 4)
@@ -1398,29 +1471,39 @@ struct MicrophonePickerIconView: View {
             }
             .frame(minWidth: 240)
             .padding(.vertical, 8)
+            .onReceive(NotificationCenter.default.publisher(for: .outputDeviceClassificationDidChange)) { _ in
+                classificationsTick &+= 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .outputDeviceDidChange)) { _ in
+                classificationsTick &+= 1
+            }
         }
     }
 }
 
 struct DualTrackBadge: View {
+    let micPlusSystem: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "person.and.background.dotted")
-                .imageScale(.small)
-            Text("Mic + System Audio")
-                .font(.caption2)
+            Image(systemName: micPlusSystem ? "person.and.background.dotted" : "person.fill")
+                .font(.title3)
+                .foregroundColor(ThemePalette.iconAccent(colorScheme))
+            Text(micPlusSystem ? "Mic + System Audio" : "Mic Only")
+                .font(.caption)
+                .foregroundColor(ThemePalette.iconAccent(colorScheme))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .foregroundColor(ThemePalette.iconAccent(colorScheme))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 8)
+        .frame(height: 32)
         .background(ThemePalette.panelSurface(colorScheme))
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
         )
-        .cornerRadius(6)
+        .cornerRadius(8)
     }
 }
 

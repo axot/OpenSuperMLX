@@ -15,6 +15,8 @@ Sys → ScreenCaptureKit (matched rate) → accumulatedSamples → drain
                                               StreamingWAVWriter (16kHz)
 ```
 
+**Note on AEC:** VPIO (`setVoiceProcessingEnabled`) was removed. AEC is now handled at the routing layer via `OutputDeviceClassifier`: if the active output device is classified as a speaker AND the user enabled system-audio capture, the routing forces mic-only to avoid the speaker→mic echo path. Headphone outputs allow free mic+sys mixing.
+
 ## Enable Pipeline Trace
 
 1. Turn on **Debug Mode** in Settings

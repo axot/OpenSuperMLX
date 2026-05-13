@@ -20,7 +20,18 @@ final class MicrophoneService: ObservableObject {
     @Published var selectedMicrophone: AudioDevice?
     @Published var currentMicrophone: AudioDevice?
     @Published var speakerCaptureEnabled: Bool = false
-    
+
+    /// True iff the toggle is on AND the current output is a headphone (per
+    /// OutputDeviceClassifier). Speaker output forces mic-only regardless of toggle.
+    @MainActor
+    var effectiveSpeakerCaptureActive: Bool {
+        guard speakerCaptureEnabled,
+              let uid = getCurrentOutputUID(),
+              OutputDeviceClassifier.shared.classification(for: uid) == .headphone
+        else { return false }
+        return true
+    }
+
     private var speakerCaptureCancellable: AnyCancellable?
     private var deviceChangeObserver: Any?
     private var timer: Timer?
@@ -95,16 +106,58 @@ final class MicrophoneService: ObservableObject {
             nil
         ) { [weak self] _, _ in
             DispatchQueue.main.async {
-                guard self != nil else { return }
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.markCurrentOutputAsUsed()
+                }
                 NotificationCenter.default.post(name: .outputDeviceDidChange, object: nil)
             }
         }
         if status != noErr {
             logger.warning("Failed to register output device change listener (status \(status, privacy: .public))")
         }
+        // Initial mark on construction so an already-classified default device gets its
+        // lastUsedAt refreshed on every app launch. `MicrophoneService.shared` is first
+        // touched from `OpenSuperMLXApp.init`, which runs on the main thread.
+        MainActor.assumeIsolated {
+            self.markCurrentOutputAsUsed()
+        }
+    }
+
+    @MainActor
+    private func markCurrentOutputAsUsed() {
+        guard let id = getSystemDefaultOutputDeviceID(),
+              let uid = getDeviceUID(id) else { return }
+        let displayName = getDeviceDisplayName(id) ?? String(uid.prefix(16))
+        OutputDeviceClassifier.shared.markUsed(uid: uid, displayName: displayName)
+    }
+
+    func getCurrentOutputUID() -> String? {
+        getSystemDefaultOutputDeviceID().flatMap { getDeviceUID($0) }
+    }
+
+    func getCurrentOutputDisplayName() -> String? {
+        guard let id = getSystemDefaultOutputDeviceID() else { return nil }
+        return getDeviceDisplayName(id)
+    }
+
+    func getDeviceDisplayName(_ deviceID: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceNameCFString,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &name)
+        guard status == noErr, let cf = name?.takeRetainedValue() else { return nil }
+        return cf as String
     }
     #else
     private func setupOutputDeviceListener() {}
+    func getCurrentOutputUID() -> String? { nil }
+    func getCurrentOutputDisplayName() -> String? { nil }
+    func getDeviceDisplayName(_ deviceID: AudioDeviceID) -> String? { nil }
     #endif
     
     private func setupDeviceMonitoring() {
@@ -689,26 +742,6 @@ final class MicrophoneService: ObservableObject {
         return deviceID
     }
 
-    func isBluetoothTransport(_ deviceID: AudioDeviceID) -> Bool {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var transportType: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-        let status = AudioObjectGetPropertyData(
-            deviceID, &propertyAddress, 0, nil, &propertySize, &transportType
-        )
-        guard status == noErr else { return false }
-        return transportType == kAudioDeviceTransportTypeBluetooth
-            || transportType == kAudioDeviceTransportTypeBluetoothLE
-    }
-
-    func deviceHasInputStreams(_ deviceID: AudioDeviceID) -> Bool {
-        return getInputChannelCount(for: deviceID) > 0
-    }
-
     func getDeviceUID(_ deviceID: AudioDeviceID) -> String? {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,
@@ -722,15 +755,6 @@ final class MicrophoneService: ObservableObject {
         )
         guard status == noErr, let cf = uid?.takeRetainedValue() else { return nil }
         return cf as String
-    }
-
-    func isSamePhysicalBTDevice(_ deviceA: AudioDeviceID, _ deviceB: AudioDeviceID) -> Bool {
-        guard let uidA = getDeviceUID(deviceA),
-              let uidB = getDeviceUID(deviceB) else { return false }
-        // BT device UIDs are "{MAC}:input" / "{MAC}:output" — same MAC = same device
-        let prefixA = uidA.components(separatedBy: ":").dropLast().joined(separator: ":")
-        let prefixB = uidB.components(separatedBy: ":").dropLast().joined(separator: ":")
-        return !prefixA.isEmpty && prefixA == prefixB
     }
     #endif
 }

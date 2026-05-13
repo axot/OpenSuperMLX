@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let prefsLogger = Logger(subsystem: "OpenSuperMLX", category: "AppPreferences")
 
 @propertyWrapper
 struct UserDefault<T> {
@@ -176,4 +179,28 @@ final class AppPreferences {
 
     @UserDefault(key: "speakerCaptureEnabled", defaultValue: false)
     var speakerCaptureEnabled: Bool
+
+    // MARK: - Output Device Classifications
+
+    @OptionalUserDefault(key: "outputDeviceClassifications")
+    private var outputDeviceClassificationsData: Data?
+
+    var outputDeviceClassifications: [String: ClassificationEntry] {
+        get {
+            guard let data = outputDeviceClassificationsData else { return [:] }
+            do {
+                return try JSONDecoder().decode([String: ClassificationEntry].self, from: data)
+            } catch {
+                prefsLogger.warning("Failed to decode outputDeviceClassifications, returning empty: \(error.localizedDescription, privacy: .public)")
+                return [:]
+            }
+        }
+        set {
+            do {
+                outputDeviceClassificationsData = try JSONEncoder().encode(newValue)
+            } catch {
+                prefsLogger.warning("Failed to encode outputDeviceClassifications: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
 }

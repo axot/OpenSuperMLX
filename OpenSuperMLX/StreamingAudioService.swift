@@ -50,9 +50,33 @@ class StreamingAudioService: ObservableObject {
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
+    /// Read by the detached feedTask each iteration — so a mid-stream classification flip
+    /// (popover chip on the current device) immediately changes whether sys samples are
+    /// drained and mixed. Mirrors the `shouldStopFeeding` lock pattern.
+    private let speakerCaptureActiveLock = OSAllocatedUnfairLock(initialState: false)
+
     private var isEngineWarmed = false
     private var hasBeenWarmedOnce = false
     private var lastWarmUpTime: Date = .distantPast
+
+    /// Output device classifier — testable seam (write at test setUp).
+    var classifier: OutputDeviceClassifierProtocol = OutputDeviceClassifier.shared
+
+    /// Classification class (.speaker / .headphone / nil-as-safe) snapshot at the
+    /// most recent startStreaming. Used to detect class flips that warrant a tap-restart.
+    private var sessionClassification: DeviceClassification?
+
+    // MARK: - Routing decision (pure function, unit-testable)
+
+    /// Pure routing decision based on current output classification + user toggle.
+    /// Speaker output (or unclassified, treated as speaker for safety) forces mic-only
+    /// to avoid the speaker→mic echo path; only headphones allow mic+sys mixing.
+    static func effectiveSpeakerCaptureEnabled(
+        classification: DeviceClassification?,
+        userToggle: Bool
+    ) -> Bool {
+        userToggle && classification == .headphone
+    }
 
     // MARK: - Init
 
@@ -102,12 +126,7 @@ class StreamingAudioService: ObservableObject {
                 self.outputDebounceTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(200))
                     guard !Task.isCancelled, let self else { return }
-                    if self.isStreaming {
-                        self.hotSwapMicrophone()
-                    } else if self.isEngineWarmed {
-                        self.coolDown()
-                        self.warmUp(fromBackground: true)
-                    }
+                    self.applyClassificationChange()
                 }
             }
         }
@@ -122,140 +141,27 @@ class StreamingAudioService: ObservableObject {
             return
         }
 
-        var engine = AVAudioEngine()
+        let engine = AVAudioEngine()
 
-        var activeMic = MicrophoneService.shared.activateForRecording()
+        let activeMic = MicrophoneService.shared.activateForRecording()
 
-        var inputNode = engine.inputNode
-        let isVirtual = activeMic.map { MicrophoneService.shared.isVirtualDevice($0) } ?? false
+        let inputNode = engine.inputNode
 
-        if !isVirtual {
-            let micService = MicrophoneService.shared
-            let outputDeviceID = micService.getSystemDefaultOutputDeviceID()
-            let inputDeviceID = activeMic.flatMap { micService.getCoreAudioDeviceID(for: $0) }
-            let outputIsBT = outputDeviceID.map { micService.isBluetoothTransport($0) } ?? false
-            let inputIsBT = inputDeviceID.map { micService.isBluetoothTransport($0) } ?? false
-            let isSplitRoute: Bool
-            if outputIsBT && inputIsBT, let inID = inputDeviceID, let outID = outputDeviceID {
-                isSplitRoute = !micService.isSamePhysicalBTDevice(inID, outID)
-            } else {
-                isSplitRoute = outputIsBT != inputIsBT
-            }
-
-            var vpioInputDeviceID: AudioDeviceID?
-            var skipVPIO = false
-
-            if isSplitRoute {
-                if micService.selectedMicrophone == nil,
-                   let outID = outputDeviceID,
-                   micService.deviceHasInputStreams(outID) {
-                    vpioInputDeviceID = outID
-                    activeMic = micService.availableMicrophones.first { micService.getCoreAudioDeviceID(for: $0) == outID }
-                    logger.info("Split-route (BT mismatch): auto-switching input to output device mic for VPIO compatibility")
-                } else {
-                    skipVPIO = true
-                    ErrorToastManager.shared.show("Noise suppression disabled — mic and speaker on different devices")
-                    logger.info("Split-route: skipping VPIO")
-                }
-            }
-
-            if !skipVPIO {
-                // VPIO reads kAudioHardwarePropertyDefaultInputDevice at aggregate creation time.
-                // Temporarily set system default to our target device so VPIO's aggregate includes it.
-                var savedDefaultInput: AudioDeviceID?
-                let targetInputID = vpioInputDeviceID ?? inputDeviceID
-                if let targetInputID {
-                    let current = getSystemDefaultInputDevice()
-                    if current != targetInputID {
-                        savedDefaultInput = current
-                        setSystemDefaultInputDevice(targetInputID)
-                        usleep(50_000)
-                    }
-                }
-
-                do {
-                    if fromBackground || isSplitRoute {
-                        // setVoiceProcessingEnabled can deadlock on BT split-route;
-                        // run on background thread with timeout as safety valve
-                        let vpioNode = inputNode
-                        let semaphore = DispatchSemaphore(value: 0)
-                        var vpioError: Error?
-                        DispatchQueue.global(qos: .userInitiated).async {
-                            do { try vpioNode.setVoiceProcessingEnabled(true) }
-                            catch { vpioError = error }
-                            semaphore.signal()
-                        }
-                        let result = semaphore.wait(timeout: .now() + 3.0)
-                        if result == .timedOut {
-                            logger.error("VPIO creation timed out (3s)")
-                            ErrorToastManager.shared.show("Noise suppression unavailable")
-                            let oldEngine = engine
-                            DispatchQueue.global(qos: .utility).async { oldEngine.stop() }
-                            engine = AVAudioEngine()
-                            inputNode = engine.inputNode
-                            skipVPIO = true
-                        } else if let vpioError {
-                            throw vpioError
-                        }
-                    } else {
-                        try inputNode.setVoiceProcessingEnabled(true)
-                    }
-
-                    if !skipVPIO {
-                        var duckingConfig = AUVoiceIOOtherAudioDuckingConfiguration(
-                            mEnableAdvancedDucking: DarwinBoolean(false),
-                            mDuckingLevel: .min
-                        )
-                        let duckStatus = AudioUnitSetProperty(
-                            inputNode.audioUnit!,
-                            kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
-                            kAudioUnitScope_Global,
-                            0,
-                            &duckingConfig,
-                            UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size)
-                        )
-                        if duckStatus != noErr {
-                            logger.warning("Warm-up: failed to disable VPIO ducking (status \(duckStatus, privacy: .public))")
-                        }
-
-                        var disableAGC: UInt32 = 0
-                        let agcStatus = AudioUnitSetProperty(
-                            inputNode.audioUnit!,
-                            kAUVoiceIOProperty_VoiceProcessingEnableAGC,
-                            kAudioUnitScope_Global,
-                            1,
-                            &disableAGC,
-                            UInt32(MemoryLayout<UInt32>.size)
-                        )
-                        if agcStatus != noErr {
-                            logger.warning("Warm-up: failed to disable VPIO AGC (status \(agcStatus, privacy: .public))")
-                        }
-
-                        logger.info("Warm-up: VoiceProcessingIO enabled for \(activeMic?.displayName ?? "default", privacy: .public)")
-                    }
-                } catch {
-                    logger.warning("Warm-up: VoiceProcessingIO not available: \(error, privacy: .public)")
-                }
-
-                if let savedDefaultInput {
-                    setSystemDefaultInputDevice(savedDefaultInput)
-                }
-            } else {
-                logger.info("Warm-up: VoiceProcessingIO skipped (split-route, no compatible mic)")
-            }
-        } else {
-            if let activeMic,
-               let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
-                var deviceID = coreAudioID
-                AudioUnitSetProperty(
-                    inputNode.audioUnit!,
-                    kAudioOutputUnitProperty_CurrentDevice,
-                    kAudioUnitScope_Global, 0,
-                    &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
-                )
-            }
-            logger.info("Warm-up: VoiceProcessingIO skipped for virtual device \(activeMic?.displayName ?? "unknown", privacy: .public)")
+        // VPIO disabled — mic input goes through plain AVAudioEngine.inputNode with no
+        // voice-processing pipeline, so other apps reading the same device (QuickTime, Zoom,
+        // etc.) see unmodified levels. AEC for speaker-capture echo is now handled at the
+        // routing layer via OutputDeviceClassifier (see startStreaming).
+        if let activeMic,
+           let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
+            var deviceID = coreAudioID
+            AudioUnitSetProperty(
+                inputNode.audioUnit!,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global, 0,
+                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
         }
+        logger.info("Warm-up: plain input for \(activeMic?.displayName ?? "default", privacy: .public)")
 
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         self.nativeSampleRate = nativeFormat.sampleRate
@@ -310,36 +216,6 @@ class StreamingAudioService: ObservableObject {
         }
     }
 
-    private func getSystemDefaultInputDevice() -> AudioDeviceID {
-        var deviceID: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
-        return deviceID
-    }
-
-    private func setSystemDefaultInputDevice(_ deviceID: AudioDeviceID) {
-        var mutableID = deviceID
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address, 0, nil,
-            UInt32(MemoryLayout<AudioDeviceID>.size),
-            &mutableID
-        )
-        if status != noErr {
-            logger.warning("Failed to set system default input device (status \(status, privacy: .public))")
-        }
-    }
-
     private var retiredEngines: [AVAudioEngine] = []
 
     func coolDown() {
@@ -355,6 +231,7 @@ class StreamingAudioService: ObservableObject {
         retireEngine(audioEngine)
         audioEngine = nil
         isEngineWarmed = false
+        sessionClassification = nil
         ringBuffer.withLock { $0.removeAll() }
         logger.info("Audio engine cooled down")
     }
@@ -386,6 +263,8 @@ class StreamingAudioService: ObservableObject {
         audioEngine = nil
         isEngineWarmed = false
 
+        // Bypass the 1s warmUp debounce — this is a same-tick recreate.
+        lastWarmUpTime = .distantPast
         warmUp(fromBackground: true)
 
         if !isEngineWarmed {
@@ -397,6 +276,62 @@ class StreamingAudioService: ObservableObject {
         }
 
         logger.info("Hot-swapped microphone, preserved \(preserved.count) samples")
+    }
+
+    /// Re-evaluate routing for the current output device. A chip flip on the *current*
+    /// device is a routing-policy change only — the physical mic is unchanged, so the
+    /// AVAudioEngine and tap stay running. We only need to update the routing flag
+    /// (read by the feedTask) and start/stop SystemAudioService for the new policy.
+    ///
+    /// Synchronously recreating the engine here was the original design but raced
+    /// Core Audio's HAL I/O release window (~100-200ms after `engine.stop()`), leaving
+    /// the new tap silent. See deep-resolve report 2026-05-12.
+    func applyClassificationChange() {
+        guard isStreaming else { return }
+        let newClassification = MicrophoneService.shared.getCurrentOutputUID()
+            .flatMap { classifier.classification(for: $0) }
+        if newClassification == sessionClassification { return }
+
+        logger.info("Output classification changed mid-stream — updating routing only")
+        ErrorToastManager.shared.show("Audio configuration changed — recording continues")
+
+        let userToggle = MicrophoneService.shared.speakerCaptureEnabled
+        let newSpeakerEnabled = Self.effectiveSpeakerCaptureEnabled(
+            classification: newClassification,
+            userToggle: userToggle
+        )
+        let priorSpeakerEnabled = speakerCaptureActiveForSession
+
+        sessionClassification = newClassification
+        speakerCaptureActiveForSession = newSpeakerEnabled
+
+        // Flip the lock BEFORE adjusting SystemAudioService — the feed loop reading the
+        // new flag immediately reflects the new policy, and any small race during the
+        // start/stop transition shows up as a few empty sys drains (mic-only output for
+        // those iterations), not as wrong content.
+        speakerCaptureActiveLock.withLock { $0 = newSpeakerEnabled }
+
+        // Reset the mixer's carry-over buffers when crossing the sys/mic boundary so
+        // stale samples from before the transition don't desynchronize the next mix.
+        if newSpeakerEnabled != priorSpeakerEnabled {
+            audioMixer?.reset()
+        }
+
+        if newSpeakerEnabled && !priorSpeakerEnabled {
+            Task {
+                do {
+                    try await SystemAudioService.shared.startCapture(sampleRate: 48000)
+                    logger.info("Routing change: speaker capture started")
+                } catch {
+                    logger.warning("Routing change: speaker capture failed: \(error, privacy: .public)")
+                }
+            }
+        } else if !newSpeakerEnabled && priorSpeakerEnabled {
+            Task {
+                await SystemAudioService.shared.stopCapture()
+                logger.info("Routing change: speaker capture stopped")
+            }
+        }
     }
 
     // MARK: - Start Streaming
@@ -454,7 +389,29 @@ class StreamingAudioService: ObservableObject {
         playNotificationSound()
         logger.info("Streaming started (engine pre-warmed)")
 
-        let speakerEnabled = MicrophoneService.shared.speakerCaptureEnabled
+        let userSpeakerToggle = MicrophoneService.shared.speakerCaptureEnabled
+        let outputUID = MicrophoneService.shared.getCurrentOutputUID()
+        let outputName = MicrophoneService.shared.getCurrentOutputDisplayName() ?? (outputUID.map { String($0.prefix(16)) } ?? "Unknown")
+
+        var classification: DeviceClassification? = nil
+        if let uid = outputUID {
+            if let known = classifier.classification(for: uid) {
+                classification = known
+            } else if userSpeakerToggle {
+                // Only ask when sys-capture is on; otherwise mic-only is fine without classification.
+                if let answer = classifier.askUser(uid: uid, displayName: outputName) {
+                    classifier.set(answer, for: uid, displayName: outputName)
+                    classification = answer
+                }
+            }
+        }
+
+        sessionClassification = classification
+
+        let speakerEnabled = Self.effectiveSpeakerCaptureEnabled(
+            classification: classification,
+            userToggle: userSpeakerToggle
+        )
         speakerCaptureActiveForSession = speakerEnabled
         let mixer = AudioMixer(inputSampleRate: nativeSampleRate)
         self.audioMixer = mixer
@@ -491,8 +448,13 @@ class StreamingAudioService: ObservableObject {
             }
         }
 
+        // Seed the lock with the initial routing decision so the feed loop sees
+        // the same value as the synchronous setup above on its very first iteration.
+        speakerCaptureActiveLock.withLock { $0 = speakerEnabled }
+
         let ringBufferRef = self.ringBuffer
         let shouldStopRef = self.shouldStopFeeding
+        let speakerActiveRef = self.speakerCaptureActiveLock
         let sampleRate = self.nativeSampleRate
         feedTask = Task.detached {
             var consecutiveEmptyDrains = 0
@@ -508,8 +470,13 @@ class StreamingAudioService: ObservableObject {
                     return drained
                 }
 
+                // Read routing flag fresh each iteration so popover chip flips on the
+                // current device (and outputDeviceDidChange transitions) take effect
+                // without restarting the streaming session.
+                let speakerActiveNow = speakerActiveRef.withLock { $0 }
+
                 let samples16k: [Float]
-                if speakerEnabled {
+                if speakerActiveNow {
                     let sysSamples = await SystemAudioService.shared.drainAccumulatedSamples()
                     samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples, sysSampleRate: systemCaptureRate)
                     PipelineTrace.shared.log("FEED", "mic=\(micSamples.count) sys=\(sysSamples.count) out=\(samples16k.count)")
