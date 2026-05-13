@@ -20,6 +20,13 @@ struct ClassificationEntry: Codable, Sendable {
     var displayName: String
 }
 
+/// Fallback display name when the OS doesn't expose `kAudioDevicePropertyDeviceNameCFString`
+/// for a device — show enough of the UID to be identifiable but short enough to fit in
+/// a popover row alongside the chip button.
+func fallbackDisplayName(forUID uid: String) -> String {
+    String(uid.prefix(16))
+}
+
 // MARK: - Protocol
 
 protocol OutputDeviceClassifierProtocol: AnyObject {
@@ -39,16 +46,30 @@ final class OutputDeviceClassifier: OutputDeviceClassifierProtocol {
     /// Test seam: when set, askUser delegates to this closure instead of NSAlert.
     var askUserOverride: ((String, String) -> DeviceClassification?)?
 
-    private init() {}
+    /// In-memory cache of the persisted dictionary. Reads (`classification(for:)`,
+    /// `recentDevices`) are on hot UI paths (toolbar badge, popover); without this
+    /// cache they would JSON-decode the full `[String: ClassificationEntry]` from
+    /// UserDefaults on every call.
+    private var cache: [String: ClassificationEntry]
+
+    private init() {
+        cache = AppPreferences.shared.outputDeviceClassifications
+    }
+
+    /// Test-only: drop the in-memory cache so the next read re-loads from UserDefaults.
+    /// Tests swap `AppPreferences.store`; without this they'd see stale data.
+    func resetCacheForTesting() {
+        cache = AppPreferences.shared.outputDeviceClassifications
+    }
 
     // MARK: read
 
     func classification(for uid: String) -> DeviceClassification? {
-        AppPreferences.shared.outputDeviceClassifications[uid]?.classification
+        cache[uid]?.classification
     }
 
-    func recentDevices(limit: Int = 3) -> [(uid: String, entry: ClassificationEntry)] {
-        AppPreferences.shared.outputDeviceClassifications
+    func recentDevices(limit: Int) -> [(uid: String, entry: ClassificationEntry)] {
+        cache
             .map { (uid: $0.key, entry: $0.value) }
             .sorted { $0.entry.lastUsedAt > $1.entry.lastUsedAt }
             .prefix(limit)
@@ -57,34 +78,36 @@ final class OutputDeviceClassifier: OutputDeviceClassifierProtocol {
 
     // MARK: write
 
+    /// `set` posts `.outputDeviceClassificationDidChange` so the popover UI refreshes
+    /// its chips. `markUsed` deliberately does NOT post — LRU promotion is invisible
+    /// to the user (the popover only re-orders by recency, the displayed labels and
+    /// classifications are unchanged), so notifying would force pointless re-renders.
     func set(_ classification: DeviceClassification, for uid: String, displayName: String) {
-        var dict = AppPreferences.shared.outputDeviceClassifications
-        if var existing = dict[uid] {
+        if var existing = cache[uid] {
             existing.classification = classification
             existing.displayName = displayName
             // lastUsedAt intentionally NOT advanced — chip-click rebrand must not promote LRU.
-            dict[uid] = existing
+            cache[uid] = existing
         } else {
-            dict[uid] = ClassificationEntry(
+            cache[uid] = ClassificationEntry(
                 classification: classification,
                 lastUsedAt: Date(),
                 displayName: displayName
             )
         }
-        AppPreferences.shared.outputDeviceClassifications = dict
+        AppPreferences.shared.outputDeviceClassifications = cache
         NotificationCenter.default.post(name: .outputDeviceClassificationDidChange, object: nil)
     }
 
     func markUsed(uid: String, displayName: String) {
-        var dict = AppPreferences.shared.outputDeviceClassifications
-        guard var entry = dict[uid] else {
+        guard var entry = cache[uid] else {
             // No-op — caller is expected to call askUser → set to obtain classification.
             return
         }
         entry.lastUsedAt = Date()
         entry.displayName = displayName
-        dict[uid] = entry
-        AppPreferences.shared.outputDeviceClassifications = dict
+        cache[uid] = entry
+        AppPreferences.shared.outputDeviceClassifications = cache
     }
 
     // MARK: ask

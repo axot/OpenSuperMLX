@@ -30,7 +30,13 @@ class StreamingAudioService: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var audioMixer: AudioMixer?
     private var nativeSampleRate: Double = 44100
-    private var speakerCaptureActiveForSession = false
+    /// True iff the current streaming session is mixing system audio with mic.
+    /// Reads through `speakerCaptureActiveLock` so all consumers see the same value
+    /// the feedTask is using.
+    private var speakerCaptureActiveForSession: Bool {
+        get { speakerCaptureActiveLock.withLock { $0 } }
+        set { speakerCaptureActiveLock.withLock { $0 = newValue } }
+    }
     private var streamingSession: StreamingInferenceSession?
     private var wavWriter: StreamingWAVWriter?
     private var currentWAVURL: URL?
@@ -89,6 +95,21 @@ class StreamingAudioService: ObservableObject {
         userToggle: Bool
     ) -> Bool {
         userToggle && classification == .headphone
+    }
+
+    /// Look up the current default output's classification, optionally prompting the
+    /// user via `classifier.askUser` if it's never been seen before. Returns `nil` if
+    /// there's no UID or the user cancels — both cases route as safe-default speaker.
+    private func resolveCurrentClassification(askIfNeeded: Bool) -> DeviceClassification? {
+        guard let uid = MicrophoneService.shared.getCurrentOutputUID() else { return nil }
+        if let known = classifier.classification(for: uid) { return known }
+        guard askIfNeeded else { return nil }
+        // Only ask when sys-capture is on; otherwise mic-only is fine without classification.
+        let displayName = MicrophoneService.shared.getCurrentOutputDisplayName()
+            ?? fallbackDisplayName(forUID: uid)
+        guard let answer = classifier.askUser(uid: uid, displayName: displayName) else { return nil }
+        classifier.set(answer, for: uid, displayName: displayName)
+        return answer
     }
 
     // MARK: - Init
@@ -179,19 +200,7 @@ class StreamingAudioService: ObservableObject {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         self.nativeSampleRate = nativeFormat.sampleRate
 
-        let ringBufferLock = self.ringBuffer
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) {
-            [weak self] buffer, _ in
-            guard self?.isStreaming ?? false else { return }
-            let floats = Array(UnsafeBufferPointer(
-                start: buffer.floatChannelData![0],
-                count: Int(buffer.frameLength)
-            ))
-            ringBufferLock.withLock { buf in
-                buf.append(contentsOf: floats)
-            }
-        }
+        installRingBufferTap(on: inputNode, format: nativeFormat)
 
         do {
             try engine.start()
@@ -280,8 +289,19 @@ class StreamingAudioService: ObservableObject {
     private func reinstallTap(format: AVAudioFormat) {
         guard let engine = audioEngine else { return }
         engine.inputNode.removeTap(onBus: 0)
+        installRingBufferTap(on: engine.inputNode, format: format)
+        nativeSampleRate = format.sampleRate
+        // Self-update the cache so callers don't need to (matches warmUp's invariant
+        // and prevents the next configChange from re-firing on the same format).
+        lastKnownInputFormat = format
+        logger.info("Tap reinstalled at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
+    }
+
+    /// Install the standard tap that drains audio into `ringBuffer`. Used by both
+    /// `warmUp` (initial install) and `reinstallTap` (format-change recovery).
+    private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
         let ringBufferLock = self.ringBuffer
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard self?.isStreaming ?? false else { return }
             let floats = Array(UnsafeBufferPointer(
                 start: buffer.floatChannelData![0],
@@ -291,11 +311,6 @@ class StreamingAudioService: ObservableObject {
                 buf.append(contentsOf: floats)
             }
         }
-        nativeSampleRate = format.sampleRate
-        // Self-update the cache so callers don't need to (matches warmUp's invariant
-        // and prevents the next configChange from re-firing on the same format).
-        lastKnownInputFormat = format
-        logger.info("Tap reinstalled at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
     }
 
     private var retiredEngines: [AVAudioEngine] = []
@@ -385,13 +400,10 @@ class StreamingAudioService: ObservableObject {
         let priorSpeakerEnabled = speakerCaptureActiveForSession
 
         sessionClassification = newClassification
+        // Setter writes through the lock; feedTask sees the new value before
+        // SystemAudioService start/stop races below. A few empty sys drains during
+        // the transition produce mic-only output, not wrong content.
         speakerCaptureActiveForSession = newSpeakerEnabled
-
-        // Flip the lock BEFORE adjusting SystemAudioService — the feed loop reading the
-        // new flag immediately reflects the new policy, and any small race during the
-        // start/stop transition shows up as a few empty sys drains (mic-only output for
-        // those iterations), not as wrong content.
-        speakerCaptureActiveLock.withLock { $0 = newSpeakerEnabled }
 
         // Reset the mixer's carry-over buffers when crossing the sys/mic boundary so
         // stale samples from before the transition don't desynchronize the next mix.
@@ -472,22 +484,7 @@ class StreamingAudioService: ObservableObject {
         logger.info("Streaming started (engine pre-warmed)")
 
         let userSpeakerToggle = MicrophoneService.shared.speakerCaptureEnabled
-        let outputUID = MicrophoneService.shared.getCurrentOutputUID()
-        let outputName = MicrophoneService.shared.getCurrentOutputDisplayName() ?? (outputUID.map { String($0.prefix(16)) } ?? "Unknown")
-
-        var classification: DeviceClassification? = nil
-        if let uid = outputUID {
-            if let known = classifier.classification(for: uid) {
-                classification = known
-            } else if userSpeakerToggle {
-                // Only ask when sys-capture is on; otherwise mic-only is fine without classification.
-                if let answer = classifier.askUser(uid: uid, displayName: outputName) {
-                    classifier.set(answer, for: uid, displayName: outputName)
-                    classification = answer
-                }
-            }
-        }
-
+        let classification = resolveCurrentClassification(askIfNeeded: userSpeakerToggle)
         sessionClassification = classification
 
         let speakerEnabled = Self.effectiveSpeakerCaptureEnabled(
@@ -529,10 +526,6 @@ class StreamingAudioService: ObservableObject {
                 self?.streamingSession = nil
             }
         }
-
-        // Seed the lock with the initial routing decision so the feed loop sees
-        // the same value as the synchronous setup above on its very first iteration.
-        speakerCaptureActiveLock.withLock { $0 = speakerEnabled }
 
         let ringBufferRef = self.ringBuffer
         let shouldStopRef = self.shouldStopFeeding

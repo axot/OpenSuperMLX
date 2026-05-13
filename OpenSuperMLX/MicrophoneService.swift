@@ -21,15 +21,17 @@ final class MicrophoneService: ObservableObject {
     @Published var currentMicrophone: AudioDevice?
     @Published var speakerCaptureEnabled: Bool = false
 
-    /// True iff the toggle is on AND the current output is a headphone (per
-    /// OutputDeviceClassifier). Speaker output forces mic-only regardless of toggle.
+    /// True iff system audio is *actually* being captured for the current device,
+    /// honoring the speaker→mic-only override. Delegates to the routing policy in
+    /// `StreamingAudioService.effectiveSpeakerCaptureEnabled` (single source of truth).
     @MainActor
     var effectiveSpeakerCaptureActive: Bool {
-        guard speakerCaptureEnabled,
-              let uid = getCurrentOutputUID(),
-              OutputDeviceClassifier.shared.classification(for: uid) == .headphone
-        else { return false }
-        return true
+        let classification = getCurrentOutputUID()
+            .flatMap { OutputDeviceClassifier.shared.classification(for: $0) }
+        return StreamingAudioService.effectiveSpeakerCaptureEnabled(
+            classification: classification,
+            userToggle: speakerCaptureEnabled
+        )
     }
 
     private var speakerCaptureCancellable: AnyCancellable?
@@ -95,9 +97,15 @@ final class MicrophoneService: ObservableObject {
     // MARK: - Output Device Listener
 
     #if os(macOS)
-    private func setupOutputDeviceListener() {
+    /// Register a HAL property listener on the system object. The callback runs on
+    /// the main queue. Used to monitor system default input/output device changes.
+    private func addHALSystemListener(
+        selector: AudioObjectPropertySelector,
+        label: String,
+        onChange: @escaping () -> Void
+    ) {
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -105,17 +113,24 @@ final class MicrophoneService: ObservableObject {
             AudioObjectID(kAudioObjectSystemObject),
             &address,
             nil
-        ) { [weak self] _, _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                MainActor.assumeIsolated {
-                    self.markCurrentOutputAsUsed()
-                }
-                NotificationCenter.default.post(name: .outputDeviceDidChange, object: nil)
-            }
+        ) { _, _ in
+            DispatchQueue.main.async(execute: onChange)
         }
         if status != noErr {
-            logger.warning("Failed to register output device change listener (status \(status, privacy: .public))")
+            logger.warning("Failed to register \(label, privacy: .public) listener (status \(status, privacy: .public))")
+        }
+    }
+
+    private func setupOutputDeviceListener() {
+        addHALSystemListener(
+            selector: kAudioHardwarePropertyDefaultOutputDevice,
+            label: "output device change"
+        ) { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                self.markCurrentOutputAsUsed()
+            }
+            NotificationCenter.default.post(name: .outputDeviceDidChange, object: nil)
         }
         // Initial mark on construction so an already-classified default device gets its
         // lastUsedAt refreshed on every app launch. `MicrophoneService.shared` is first
@@ -129,7 +144,7 @@ final class MicrophoneService: ObservableObject {
     private func markCurrentOutputAsUsed() {
         guard let id = getSystemDefaultOutputDeviceID(),
               let uid = getDeviceUID(id) else { return }
-        let displayName = getDeviceDisplayName(id) ?? String(uid.prefix(16))
+        let displayName = getDeviceDisplayName(id) ?? fallbackDisplayName(forUID: uid)
         OutputDeviceClassifier.shared.markUsed(uid: uid, displayName: displayName)
     }
 
@@ -161,23 +176,11 @@ final class MicrophoneService: ObservableObject {
     /// which used to be our only signal and forms a feedback loop when the
     /// recovery path itself changes engine config.
     private func setupInputDeviceListener() {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            nil
-        ) { [weak self] _, _ in
-            DispatchQueue.main.async {
-                guard self != nil else { return }
-                NotificationCenter.default.post(name: .microphoneDidChange, object: nil)
-            }
-        }
-        if status != noErr {
-            logger.warning("Failed to register input device change listener (status \(status, privacy: .public))")
+        addHALSystemListener(
+            selector: kAudioHardwarePropertyDefaultInputDevice,
+            label: "input device change"
+        ) {
+            NotificationCenter.default.post(name: .microphoneDidChange, object: nil)
         }
     }
     #else

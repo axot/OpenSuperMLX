@@ -1398,7 +1398,7 @@ struct MicrophonePickerIconView: View {
                     ForEach(recentDevices, id: \.uid) { item in
                         HStack(spacing: 8) {
                             let displayName = item.entry.displayName.isEmpty
-                                ? String(item.uid.prefix(16))
+                                ? fallbackDisplayName(forUID: item.uid)
                                 : item.entry.displayName
                             Text(displayName)
                                 .lineLimit(1)

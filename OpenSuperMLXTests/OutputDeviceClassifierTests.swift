@@ -15,6 +15,7 @@ final class OutputDeviceClassifierTests: XCTestCase {
         defaults.removePersistentDomain(forName: "OutputDeviceClassifierTests")
         AppPreferences.store = defaults
         classifier = OutputDeviceClassifier.shared
+        classifier.resetCacheForTesting()
     }
 
     override func tearDown() async throws {
@@ -62,6 +63,7 @@ final class OutputDeviceClassifierTests: XCTestCase {
             dict["uid-\(i)"]?.lastUsedAt = now.addingTimeInterval(TimeInterval(i))
             AppPreferences.shared.outputDeviceClassifications = dict
         }
+        classifier.resetCacheForTesting()
 
         let recent = classifier.recentDevices(limit: 3)
         XCTAssertEqual(recent.count, 3)
@@ -94,6 +96,7 @@ final class OutputDeviceClassifierTests: XCTestCase {
 
     func testCorruptedStorageRecoversToEmpty() {
         defaults.set(Data([0xFF, 0xFE, 0xFD, 0xFC]), forKey: "outputDeviceClassifications")
+        classifier.resetCacheForTesting()
 
         XCTAssertTrue(AppPreferences.shared.outputDeviceClassifications.isEmpty)
         XCTAssertNil(classifier.classification(for: "any-uid"))
