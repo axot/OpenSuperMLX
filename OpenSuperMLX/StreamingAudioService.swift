@@ -55,6 +55,19 @@ class StreamingAudioService: ObservableObject {
     /// drained and mixed. Mirrors the `shouldStopFeeding` lock pattern.
     private let speakerCaptureActiveLock = OSAllocatedUnfairLock(initialState: false)
 
+    /// Snapshot of input format + device ID right after the most recent successful
+    /// engine.start(). The configChange handler compares the live values to these to
+    /// distinguish three cases: (a) no real change (drop notification), (b) format-only
+    /// change (re-tap on same engine — does NOT re-trigger configChange), (c) device
+    /// change (full hot-swap). This eliminates the self-induced configChange loop
+    /// caused by hotSwap → AUHAL property write → configChange → hotSwap …
+    private var lastKnownInputFormat: AVAudioFormat?
+    private var lastKnownInputDeviceID: AudioDeviceID?
+
+    /// Synchronously gates re-entry into the configChange handler within a single
+    /// dispatch — strict scope, no timer. Set true on entry, defer-cleared on exit.
+    private var isHandlingConfigChange = false
+
     private var isEngineWarmed = false
     private var hasBeenWarmedOnce = false
     private var lastWarmUpTime: Date = .distantPast
@@ -186,6 +199,11 @@ class StreamingAudioService: ObservableObject {
             isEngineWarmed = true
             hasBeenWarmedOnce = true
             lastWarmUpTime = Date()
+            // Snapshot post-start state so the configChange handler can branch on what
+            // actually changed instead of unconditionally hot-swapping (which would
+            // self-trigger another configChange via the AUHAL property write below).
+            lastKnownInputFormat = nativeFormat
+            lastKnownInputDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
             observeEngineConfigChange(engine)
             logger.info("Audio engine warmed up")
         } catch {
@@ -204,16 +222,80 @@ class StreamingAudioService: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                logger.warning("AVAudioEngine configuration changed")
                 self.configDebounceTask?.cancel()
                 self.configDebounceTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(200))
                     guard !Task.isCancelled, let self, self.isStreaming else { return }
-                    logger.warning("Hot-swapping microphone after config change during streaming")
-                    self.hotSwapMicrophone()
+                    self.handleConfigChange()
                 }
             }
         }
+    }
+
+    /// Branches on what actually changed, so the recovery path does not re-trigger the
+    /// trigger condition for `.AVAudioEngineConfigurationChange`. This eliminates the
+    /// hot-swap feedback loop that bounded `feedAudio` to 500–1300ms.
+    private func handleConfigChange() {
+        guard !isHandlingConfigChange else {
+            logger.info("Skipping nested configChange handler re-entry")
+            return
+        }
+        isHandlingConfigChange = true
+        defer { isHandlingConfigChange = false }
+
+        guard let engine = audioEngine else { return }
+        let liveFormat = engine.inputNode.outputFormat(forBus: 0)
+        let liveDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
+
+        let formatChanged: Bool = {
+            guard let cached = lastKnownInputFormat else { return true }
+            return cached.sampleRate != liveFormat.sampleRate
+                || cached.channelCount != liveFormat.channelCount
+        }()
+        let deviceChanged = liveDeviceID != lastKnownInputDeviceID
+
+        switch (deviceChanged, formatChanged) {
+        case (false, false):
+            logger.info("configChange: nothing changed, dropping")
+        case (false, true):
+            logger.warning("configChange: format-only change — reinstalling tap on same engine")
+            reinstallTap(format: liveFormat)
+        case (true, _):
+            logger.warning("configChange: input device changed — full hot-swap")
+            hotSwapMicrophone()
+            // Force the cache to reflect what we observed at handler entry, regardless of
+            // whether warmUp succeeded inside hotSwap. If warm-up threw, the engine is
+            // gone but the *system*'s default input is still `liveDeviceID`; without this
+            // update we'd loop on the next configChange comparing stale cache vs the
+            // already-swapped live state.
+            lastKnownInputFormat = liveFormat
+            lastKnownInputDeviceID = liveDeviceID
+        }
+    }
+
+    /// Re-tap on the same engine without stopping it. Critically, this does NOT call
+    /// `engine.stop()` and does NOT write `kAudioOutputUnitProperty_CurrentDevice`,
+    /// so it does not satisfy the documented trigger condition for
+    /// `.AVAudioEngineConfigurationChange` — the loop cannot form by construction.
+    private func reinstallTap(format: AVAudioFormat) {
+        guard let engine = audioEngine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        let ringBufferLock = self.ringBuffer
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            guard self?.isStreaming ?? false else { return }
+            let floats = Array(UnsafeBufferPointer(
+                start: buffer.floatChannelData![0],
+                count: Int(buffer.frameLength)
+            ))
+            ringBufferLock.withLock { buf in
+                buf.append(contentsOf: floats)
+            }
+        }
+        nativeSampleRate = format.sampleRate
+        // Self-update the cache so callers don't need to (matches warmUp's invariant
+        // and prevents the next configChange from re-firing on the same format).
+        lastKnownInputFormat = format
+        logger.info("Tap reinstalled at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
     }
 
     private var retiredEngines: [AVAudioEngine] = []

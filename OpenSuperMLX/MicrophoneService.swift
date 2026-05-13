@@ -71,6 +71,7 @@ final class MicrophoneService: ObservableObject {
         updateCurrentMicrophone()
         setupSpeakerCaptureSync()
         setupOutputDeviceListener()
+        setupInputDeviceListener()
     }
     
     deinit {
@@ -153,8 +154,35 @@ final class MicrophoneService: ObservableObject {
         guard status == noErr, let cf = name?.takeRetainedValue() else { return nil }
         return cf as String
     }
+    /// HAL-level listener for the system default *input* device. Posts the same
+    /// `.microphoneDidChange` notification used elsewhere so consumers (chiefly
+    /// `StreamingAudioService`) get a clean, semantic signal for "default mic
+    /// changed" without going through `.AVAudioEngineConfigurationChange` —
+    /// which used to be our only signal and forms a feedback loop when the
+    /// recovery path itself changes engine config.
+    private func setupInputDeviceListener() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            nil
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                guard self != nil else { return }
+                NotificationCenter.default.post(name: .microphoneDidChange, object: nil)
+            }
+        }
+        if status != noErr {
+            logger.warning("Failed to register input device change listener (status \(status, privacy: .public))")
+        }
+    }
     #else
     private func setupOutputDeviceListener() {}
+    private func setupInputDeviceListener() {}
     func getCurrentOutputUID() -> String? { nil }
     func getCurrentOutputDisplayName() -> String? { nil }
     func getDeviceDisplayName(_ deviceID: AudioDeviceID) -> String? { nil }
