@@ -14,7 +14,8 @@ final class StreamingInferenceTests: XCTestCase {
         let config = StreamingConfig()
         XCTAssertEqual(config.language, "English")
         XCTAssertEqual(config.temperature, 0.0)
-        XCTAssertEqual(config.maxNewTokensPerChunk, 200)
+        // 32 is the antirez-aligned default set by 9243a28; the prior value was 200.
+        XCTAssertEqual(config.maxNewTokensPerChunk, 32)
     }
 
     func testStreamingConfigCustomValues() {
