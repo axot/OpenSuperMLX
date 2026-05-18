@@ -55,9 +55,42 @@ fi
 # Resolve SPM packages and apply patches before building
 "$(dirname "$0")/Scripts/resolve_and_patch.sh"
 
+# Pick code-signing identity:
+#   1. If DEV_SIGN_IDENTITY env var is set, use it (explicit override).
+#   2. Otherwise, if a "OpenSuperMLX Dev" code-signing identity is in the user's
+#      keychain, use it. This gives the resulting .app a stable codesign identity
+#      across rebuilds, so macOS TCC keeps Accessibility / Microphone / Screen
+#      Recording permissions instead of re-prompting on every build.
+#   3. Otherwise (CI, fresh clones), fall back to ad-hoc signing — the historical
+#      default. Permissions will be re-requested on every rebuild.
+#
+# When using a real signing identity, we also disable Hardened Runtime and the
+# debug-dylib split so library validation doesn't reject our self-signed dylibs
+# (libomp, libautocorrect_swift, libtext_processing_rs).
+DEV_SIGN_IDENTITY="${DEV_SIGN_IDENTITY:-OpenSuperMLX Dev}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$DEV_SIGN_IDENTITY\""; then
+    echo "Code signing: using \"$DEV_SIGN_IDENTITY\" (TCC permissions persist across rebuilds)"
+    SIGN_ARGS=(
+        CODE_SIGN_IDENTITY="$DEV_SIGN_IDENTITY"
+        CODE_SIGN_STYLE=Manual
+        CODE_SIGNING_REQUIRED=YES
+        CODE_SIGNING_ALLOWED=YES
+        ENABLE_DEBUG_DYLIB=NO
+        ENABLE_HARDENED_RUNTIME=NO
+    )
+else
+    echo "Code signing: ad-hoc (install \"$DEV_SIGN_IDENTITY\" cert in Keychain to persist TCC permissions)"
+    SIGN_ARGS=(
+        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGN_IDENTITY=""
+        CODE_SIGNING_REQUIRED=NO
+        OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperMLX/OpenSuperMLX.entitlements"
+    )
+fi
+
 # Build the app
 echo "Building OpenSuperMLX..."
-BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperMLX/OpenSuperMLX.entitlements" build 2>&1)
+BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions "${SIGN_ARGS[@]}" build 2>&1)
 
 # sudo gem install xcpretty
 if command -v xcpretty &> /dev/null

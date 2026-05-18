@@ -88,12 +88,32 @@ For **Swift-only changes**, skip `run.sh` — the **preferred build command duri
 xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
   -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' \
   -skipPackagePluginValidation -skipMacroValidation \
-  -clonedSourcePackagesDirPath SourcePackages CODE_SIGNING_ALLOWED=NO build
+  -clonedSourcePackagesDirPath SourcePackages \
+  CODE_SIGN_IDENTITY="OpenSuperMLX Dev" CODE_SIGN_STYLE=Manual \
+  CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
+  ENABLE_DEBUG_DYLIB=NO ENABLE_HARDENED_RUNTIME=NO build
 ```
 
 **Fall back to `./run.sh build`** when: first build on fresh clone, after modifying `asian-autocorrect/` (Rust), `patches/*.patch`, `WeTextProcessing/` (ITN binary), SPM dependencies, or if `build/` was deleted.
 
 **`VendoredPackages/mlx-audio-swift/`** — edit Swift source directly; changes are picked up by the incremental xcodebuild above (no `./run.sh` needed).
+
+#### Persistent dev-build code-signing (recommended)
+
+The fast-build command above signs with a `OpenSuperMLX Dev` self-signed cert. Why: macOS TCC (Accessibility, Microphone, Screen Recording) caches permissions per code-signing identity. Without a stable cert, every rebuild produces a new ad-hoc signature — TCC treats it as a new app and re-prompts. With a stable cert, cdhash changes per build but the designated requirement (cert SHA-1) stays the same, so permissions persist forever.
+
+**One-time setup:**
+1. Open **Keychain Access** → **Certificate Assistant** → **Create a Certificate…**
+2. Name: `OpenSuperMLX Dev`. Identity Type: `Self Signed Root`. Certificate Type: `Code Signing`. Defaults otherwise.
+3. After creation, double-click the cert → **Trust** → **When using this certificate: Always Trust**.
+4. Switch to the **Keys** tab, find the matching private key, double-click → **Access Control** → **Allow all applications to access this item** (so `xcodebuild` can use it without prompting).
+5. Verify: `security find-identity -v -p codesigning` should list `OpenSuperMLX Dev` without `CSSMERR_TP_NOT_TRUSTED`.
+
+**On first run** of the freshly signed app, macOS will re-request Accessibility / Microphone / Screen Recording once. Grant them — they will persist across all future rebuilds.
+
+If you don't install the cert, swap the signing args in the build command above for `CODE_SIGNING_ALLOWED=NO` (the historical default). Permissions will reset every rebuild.
+
+`./run.sh` auto-detects the cert: if `OpenSuperMLX Dev` is in your keychain it signs with it; otherwise it falls back to ad-hoc. Override with `DEV_SIGN_IDENTITY=other-cert ./run.sh`.
 
 ## Tests
 
