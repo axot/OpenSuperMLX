@@ -143,4 +143,42 @@ final class SystemAudioServiceTests: XCTestCase {
             }
         }
     }
+
+    /// Regression: bundle IDs are reverse-DNS strings that macOS treats case-insensitively.
+    /// Before the fix, an exact-string compare meant a persisted bundleID with different
+    /// casing than what `SCShareableContent` reported would silently fail to find the app
+    /// and the user would record silence instead of speaker audio.
+    @MainActor
+    func testMakeContentFilterMatchesBundleIDCaseInsensitively() async throws {
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: false
+            )
+        } catch {
+            throw XCTSkip("Screen Recording permission not granted: \(error.localizedDescription)")
+        }
+
+        guard content.displays.first != nil else {
+            throw XCTSkip("No display available")
+        }
+
+        // Pick a real app from the live application list and uppercase its bundle ID. The
+        // pre-fix exact-equality compare would never find an uppercased ID; the post-fix
+        // case-insensitive compare must succeed.
+        guard let realApp = content.applications.first(where: { !$0.bundleIdentifier.isEmpty }) else {
+            throw XCTSkip("No applications with bundle identifiers available")
+        }
+        let mangled = realApp.bundleIdentifier.uppercased()
+        // Ensure mangling actually changed something so the test exercises the case path.
+        guard mangled != realApp.bundleIdentifier else {
+            throw XCTSkip("Picked application has no lowercase characters; cannot exercise case path")
+        }
+
+        let service = SystemAudioService.shared
+        XCTAssertNoThrow(
+            try service.makeContentFilter(bundleID: mangled, content: content),
+            "Bundle ID match must be case-insensitive — uppercased \(mangled) should still find \(realApp.bundleIdentifier)"
+        )
+    }
 }

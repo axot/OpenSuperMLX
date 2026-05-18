@@ -53,7 +53,11 @@ final class SystemAudioService: NSObject, ObservableObject {
         }
 
         if let bundleID {
-            guard let app = content.applications.first(where: { $0.bundleIdentifier == bundleID }) else {
+            // Bundle IDs are case-insensitive on macOS.
+            let normalized = bundleID.lowercased()
+            guard let app = content.applications.first(where: {
+                $0.bundleIdentifier.lowercased() == normalized
+            }) else {
                 throw SystemAudioCaptureError.applicationNotFound(bundleID)
             }
             return SCContentFilter(display: display, including: [app], exceptingWindows: [])
