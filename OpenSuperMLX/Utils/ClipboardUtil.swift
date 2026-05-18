@@ -1,27 +1,47 @@
 import Cocoa
 import ApplicationServices
 import Carbon
+import os.log
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "ClipboardUtil")
 
 class ClipboardUtil {
-    
+
+    /// Delay before restoring the user's prior pasteboard contents. Sized to outlast slow
+    /// destination apps (Electron, Java, slow web fields) that read the pasteboard 150–300ms
+    /// after Cmd+V. Anything shorter risks the destination app reading the restored value
+    /// instead of our transcription.
+    static let pasteboardRestoreDelay: TimeInterval = 0.4
+
     static func insertText(_ text: String) {
         let pasteboard = NSPasteboard.general
-        
+
         // Save current pasteboard contents
         let savedContents = saveCurrentPasteboardContents()
-        
+
         // Set new text to pasteboard
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(text, forType: .string)
-        
+
+        // Snapshot the pasteboard's changeCount AFTER we write our transcription. If anything
+        // else modifies the pasteboard between now and the restore window (e.g. a slow
+        // destination app re-emits, or another app writes), we must NOT clobber it with the
+        // saved contents — that would lose the user's most recent clipboard write.
+        let changeCountAfterWrite = pasteboard.changeCount
+
         // Simulate Cmd+V using layout-aware keycode resolution
         simulatePaste()
-        
-        // Add a small delay to ensure paste operation completes
-        Thread.sleep(forTimeInterval: 0.1)
-        
-        // Restore original contents
-        if let contents = savedContents {
+
+        // Skip restore if changeCount advanced (third party wrote something newer).
+        guard let contents = savedContents else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pasteboardRestoreDelay) {
+            let currentChangeCount = pasteboard.changeCount
+            guard currentChangeCount == changeCountAfterWrite else {
+                logger.debug(
+                    "Pasteboard restore skipped — changeCount advanced from \(changeCountAfterWrite, privacy: .public) to \(currentChangeCount, privacy: .public)"
+                )
+                return
+            }
             restorePasteboardContents(contents)
         }
     }
