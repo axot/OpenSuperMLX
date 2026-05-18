@@ -83,6 +83,8 @@ final class LLMCorrectionServiceTests: XCTestCase {
         mockProvider.correctResult = ""
         let result = await sut.correctTranscription("hello")
         XCTAssertEqual(result, "hello")
+        // Regression: empty response must set lastErrorMessage so the toast surface fires.
+        XCTAssertEqual(sut.lastErrorMessage, LLMCorrectionService.emptyCorrectionMessage)
     }
 
     func testCorrectTranscription_ProviderThrows_ReturnsOriginal() async {
