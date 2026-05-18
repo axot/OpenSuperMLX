@@ -122,6 +122,53 @@ final class RecordingStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Search Wildcard Escaping (regression)
+    // SQL LIKE wildcards (%, _, \) in user input must match literally, not as wildcards.
+
+    private func assertLiteralMatch(
+        query: String,
+        matching: String,
+        notMatching: String,
+        useAsync: Bool = false,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) async throws {
+        try await sut.addRecordingSync(makeRecording(transcription: matching))
+        try await sut.addRecordingSync(makeRecording(transcription: notMatching))
+
+        let results = useAsync
+            ? await sut.searchRecordingsAsync(query: query)
+            : sut.searchRecordings(query: query)
+
+        XCTAssertEqual(results.count, 1, file: file, line: line)
+        XCTAssertEqual(results.first?.transcription, matching, file: file, line: line)
+    }
+
+    func testSearch_PercentIsLiteral() async throws {
+        try await assertLiteralMatch(
+            query: "100%", matching: "Battery at 100% charged", notMatching: "Battery at 100 charged"
+        )
+    }
+
+    func testSearch_UnderscoreIsLiteral() async throws {
+        try await assertLiteralMatch(
+            query: "file_name", matching: "file_name.txt", notMatching: "fileXname.txt"
+        )
+    }
+
+    func testSearch_BackslashIsLiteral() async throws {
+        try await assertLiteralMatch(
+            query: "path\\to", matching: "path\\to\\file", notMatching: "path/to/file"
+        )
+    }
+
+    func testSearchAsync_PercentIsLiteral() async throws {
+        try await assertLiteralMatch(
+            query: "50%", matching: "discount 50% off", notMatching: "discount 50 off",
+            useAsync: true
+        )
+    }
+
     func testMigrations() async throws {
         let freshDB = try DatabaseQueue()
         let store = RecordingStore(dbQueue: freshDB)

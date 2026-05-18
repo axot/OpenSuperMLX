@@ -386,14 +386,25 @@ class RecordingStore: ObservableObject {
         }
     }
 
+    // Paired with `ESCAPE '\'` so `%`, `_`, `\` in user input match literally.
+    private nonisolated static func escapeLikePattern(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+    }
+
+    private nonisolated static func searchRequest(query: String) -> QueryInterfaceRequest<Recording> {
+        let pattern = "%\(escapeLikePattern(query))%"
+        return Recording
+            .filter(sql: "transcription LIKE ? ESCAPE '\\' COLLATE NOCASE", arguments: [pattern])
+            .order(Recording.Columns.timestamp.desc)
+    }
+
     func searchRecordings(query: String) -> [Recording] {
         do {
             let results = try dbQueue.read { db in
-                try Recording
-                    .filter(Recording.Columns.transcription.like("%\(query)%").collating(.nocase))
-                    .order(Recording.Columns.timestamp.desc)
-                    .limit(100)
-                    .fetchAll(db)
+                try Self.searchRequest(query: query).limit(100).fetchAll(db)
             }
             if AppPreferences.shared.debugMode {
                 logger.debug("[DEBUG] Search recordings: query=\(query, privacy: .public), results=\(results.count, privacy: .public)")
@@ -404,15 +415,11 @@ class RecordingStore: ObservableObject {
             return []
         }
     }
-    
+
     nonisolated func searchRecordingsAsync(query: String, limit: Int = 100, offset: Int = 0) async -> [Recording] {
         do {
             return try await dbQueue.read { db in
-                try Recording
-                    .filter(Recording.Columns.transcription.like("%\(query)%").collating(.nocase))
-                    .order(Recording.Columns.timestamp.desc)
-                    .limit(limit, offset: offset)
-                    .fetchAll(db)
+                try Self.searchRequest(query: query).limit(limit, offset: offset).fetchAll(db)
             }
         } catch {
             logger.error("Failed to search recordings: \(error, privacy: .public)")
