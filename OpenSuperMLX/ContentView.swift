@@ -894,6 +894,18 @@ struct RecordingRow: View {
     private var isPlaying: Bool {
         audioRecorder.isPlaying && audioRecorder.currentlyPlayingURL == recording.url
     }
+
+    private static let metadataDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    private var metadataDateText: String {
+        Self.metadataDateFormatter.string(from: recording.timestamp)
+    }
     
     private var isPending: Bool {
         recording.status == .pending || recording.status == .converting || recording.status == .transcribing
@@ -1060,7 +1072,29 @@ struct RecordingRow: View {
                 
                 }
 
-                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Text(metadataDateText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Image(systemName: "doc")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Text(recording.displayFileName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .lineLimit(1)
+
+                Spacer(minLength: 8)
 
                 HStack(spacing: 16) {
                     if !isPending && recording.status != .failed && (isHovered || isPlaying) {

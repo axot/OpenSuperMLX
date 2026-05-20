@@ -55,6 +55,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         return URL(fileURLWithPath: sourceFileURL).lastPathComponent
     }
 
+    var displayFileName: String {
+        sourceFileName ?? fileName
+    }
+
     static let databaseTableName = "recordings"
 
     enum Columns {

@@ -35,7 +35,8 @@ final class RecordingStoreTests: XCTestCase {
         transcription: String = "",
         duration: TimeInterval = 5.0,
         status: RecordingStatus = .completed,
-        progress: Float = 1.0
+        progress: Float = 1.0,
+        sourceFileURL: String? = nil
     ) -> Recording {
         Recording(
             id: id,
@@ -44,7 +45,8 @@ final class RecordingStoreTests: XCTestCase {
             transcription: transcription,
             duration: duration,
             status: status,
-            progress: progress
+            progress: progress,
+            sourceFileURL: sourceFileURL
         )
     }
 
@@ -60,6 +62,17 @@ final class RecordingStoreTests: XCTestCase {
         XCTAssertEqual(fetched.first?.transcription, "Hello world")
         XCTAssertEqual(fetched.first?.fileName, "test.m4a")
         XCTAssertEqual(fetched.first?.status, .completed)
+    }
+
+    func testDisplayFileNamePrefersSourceFileNameAndFallsBackToStoredName() {
+        let imported = makeRecording(
+            fileName: "1747720000.wav",
+            sourceFileURL: "/Users/example/Recordings/client call.wav"
+        )
+        let recorded = makeRecording(fileName: "1747720001.wav")
+
+        XCTAssertEqual(imported.displayFileName, "client call.wav")
+        XCTAssertEqual(recorded.displayFileName, "1747720001.wav")
     }
 
     func testFetchAll_ReturnsInOrder() async throws {
