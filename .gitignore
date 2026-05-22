@@ -130,3 +130,6 @@ docs/superpowers/
 
 # Claude
 .claude/
+
+# Local browser automation profiles
+.edreams_chrome_data/
