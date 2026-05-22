@@ -12,6 +12,30 @@ import MLXAudioSTT
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "StreamingAudioService")
 
+struct StreamingTapHealth: Equatable {
+    var callbacks = 0
+
+    var needsRecovery: Bool {
+        callbacks == 0
+    }
+
+    mutating func recordCallback() {
+        callbacks += 1
+    }
+}
+
+struct StreamingCaptureHealth: Equatable {
+    var samplesWritten = 0
+
+    var hasCapturedSamples: Bool {
+        samplesWritten > 0
+    }
+
+    mutating func recordSamplesWritten(_ count: Int) {
+        samplesWritten += max(0, count)
+    }
+}
+
 // MARK: - StreamingAudioService
 
 @MainActor
@@ -43,6 +67,7 @@ class StreamingAudioService: ObservableObject {
 
     private var feedTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
+    private var tapHealthTask: Task<Void, Never>?
     private var recordingStartTime: Date?
     private var microphoneChangeObserver: NSObjectProtocol?
     private var microphoneDisconnectObserver: NSObjectProtocol?
@@ -53,6 +78,8 @@ class StreamingAudioService: ObservableObject {
 
     /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
+    private let tapState = OSAllocatedUnfairLock(initialState: StreamingTapHealth())
+    private let captureState = OSAllocatedUnfairLock(initialState: StreamingCaptureHealth())
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
@@ -77,6 +104,7 @@ class StreamingAudioService: ObservableObject {
     private var isEngineWarmed = false
     private var hasBeenWarmedOnce = false
     private var lastWarmUpTime: Date = .distantPast
+    private var tapRecoveryAttempts = 0
 
     /// Output device classifier — testable seam (write at test setUp).
     var classifier: OutputDeviceClassifierProtocol = OutputDeviceClassifier.shared
@@ -175,6 +203,7 @@ class StreamingAudioService: ObservableObject {
             return
         }
 
+        resetTapHealth()
         let engine = AVAudioEngine()
 
         let activeMic = MicrophoneService.shared.activateForRecording()
@@ -188,22 +217,26 @@ class StreamingAudioService: ObservableObject {
         if let activeMic,
            let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
             var deviceID = coreAudioID
-            AudioUnitSetProperty(
+            let status = AudioUnitSetProperty(
                 inputNode.audioUnit!,
                 kAudioOutputUnitProperty_CurrentDevice,
                 kAudioUnitScope_Global, 0,
                 &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
             )
+            if status != noErr {
+                logger.error("Failed to set current input device status=\(status, privacy: .public) mic=\(activeMic.displayName, privacy: .public) coreAudioID=\(coreAudioID, privacy: .public)")
+            }
+        } else {
+            logger.warning("No CoreAudio ID for active microphone: \(activeMic?.displayName ?? "nil", privacy: .public)")
         }
         logger.info("Warm-up: plain input for \(activeMic?.displayName ?? "default", privacy: .public)")
 
-        let nativeFormat = inputNode.outputFormat(forBus: 0)
-        self.nativeSampleRate = nativeFormat.sampleRate
-
-        installRingBufferTap(on: inputNode, format: nativeFormat)
-
         do {
+            warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "warm-up before engine.start")
             try engine.start()
+            let runningFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
+            self.nativeSampleRate = runningFormat.sampleRate
+            installRingBufferTap(on: inputNode, format: runningFormat)
             audioEngine = engine
             isEngineWarmed = true
             hasBeenWarmedOnce = true
@@ -211,7 +244,7 @@ class StreamingAudioService: ObservableObject {
             // Snapshot post-start state so the configChange handler can branch on what
             // actually changed instead of unconditionally hot-swapping (which would
             // self-trigger another configChange via the AUHAL property write below).
-            lastKnownInputFormat = nativeFormat
+            lastKnownInputFormat = runningFormat
             lastKnownInputDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
             observeEngineConfigChange(engine)
             logger.info("Audio engine warmed up")
@@ -253,7 +286,7 @@ class StreamingAudioService: ObservableObject {
         defer { isHandlingConfigChange = false }
 
         guard let engine = audioEngine else { return }
-        let liveFormat = engine.inputNode.outputFormat(forBus: 0)
+        let liveFormat = currentPlainMicTapFormat(for: engine.inputNode, in: engine)
         let liveDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
 
         let formatChanged: Bool = {
@@ -301,8 +334,13 @@ class StreamingAudioService: ObservableObject {
     /// `warmUp` (initial install) and `reinstallTap` (format-change recovery).
     private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
         let ringBufferLock = self.ringBuffer
+        let tapState = self.tapState
+        logger.info("Installing input tap at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard self?.isStreaming ?? false else { return }
+            tapState.withLock { state in
+                state.recordCallback()
+            }
             let floats = Array(UnsafeBufferPointer(
                 start: buffer.floatChannelData![0],
                 count: Int(buffer.frameLength)
@@ -313,9 +351,139 @@ class StreamingAudioService: ObservableObject {
         }
     }
 
+    struct PlainMicGraphStatus: Equatable {
+        let unexpectedNodeTypes: [String]
+        let outputConnectionCount: Int
+
+        var isPlainMicGraph: Bool {
+            unexpectedNodeTypes.isEmpty && outputConnectionCount == 0
+        }
+    }
+
+    static func plainMicGraphStatus(engine: AVAudioEngine, inputNode: AVAudioInputNode) -> PlainMicGraphStatus {
+        let unexpectedNodeTypes = engine.attachedNodes
+            .filter { $0 !== inputNode }
+            .map { String(describing: type(of: $0)) }
+            .sorted()
+        let outputConnectionCount = engine.outputConnectionPoints(for: inputNode, outputBus: 0).count
+        return PlainMicGraphStatus(
+            unexpectedNodeTypes: unexpectedNodeTypes,
+            outputConnectionCount: outputConnectionCount
+        )
+    }
+
+    private func currentPlainMicTapFormat(for inputNode: AVAudioInputNode, in engine: AVAudioEngine) -> AVAudioFormat {
+        warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "plain mic tap format")
+
+        let inputFormat = inputNode.inputFormat(forBus: 0)
+        let outputFormat = inputNode.outputFormat(forBus: 0)
+
+        // This resolver is intentionally scoped to the current mic-only engine: no
+        // output node, no mixer/converter, and no voice-processing path. In that graph,
+        // the tap should use the microphone's enabled input format. If a future change
+        // adds nodes or connections, revisit this resolver instead of reusing this rule.
+        if inputFormat.sampleRate > 0, inputFormat.channelCount > 0 {
+            if inputFormat.sampleRate != outputFormat.sampleRate
+                || inputFormat.channelCount != outputFormat.channelCount
+                || inputFormat.commonFormat != outputFormat.commonFormat
+                || inputFormat.isInterleaved != outputFormat.isInterleaved {
+                logger.warning("Plain mic input/output format mismatch: input=\(self.describe(format: inputFormat), privacy: .public) output=\(self.describe(format: outputFormat), privacy: .public); using input format")
+            }
+            return inputFormat
+        }
+
+        logger.warning("Input format invalid for plain mic tap; falling back to output format \(self.describe(format: outputFormat), privacy: .public)")
+        return outputFormat
+    }
+
+    private func warnIfNonPlainMicGraph(engine: AVAudioEngine, inputNode: AVAudioInputNode, context: String) {
+        let graphStatus = Self.plainMicGraphStatus(engine: engine, inputNode: inputNode)
+        guard !graphStatus.isPlainMicGraph else { return }
+
+        assertionFailure("Plain mic graph invariant violated")
+        logger.error("Plain mic graph invariant violated: context=\(context, privacy: .public) unexpectedNodes=\(graphStatus.unexpectedNodeTypes.joined(separator: ","), privacy: .public) outputConnections=\(graphStatus.outputConnectionCount, privacy: .public)")
+    }
+
+    private func describe(format: AVAudioFormat) -> String {
+        "\(format.sampleRate)Hz x\(format.channelCount) \(format.commonFormat) interleaved=\(format.isInterleaved)"
+    }
+
+    private func resetTapHealth() {
+        tapState.withLock { $0 = StreamingTapHealth() }
+    }
+
+    private func resetCaptureHealth() {
+        captureState.withLock { $0 = StreamingCaptureHealth() }
+    }
+
+    private func cancelTapHealthCheck() {
+        tapHealthTask?.cancel()
+        tapHealthTask = nil
+    }
+
+    private func resetHealthForNewRecording() {
+        cancelTapHealthCheck()
+        tapRecoveryAttempts = 0
+        resetTapHealth()
+        resetCaptureHealth()
+    }
+
+    private func scheduleTapHealthCheck(afterMilliseconds delay: Int = 900) {
+        cancelTapHealthCheck()
+        tapHealthTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delay))
+            guard !Task.isCancelled, let self, self.isStreaming else { return }
+            let needsRecovery = self.tapState.withLock { $0.needsRecovery }
+            guard needsRecovery else { return }
+            await self.recoverSilentTap()
+        }
+    }
+
+    private func recoverSilentTap() async {
+        guard isStreaming else { return }
+        guard tapRecoveryAttempts < 2 else {
+            logger.error("Audio tap produced no buffers after retry")
+            ErrorToastManager.shared.show("Microphone audio did not start. Try recording again.")
+            return
+        }
+
+        tapRecoveryAttempts += 1
+        logger.warning("Audio tap produced no buffers - restarting audio engine (attempt \(self.tapRecoveryAttempts, privacy: .public))")
+        resetEngineForTapRecovery()
+        try? await Task.sleep(for: .milliseconds(500))
+        guard isStreaming else { return }
+
+        lastWarmUpTime = .distantPast
+        warmUp()
+        if isEngineWarmed {
+            scheduleTapHealthCheck()
+        } else {
+            logger.error("Audio tap recovery failed: engine did not warm up")
+            ErrorToastManager.shared.show("Microphone audio could not start.")
+        }
+    }
+
+    private func resetEngineForTapRecovery() {
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
+        configDebounceTask?.cancel()
+        configDebounceTask = nil
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        retireEngine(audioEngine)
+        audioEngine = nil
+        isEngineWarmed = false
+        ringBuffer.withLock { $0.removeAll() }
+        resetTapHealth()
+    }
+
     private var retiredEngines: [AVAudioEngine] = []
 
     func coolDown() {
+        cancelTapHealthCheck()
+        tapRecoveryAttempts = 0
         guard isEngineWarmed else { return }
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -414,7 +582,7 @@ class StreamingAudioService: ObservableObject {
         if newSpeakerEnabled && !priorSpeakerEnabled {
             Task {
                 do {
-                    try await SystemAudioService.shared.startCapture(sampleRate: 48000)
+                    try await SystemAudioService.shared.startCapture(sampleRate: AudioSampleRates.systemCapture)
                     logger.info("Routing change: speaker capture started")
                 } catch {
                     logger.warning("Routing change: speaker capture failed: \(error, privacy: .public)")
@@ -455,6 +623,7 @@ class StreamingAudioService: ObservableObject {
         }
 
         shouldStopFeeding.withLock { $0 = false }
+        resetHealthForNewRecording()
         confirmedText = ""
         provisionalText = ""
 
@@ -463,7 +632,7 @@ class StreamingAudioService: ObservableObject {
         let timestamp = Int(Date().timeIntervalSince1970)
         let wavURL = tempDir.appendingPathComponent("\(timestamp)_streaming.wav")
         currentWAVURL = wavURL
-        let writer = try StreamingWAVWriter(url: wavURL, sampleRate: 16000)
+        let writer = try StreamingWAVWriter(url: wavURL, sampleRate: AudioSampleRates.transcription)
         wavWriter = writer
 
         let settings = Settings()
@@ -494,8 +663,6 @@ class StreamingAudioService: ObservableObject {
         speakerCaptureActiveForSession = speakerEnabled
         let mixer = AudioMixer(inputSampleRate: nativeSampleRate)
         self.audioMixer = mixer
-        let systemCaptureRate: Double = 48000
-
         PipelineTrace.shared.log("STREAM", "streaming started speakerEnabled=\(speakerEnabled) sampleRate=\(nativeSampleRate)")
 
         if speakerEnabled {
@@ -505,7 +672,7 @@ class StreamingAudioService: ObservableObject {
             }
             Task {
                 do {
-                    try await SystemAudioService.shared.startCapture(sampleRate: systemCaptureRate)
+                    try await SystemAudioService.shared.startCapture(sampleRate: AudioSampleRates.systemCapture)
                     PipelineTrace.shared.log("STREAM", "speaker capture started")
                     logger.info("Speaker capture started")
                 } catch {
@@ -530,6 +697,7 @@ class StreamingAudioService: ObservableObject {
         let ringBufferRef = self.ringBuffer
         let shouldStopRef = self.shouldStopFeeding
         let speakerActiveRef = self.speakerCaptureActiveLock
+        let captureStateRef = self.captureState
         let sampleRate = self.nativeSampleRate
         feedTask = Task.detached {
             var consecutiveEmptyDrains = 0
@@ -553,7 +721,8 @@ class StreamingAudioService: ObservableObject {
                 let samples16k: [Float]
                 if speakerActiveNow {
                     let sysSamples = await SystemAudioService.shared.drainAccumulatedSamples()
-                    samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples, sysSampleRate: systemCaptureRate)
+                    let sysSampleRate = await SystemAudioService.shared.activeSampleRate
+                    samples16k = mixer.mix(mic: micSamples, micSampleRate: sampleRate, sys: sysSamples, sysSampleRate: sysSampleRate)
                     PipelineTrace.shared.log("FEED", "mic=\(micSamples.count) sys=\(sysSamples.count) out=\(samples16k.count)")
                 } else if !micSamples.isEmpty {
                     samples16k = mixer.micOnly(micSamples, inputSampleRate: sampleRate)
@@ -567,12 +736,12 @@ class StreamingAudioService: ObservableObject {
 
                     // Backpressure: if >5s of audio buffered, keep only last 1s
                     // Prevents cascading failure when inference falls behind real-time
-                    let backpressureThreshold = 80000 // 5 seconds at 16kHz
-                    let backpressureKeep = 16000       // 1 second at 16kHz
+                    let backpressureThreshold = Int(AudioSampleRates.transcription * 5)
+                    let backpressureKeep = Int(AudioSampleRates.transcription)
                     var feedSamples = samples16k
                     if feedSamples.count > backpressureThreshold {
                         let dropped = feedSamples.count - backpressureKeep
-                        logger.warning("Backpressure: dropping \(dropped, privacy: .public) samples (\(String(format: "%.1f", Double(dropped) / 16000.0), privacy: .public)s), keeping last 1s")
+                        logger.warning("Backpressure: dropping \(dropped, privacy: .public) samples (\(String(format: "%.1f", Double(dropped) / AudioSampleRates.transcription), privacy: .public)s), keeping last 1s")
                         feedSamples = Array(feedSamples.suffix(backpressureKeep))
                     }
 
@@ -584,6 +753,7 @@ class StreamingAudioService: ObservableObject {
                     }
                     do {
                         try writer.writeChunk(feedSamples)
+                        captureStateRef.withLock { $0.recordSamplesWritten(feedSamples.count) }
                         PipelineTrace.shared.log("WAV", "wrote \(feedSamples.count) samples")
                     } catch {
                         PipelineTrace.shared.log("WAV", "write FAILED: \(error)")
@@ -615,6 +785,7 @@ class StreamingAudioService: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
+        scheduleTapHealthCheck()
     }
 
     // MARK: - Stop Streaming
@@ -630,6 +801,7 @@ class StreamingAudioService: ObservableObject {
             isStreaming = false
         }
 
+        cancelTapHealthCheck()
         shouldStopFeeding.withLock { $0 = true }
         if let feedTask {
             _ = await feedTask.value
@@ -654,7 +826,10 @@ class StreamingAudioService: ObservableObject {
                 session.feedAudio(samples: remaining16k)
             }
             if let writer = wavWriter {
-                do { try writer.writeChunk(remaining16k) } catch {
+                do {
+                    try writer.writeChunk(remaining16k)
+                    captureState.withLock { $0.recordSamplesWritten(remaining16k.count) }
+                } catch {
                     logger.error("Failed to write final WAV chunk: \(error, privacy: .public)")
                 }
             }
@@ -671,6 +846,16 @@ class StreamingAudioService: ObservableObject {
 
         let finalURL = wavWriter?.finalize()
         wavWriter = nil
+
+        if !captureState.withLock({ $0.hasCapturedSamples }) {
+            logger.error("No audio samples captured during streaming, discarding empty recording")
+            if let url = finalURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            ErrorToastManager.shared.show("No microphone audio received. Try recording again.")
+            clearState()
+            return nil
+        }
 
         if let startTime = recordingStartTime {
             let duration = Date().timeIntervalSince(startTime)
@@ -708,6 +893,8 @@ class StreamingAudioService: ObservableObject {
 
         isStreaming = false
 
+        cancelTapHealthCheck()
+        tapRecoveryAttempts = 0
         feedTask?.cancel()
         feedTask = nil
         eventTask?.cancel()
@@ -837,6 +1024,8 @@ class StreamingAudioService: ObservableObject {
         provisionalText = ""
         isSpeechDetected = false
         recordingStartTime = nil
+        resetTapHealth()
+        resetCaptureHealth()
     }
 
     // MARK: - Language Mapping
@@ -882,7 +1071,7 @@ class StreamingAudioService: ObservableObject {
     }
 
     func writeRawSamplesToRingBuffer(_ samples: [Float], chunkDuration: Double) -> Int {
-        let chunkSize = max(1, Int(chunkDuration * 16000))
+        let chunkSize = max(1, Int(chunkDuration * AudioSampleRates.transcription))
         var offset = 0
         var chunksFed = 0
         while offset < samples.count {
@@ -906,9 +1095,9 @@ class StreamingAudioService: ObservableObject {
             throw StreamingAudioError.modelNotLoaded
         }
 
-        let (_, audio) = try loadAudioArray(from: url, sampleRate: 16000)
+        let (_, audio) = try loadAudioArray(from: url, sampleRate: Int(AudioSampleRates.transcription))
         let samples = audio.asArray(Float.self)
-        let audioDurationS = Double(samples.count) / 16000.0
+        let audioDurationS = Double(samples.count) / AudioSampleRates.transcription
 
         let mappedLanguage = Self.mapLanguageCode(language)
         let config = StreamingConfig(language: mappedLanguage, temperature: temperature)
@@ -935,7 +1124,7 @@ class StreamingAudioService: ObservableObject {
             }
         }
 
-        let chunkSize = max(1, Int(chunkDuration * 16000))
+        let chunkSize = max(1, Int(chunkDuration * AudioSampleRates.transcription))
         let tailSilence = [Float](repeating: 0, count: 10560)
         let totalChunks = (samples.count + chunkSize - 1) / chunkSize
 
