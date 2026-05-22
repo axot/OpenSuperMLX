@@ -9,6 +9,11 @@ import ScreenCaptureKit
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "SystemAudioService")
 
+enum AudioSampleRates {
+    static let transcription: Double = 16_000
+    static let systemCapture: Double = 48_000
+}
+
 // MARK: - SystemAudioService
 
 @MainActor
@@ -16,12 +21,16 @@ final class SystemAudioService: NSObject, ObservableObject {
     static let shared = SystemAudioService()
 
     @Published private(set) var isCapturing = false
-    nonisolated(unsafe) private(set) var activeSampleRate: Double = 48000
+    nonisolated var activeSampleRate: Double {
+        activeSampleRateLock.withLock { $0 }
+    }
 
     private var stream: SCStream?
     private let accumulatedSamples = OSAllocatedUnfairLock(initialState: [Float]())
+    private let activeSampleRateLock = OSAllocatedUnfairLock(initialState: AudioSampleRates.systemCapture)
     private let audioOutputQueue = DispatchQueue(label: "OpenSuperMLX.systemAudio", qos: .userInteractive)
     private let nextExpectedAudioTime = OSAllocatedUnfairLock<CMTime?>(initialState: nil)
+    private let lastObservedSampleRate = OSAllocatedUnfairLock<Double?>(initialState: nil)
 
     private override init() {
         super.init()
@@ -35,7 +44,8 @@ final class SystemAudioService: NSObject, ObservableObject {
         config.excludesCurrentProcessAudio = true
         config.sampleRate = Int(sampleRate)
         config.channelCount = 1
-        activeSampleRate = sampleRate
+        setActiveSampleRate(sampleRate)
+        lastObservedSampleRate.withLock { $0 = nil }
 
         // Minimize video overhead — ScreenCaptureKit requires a display but we only want audio
         config.width = 2
@@ -68,7 +78,7 @@ final class SystemAudioService: NSObject, ObservableObject {
 
     // MARK: - Capture Lifecycle
 
-    func startCapture(bundleID: String? = nil, sampleRate: Double = 48000) async throws {
+    func startCapture(bundleID: String? = nil, sampleRate: Double = AudioSampleRates.systemCapture) async throws {
         guard !isCapturing else { return }
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -189,6 +199,44 @@ final class SystemAudioService: NSObject, ObservableObject {
         let floatPointer = UnsafeRawPointer(dataPointer).bindMemory(to: Float.self, capacity: floatCount)
         return Array(UnsafeBufferPointer(start: floatPointer, count: floatCount))
     }
+
+    nonisolated func sampleRate(from formatDescription: CMFormatDescription?) -> Double? {
+        guard let formatDescription,
+              CMFormatDescriptionGetMediaType(formatDescription) == kCMMediaType_Audio,
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return nil
+        }
+
+        let sampleRate = streamDescription.pointee.mSampleRate
+        return sampleRate > 0 ? sampleRate : nil
+    }
+
+    nonisolated func observedSampleRate(from sampleBuffer: CMSampleBuffer) -> Double {
+        guard let observed = sampleRate(from: CMSampleBufferGetFormatDescription(sampleBuffer)) else {
+            return activeSampleRate
+        }
+
+        let previousObserved = lastObservedSampleRate.withLock { previous -> Double? in
+            defer { previous = observed }
+            return previous
+        }
+
+        if previousObserved != observed {
+            logger.info("System audio actual sample rate: \(observed, privacy: .public)Hz")
+        }
+
+        let configured = activeSampleRate
+        if abs(configured - observed) > 0.5 {
+            logger.warning("System audio sample rate mismatch: configured=\(configured, privacy: .public)Hz actual=\(observed, privacy: .public)Hz; using actual rate")
+            setActiveSampleRate(observed)
+        }
+
+        return observed
+    }
+
+    nonisolated private func setActiveSampleRate(_ sampleRate: Double) {
+        activeSampleRateLock.withLock { $0 = sampleRate }
+    }
 }
 
 // MARK: - SCStreamDelegate
@@ -216,11 +264,12 @@ extension SystemAudioService: SCStreamOutput {
               CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let sampleRate = observedSampleRate(from: sampleBuffer)
         let samples = extractFloatSamples(from: sampleBuffer)
 
         let computedDuration = CMTime(
             value: CMTimeValue(samples.count),
-            timescale: CMTimeScale(activeSampleRate)
+            timescale: CMTimeScale(sampleRate)
         )
 
         let silenceSamples: [Float]? = nextExpectedAudioTime.withLock { expected in
@@ -232,8 +281,8 @@ extension SystemAudioService: SCStreamOutput {
             guard let exp = expected, pts != .invalid, exp != .invalid else { return nil }
             let gapSeconds = CMTimeGetSeconds(pts) - CMTimeGetSeconds(exp)
             guard gapSeconds > 0.001 else { return nil }
-            let gapSampleCount = Int(gapSeconds * activeSampleRate)
-            guard gapSampleCount > 0, gapSampleCount < Int(activeSampleRate) else { return nil }
+            let gapSampleCount = Int(gapSeconds * sampleRate)
+            guard gapSampleCount > 0, gapSampleCount < Int(sampleRate) else { return nil }
             return [Float](repeating: 0, count: gapSampleCount)
         }
 

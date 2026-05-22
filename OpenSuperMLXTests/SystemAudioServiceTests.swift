@@ -1,6 +1,8 @@
 // SystemAudioServiceTests.swift
 // OpenSuperMLX
 
+import AVFoundation
+import CoreMedia
 import ScreenCaptureKit
 import XCTest
 
@@ -67,12 +69,13 @@ final class SystemAudioServiceTests: XCTestCase {
     @MainActor
     func testSystemAudioServiceConfiguration() throws {
         let service = SystemAudioService.shared
-        let config = service.makeStreamConfiguration(sampleRate: 48000)
+        let config = service.makeStreamConfiguration(sampleRate: AudioSampleRates.systemCapture)
 
         XCTAssertTrue(config.capturesAudio)
         XCTAssertTrue(config.excludesCurrentProcessAudio)
-        XCTAssertEqual(config.sampleRate, 48000)
+        XCTAssertEqual(config.sampleRate, Int(AudioSampleRates.systemCapture))
         XCTAssertEqual(config.channelCount, 1)
+        XCTAssertEqual(service.activeSampleRate, AudioSampleRates.systemCapture)
     }
 
     @MainActor
@@ -93,6 +96,24 @@ final class SystemAudioServiceTests: XCTestCase {
         let service = SystemAudioService.shared
         let result = service.extractFloatSamples(from: nil)
         XCTAssertTrue(result.isEmpty)
+    }
+
+    @MainActor
+    func testReadsSampleRateFromAudioFormatDescription() throws {
+        let service = SystemAudioService.shared
+        let description = try makeAudioFormatDescription(sampleRate: 44100)
+
+        XCTAssertEqual(service.sampleRate(from: description), 44100)
+    }
+
+    @MainActor
+    func testObservedSampleRateUpdatesActiveRateWhenCaptureOutputDiffers() throws {
+        let service = SystemAudioService.shared
+        _ = service.makeStreamConfiguration(sampleRate: AudioSampleRates.systemCapture)
+        let sampleBuffer = try makeAudioSampleBuffer(sampleRate: 44100)
+
+        XCTAssertEqual(service.observedSampleRate(from: sampleBuffer), 44100)
+        XCTAssertEqual(service.activeSampleRate, 44100)
     }
 
     // MARK: - drainAccumulatedSamples
@@ -180,5 +201,57 @@ final class SystemAudioServiceTests: XCTestCase {
             try service.makeContentFilter(bundleID: mangled, content: content),
             "Bundle ID match must be case-insensitive — uppercased \(mangled) should still find \(realApp.bundleIdentifier)"
         )
+    }
+
+    private func makeAudioFormatDescription(sampleRate: Double) throws -> CMFormatDescription {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        var description: CMAudioFormatDescription?
+        let status = CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &asbd,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &description
+        )
+
+        XCTAssertEqual(status, noErr)
+        return try XCTUnwrap(description)
+    }
+
+    private func makeAudioSampleBuffer(sampleRate: Double) throws -> CMSampleBuffer {
+        let description = try makeAudioFormatDescription(sampleRate: sampleRate)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(sampleRate)),
+            presentationTimeStamp: .zero,
+            decodeTimeStamp: .invalid
+        )
+        var sampleBuffer: CMSampleBuffer?
+        let status = CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: nil,
+            formatDescription: description,
+            sampleCount: 1,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0,
+            sampleSizeArray: nil,
+            sampleBufferOut: &sampleBuffer
+        )
+
+        XCTAssertEqual(status, noErr)
+        return try XCTUnwrap(sampleBuffer)
     }
 }

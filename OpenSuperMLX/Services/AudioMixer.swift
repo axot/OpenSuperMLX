@@ -13,7 +13,7 @@ final class AudioMixer: @unchecked Sendable {
     private var micCarryOver = [Float]()
     private var sysCarryOver = [Float]()
 
-    init(inputSampleRate: Double = 48000) {
+    init(inputSampleRate: Double = AudioSampleRates.systemCapture) {
         sysAGC = RMSNormalizer(maxGainDB: 12, sampleRate: Float(inputSampleRate))
     }
 
@@ -40,8 +40,13 @@ final class AudioMixer: @unchecked Sendable {
         arr.isEmpty ? 0 : sqrt(arr.reduce(Float(0)) { $0 + $1 * $1 } / Float(arr.count))
     }
 
-    func mix(mic: [Float], micSampleRate: Double, sys: [Float], sysSampleRate: Double,
-             outputSampleRate: Double = 16000) -> [Float] {
+    func mix(
+        mic: [Float],
+        micSampleRate: Double,
+        sys: [Float],
+        sysSampleRate: Double,
+        outputSampleRate: Double = AudioSampleRates.transcription
+    ) -> [Float] {
 
         traceCounter += 1
         let n = traceCounter
@@ -99,7 +104,11 @@ final class AudioMixer: @unchecked Sendable {
         return mixed
     }
 
-    func micOnly(_ samples: [Float], inputSampleRate: Double, outputSampleRate: Double = 16000) -> [Float] {
+    func micOnly(
+        _ samples: [Float],
+        inputSampleRate: Double,
+        outputSampleRate: Double = AudioSampleRates.transcription
+    ) -> [Float] {
         downsample(samples, from: inputSampleRate, to: outputSampleRate)
     }
 
