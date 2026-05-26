@@ -1072,27 +1072,25 @@ struct RecordingRow: View {
                 
                 }
 
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                if isHovered || isPlaying {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.caption2)
 
-                    Text(metadataDateText)
-                        .font(.caption.monospacedDigit())
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        Text(metadataDateText)
+                            .font(.caption.monospacedDigit())
+                            .fixedSize(horizontal: true, vertical: false)
 
-                    Image(systemName: "doc")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                        Image(systemName: "doc")
+                            .font(.caption2)
 
-                    Text(recording.displayFileName)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        Text(recording.displayFileName)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundColor(.secondary)
                 }
-                .lineLimit(1)
 
                 Spacer(minLength: 8)
 
