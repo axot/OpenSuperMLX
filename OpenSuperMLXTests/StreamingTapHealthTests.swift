@@ -38,4 +38,53 @@ final class StreamingTapHealthTests: XCTestCase {
         XCTAssertTrue(tapHealth.needsRecovery)
         XCTAssertTrue(captureHealth.hasCapturedSamples)
     }
+
+    func testFeedLoopContinuesOnlyWhileNotCancelledAndNotStopped() {
+        XCTAssertTrue(StreamingAudioService.shouldContinueFeedLoop(
+            isCancelled: false,
+            shouldStop: false
+        ))
+        XCTAssertFalse(StreamingAudioService.shouldContinueFeedLoop(
+            isCancelled: true,
+            shouldStop: false
+        ))
+        XCTAssertFalse(StreamingAudioService.shouldContinueFeedLoop(
+            isCancelled: false,
+            shouldStop: true
+        ))
+        XCTAssertFalse(StreamingAudioService.shouldContinueFeedLoop(
+            isCancelled: true,
+            shouldStop: true
+        ))
+    }
+
+    func testFeedLoopSleepReturnsFalseWhenCancelled() async {
+        let task = Task {
+            await StreamingAudioService.waitForNextFeedIteration()
+        }
+
+        task.cancel()
+
+        let didSleep = await task.value
+        XCTAssertFalse(didSleep)
+    }
+
+    func testSpeechDetectionPublishesOnlyOnChange() {
+        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
+            lastPublished: nil,
+            current: false
+        ))
+        XCTAssertFalse(StreamingAudioService.shouldPublishSpeechDetection(
+            lastPublished: false,
+            current: false
+        ))
+        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
+            lastPublished: false,
+            current: true
+        ))
+        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
+            lastPublished: true,
+            current: false
+        ))
+    }
 }

@@ -113,7 +113,7 @@ class StreamingAudioService: ObservableObject {
     /// most recent startStreaming. Used to detect class flips that warrant a tap-restart.
     private var sessionClassification: DeviceClassification?
 
-    // MARK: - Routing decision (pure function, unit-testable)
+    // MARK: - Routing Decision
 
     /// Pure routing decision based on current output classification + user toggle.
     /// Speaker output (or unclassified, treated as speaker for safety) forces mic-only
@@ -124,6 +124,27 @@ class StreamingAudioService: ObservableObject {
     ) -> Bool {
         userToggle && classification == .headphone
     }
+
+    // MARK: - Feed Loop Helpers
+
+    nonisolated static func shouldContinueFeedLoop(isCancelled: Bool, shouldStop: Bool) -> Bool {
+        !isCancelled && !shouldStop
+    }
+
+    nonisolated static func shouldPublishSpeechDetection(lastPublished: Bool?, current: Bool) -> Bool {
+        lastPublished != current
+    }
+
+    nonisolated static func waitForNextFeedIteration() async -> Bool {
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: - Device Classification
 
     /// Look up the current default output's classification, optionally prompting the
     /// user via `classifier.askUser` if it's never been seen before. Returns `nil` if
@@ -699,12 +720,16 @@ class StreamingAudioService: ObservableObject {
         let speakerActiveRef = self.speakerCaptureActiveLock
         let captureStateRef = self.captureState
         let sampleRate = self.nativeSampleRate
-        feedTask = Task.detached {
+        feedTask = Task.detached { [weak self] in
             var consecutiveEmptyDrains = 0
             var feedIterationCount = 0
             var lastStatusLogTime = ContinuousClock.now
+            var lastPublishedSpeechActive: Bool?
 
-            while !shouldStopRef.withLock({ $0 }) {
+            while Self.shouldContinueFeedLoop(
+                isCancelled: Task.isCancelled,
+                shouldStop: shouldStopRef.withLock({ $0 })
+            ) {
                 feedIterationCount += 1
                 let micSamples = ringBufferRef.withLock { buffer -> [Float] in
                     guard !buffer.isEmpty else { return [] }
@@ -778,11 +803,17 @@ class StreamingAudioService: ObservableObject {
                 }
 
                 let speechActive = session.isSpeechActive
-                Task { @MainActor [weak self] in
-                    self?.isSpeechDetected = speechActive
+                if Self.shouldPublishSpeechDetection(
+                    lastPublished: lastPublishedSpeechActive,
+                    current: speechActive
+                ) {
+                    lastPublishedSpeechActive = speechActive
+                    await MainActor.run { [weak self] in
+                        self?.isSpeechDetected = speechActive
+                    }
                 }
 
-                try? await Task.sleep(for: .milliseconds(100))
+                guard await Self.waitForNextFeedIteration() else { break }
             }
         }
         scheduleTapHealthCheck()
@@ -895,6 +926,7 @@ class StreamingAudioService: ObservableObject {
 
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
+        shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
         feedTask = nil
         eventTask?.cancel()
