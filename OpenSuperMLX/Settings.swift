@@ -193,14 +193,26 @@ struct Settings {
 }
 
 struct SettingsView: View {
+    /// When true the view is hosted inside the sidebar content area (no modal
+    /// chrome): the fixed 550pt width and the Done/GitHub footer are dropped.
+    var embedded = false
+
     @StateObject private var viewModel = SettingsViewModel()
     @StateObject private var modelManager = MLXModelManager.shared
     @Environment(\.dismiss) var dismiss
     @State private var isRecordingNewShortcut = false
     @State private var selectedTab = 0
     @State private var customModelInput = ""
-    
+
     var body: some View {
+        if embedded {
+            SettingsRedesignView(viewModel: viewModel, modelManager: modelManager)
+        } else {
+            modalBody
+        }
+    }
+
+    private var modalBody: some View {
         TabView(selection: $selectedTab) {
             shortcutSettings
                 .tabItem {
@@ -233,31 +245,34 @@ struct SettingsView: View {
                 .tag(4)
         }
         .padding()
-        .frame(width: 550)
+        .frame(width: embedded ? nil : 550)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(Color(.windowBackgroundColor))
         .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button("Done") {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                
-                Spacer()
-                
-                Link(destination: URL(string: "https://github.com/axot/OpenSuperMLX")!) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "star")
-                            .font(.system(size: 10))
-                        Text("GitHub")
-                            .font(.system(size: 11))
+            if !embedded {
+                HStack {
+                    Button("Done") {
+                        dismiss()
                     }
-                    .foregroundColor(.secondary)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+
+                    Spacer()
+
+                    Link(destination: URL(string: "https://github.com/axot/OpenSuperMLX")!) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star")
+                                .font(.system(size: 10))
+                            Text("GitHub")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding()
+                .background(Color(.windowBackgroundColor))
             }
-            .padding()
-            .background(Color(.windowBackgroundColor))
         }
     }
     
