@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- macOS app-icon body: black squircle, ~824 centered with ~100px margin -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#0a0a0a"/>
+  <!-- Brand waveform glyph (#i-wave). Centered on the glyph's true visual bbox
+       (x 5→22, y 1.83→19.5 ⇒ center 13.5,10.67). Scale 28 to fill the squircle:
+       translate = (512 - 13.5*28, 512 - 10.67*28) = (134, 213). -->
+  <g transform="translate(134,213) scale(28)" fill="#ffffff" stroke="none">
+    <rect x="5.0" y="10.5" width="2.2" height="5" rx="1.1"/>
+    <rect x="8.3" y="8" width="2.2" height="10" rx="1.1"/>
+    <rect x="11.6" y="6.5" width="2.2" height="13" rx="1.1"/>
+    <rect x="14.9" y="9" width="2.2" height="8" rx="1.1"/>
+    <path d="M19.50 1.83C19.88 3.445 20.355 3.92 21.97 4.30C20.355 4.68 19.88 5.155 19.50 6.77C19.12 5.155 18.645 4.68 17.03 4.30C18.645 3.92 19.12 3.445 19.50 1.83z"/>
+  </g>
+</svg>
