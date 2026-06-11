@@ -69,22 +69,38 @@ class OnboardingViewModel: ObservableObject {
         AppPreferences.shared.selectedMLXModel = model.repoID
     }
 
+    /// Highest fraction shown so far this download — keeps the bar monotonic.
+    /// HuggingFace downloads files sequentially, each with its own Progress that
+    /// restarts at 0, so the raw fractionCompleted bounces 0→high→0. We only ever
+    /// move the bar forward.
+    private var maxProgress: Double = 0
+
     @MainActor
     func downloadModel(_ model: OnboardingMLXModel) async throws {
         guard !isDownloading else { return }
-        
+
         isDownloading = true
         downloadingModelName = model.name
-        
+        maxProgress = 0
+        downloadProgress = 0
+
         defer {
             isDownloading = false
             downloadingModelName = nil
             downloadProgress = nil
         }
-        
+
         downloadTask = Task {
             let _ = try await Qwen3ASRModel.fromPretrained(model.repoID, progressHandler: { [weak self] progress in
-                self?.downloadProgress = progress.fractionCompleted
+                let fraction = progress.fractionCompleted
+                Task { @MainActor in
+                    guard let self else { return }
+                    // Monotonic: never regress when a new file's Progress resets to 0.
+                    if fraction > self.maxProgress {
+                        self.maxProgress = fraction
+                        self.downloadProgress = fraction
+                    }
+                }
             })
         }
         
@@ -211,6 +227,7 @@ struct OnboardingView: View {
             }
             .padding(16)
         }
+        .frame(maxWidth: 550)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             ZStack {

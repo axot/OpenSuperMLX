@@ -24,12 +24,17 @@ struct OpenSuperMLXApp: App {
                     ContentView()
                 }
             }
-            .frame(width: 450)
-            .frame(minHeight: 400, maxHeight: 900)
+            .frame(minWidth: 750, idealWidth: 850, maxWidth: .infinity)
+            .frame(minHeight: 500, maxHeight: .infinity)
+            // The redesign is an intentional light-mono palette: DesignTokens
+            // hardcode white/black surfaces. Lock the window to light so native
+            // controls (pickers, sliders, the mic popover) don't render dark-on-
+            // dark against those surfaces when the system is in dark mode.
+            .preferredColorScheme(.light)
             .environmentObject(appState)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 450, height: 650)
+        .defaultSize(width: 850, height: 650)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -83,8 +88,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self.mainWindow = window
             window.delegate = self
             
-            window.minSize = NSSize(width: 450, height: 400)
-            window.maxSize = NSSize(width: 450, height: 900)
+            window.minSize = NSSize(width: 750, height: 500)
+            window.maxSize = NSSize(width: 1100, height: 900)
         }
         
         OpenSuperMLXApp.startTranscriptionQueue()
@@ -315,9 +320,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-    }
-    
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        return NSSize(width: 450, height: frameSize.height)
     }
 }
