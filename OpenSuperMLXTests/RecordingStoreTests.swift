@@ -64,6 +64,23 @@ final class RecordingStoreTests: XCTestCase {
         XCTAssertEqual(fetched.first?.status, .completed)
     }
 
+    func testFetchRecordingsCount_ReflectsTotalNotPageSize() async throws {
+        let initial = try await sut.fetchRecordingsCount()
+        XCTAssertEqual(initial, 0)
+
+        for i in 0..<7 {
+            try await sut.addRecordingSync(makeRecording(transcription: "rec \(i)"))
+        }
+
+        // Count is the DB total, independent of any page limit.
+        let total = try await sut.fetchRecordingsCount()
+        XCTAssertEqual(total, 7)
+        let firstPage = try await sut.fetchRecordings(limit: 3, offset: 0)
+        XCTAssertEqual(firstPage.count, 3)
+        let totalAfterPage = try await sut.fetchRecordingsCount()
+        XCTAssertEqual(totalAfterPage, 7)
+    }
+
     func testDisplayFileNamePrefersSourceFileNameAndFallsBackToStoredName() {
         let imported = makeRecording(
             fileName: "1747720000.wav",
