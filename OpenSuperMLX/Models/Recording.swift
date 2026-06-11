@@ -142,7 +142,7 @@ class RecordingStore: ObservableObject {
         try migrator.migrate(dbQueue)
     }
     
-    private nonisolated func fetchAllRecordings() async throws -> [Recording] {
+    nonisolated func fetchAllRecordings() async throws -> [Recording] {
         try await dbQueue.read { db in
             try Recording
                 .order(Recording.Columns.timestamp.desc)
@@ -156,6 +156,14 @@ class RecordingStore: ObservableObject {
                 .order(Recording.Columns.timestamp.desc)
                 .limit(limit, offset: offset)
                 .fetchAll(db)
+        }
+    }
+
+    /// Total number of recordings in the store (all statuses). Used by the
+    /// Recordings header so the count reflects the database, not the loaded page.
+    nonisolated func fetchRecordingsCount() async throws -> Int {
+        try await dbQueue.read { db in
+            try Recording.fetchCount(db)
         }
     }
 

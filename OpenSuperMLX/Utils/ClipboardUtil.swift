@@ -13,6 +13,20 @@ class ClipboardUtil {
     /// instead of our transcription.
     static let pasteboardRestoreDelay: TimeInterval = 0.4
 
+    /// Write a PNG of `nsImage` to the pasteboard. Returns false if conversion fails.
+    /// `pasteboard` is injectable so tests can use a named pasteboard instead of mutating
+    /// the user's clipboard. Main-thread-only (`NSPasteboard` requirement).
+    @MainActor
+    static func copyImage(_ nsImage: NSImage, pasteboard: NSPasteboard = .general) -> Bool {
+        guard let tiff = nsImage.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let pngData = rep.representation(using: .png, properties: [:]) else {
+            return false
+        }
+        pasteboard.clearContents()
+        return pasteboard.setData(pngData, forType: .png)
+    }
+
     static func insertText(_ text: String) {
         let pasteboard = NSPasteboard.general
 
