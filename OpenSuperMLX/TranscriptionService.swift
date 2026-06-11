@@ -17,7 +17,11 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var loadError: Error?
     @Published private(set) var progress: Float = 0.0
     @Published private(set) var downloadProgress: Double?
-    
+
+    /// Highest download fraction seen this load — keeps the bar monotonic across
+    /// HuggingFace's per-file Progress objects (each restarts at 0).
+    private var maxDownloadProgress: Double = 0
+
     private var currentEngine: TranscriptionEngine?
 
     var streamingModel: Qwen3ASRModel? {
@@ -61,13 +65,20 @@ class TranscriptionService: ObservableObject {
         
         isLoading = true
         loadError = nil
-        
+        maxDownloadProgress = 0
+        downloadProgress = 0
+
         Task.detached(priority: .userInitiated) {
             let engine = await MLXEngine()
             engine.downloadProgressHandler = { [weak self] progress in
                 let fraction = progress.fractionCompleted
                 logger.info("Download: \(Int(fraction * 100))% (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
-                self?.downloadProgress = fraction
+                guard let self else { return }
+                // Monotonic: ignore per-file resets so the bar never jumps back to 0%.
+                if fraction > self.maxDownloadProgress {
+                    self.maxDownloadProgress = fraction
+                    self.downloadProgress = fraction
+                }
             }
             
             do {

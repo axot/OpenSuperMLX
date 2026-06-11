@@ -48,6 +48,7 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var provisionalText = ""
     @Published private(set) var isStreaming = false
     @Published private(set) var isSpeechDetected = false
+    @Published private(set) var currentRMSLevel: Float = 0
 
     // MARK: - Private State
 
@@ -80,6 +81,12 @@ class StreamingAudioService: ObservableObject {
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
     private let tapState = OSAllocatedUnfairLock(initialState: StreamingTapHealth())
     private let captureState = OSAllocatedUnfairLock(initialState: StreamingCaptureHealth())
+
+    /// RMS level written from the tap callback (CoreAudio thread), read by a 30Hz main
+    /// timer that publishes `currentRMSLevel`. Mirrors the `ringBuffer` lock pattern so
+    /// the tap never touches actor-isolated state.
+    private let rmsLock = OSAllocatedUnfairLock(initialState: Float(0))
+    private var rmsTimer: Timer?
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
 
@@ -142,6 +149,84 @@ class StreamingAudioService: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    // MARK: - RMS Metering
+
+    /// Root-mean-square amplitude of channel 0, clamped to [0, 1]. Microphone input is
+    /// mono so channel 0 carries the signal; multi-channel aggregate devices still keep
+    /// primary audio on channel 0. Pure + nonisolated for unit testing and tap-thread use.
+    nonisolated static func computeRMS(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let data = buffer.floatChannelData?[0] else { return 0 }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return 0 }
+        var sum: Float = 0
+        for i in 0..<count { sum += data[i] * data[i] }
+        let rms = sqrt(sum / Float(count))
+        // A denormal/corrupt buffer can make `rms` NaN; that would flow into a
+        // SwiftUI `.frame(height:)` and corrupt layout. Clamp non-finite to 0.
+        guard rms.isFinite else { return 0 }
+        return min(1.0, rms)
+    }
+
+    /// Resolve the recording duration to persist. The session-measured value is
+    /// authoritative; a caller-supplied wall-clock is only a fallback for when the
+    /// session had no start time. Prevents the duration=0 rows that broke stats.
+    nonisolated static func resolveDuration(measured: TimeInterval, caller: TimeInterval) -> TimeInterval {
+        measured > 0 ? measured : max(0, caller)
+    }
+
+    private func startRMSTimer() {
+        rmsTimer?.invalidate()
+        rmsTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.currentRMSLevel = self.rmsLock.withLock { $0 }
+            }
+        }
+    }
+
+    private func stopRMSTimer() {
+        rmsTimer?.invalidate()
+        rmsTimer = nil
+        currentRMSLevel = 0
+    }
+
+    // MARK: - Idle Metering (popover VU)
+
+    /// True while the mic-picker popover is open and wants a live level. Read by
+    /// `resumeIdleMeteringIfNeeded()` so that a recording ending while the popover
+    /// is still open restarts the metering timer the stop path tore down.
+    private var popoverWantsMetering = false
+
+    /// Begin live mic metering for the picker popover. Warms the engine if needed
+    /// (so the tap delivers buffers) and runs the RMS timer. No-op while streaming —
+    /// streaming already drives `currentRMSLevel`.
+    func startIdleMetering() {
+        popoverWantsMetering = true
+        guard !isStreaming else { return }
+        if !isEngineWarmed || audioEngine?.isRunning != true {
+            warmUp()
+        }
+        if rmsTimer == nil {
+            startRMSTimer()
+        }
+    }
+
+    /// Stop popover metering. Leaves the warmed engine in place (it's reused for the
+    /// next recording); only tears down the timer it owns and zeroes the level.
+    func stopIdleMetering() {
+        popoverWantsMetering = false
+        guard !isStreaming else { return } // streaming owns the timer; leave it
+        stopRMSTimer()
+    }
+
+    /// Restart idle metering after a recording ends if the picker popover is still
+    /// open. The popover's `.onAppear` only fires once, so without this its VU would
+    /// sit dead at 0 (the stop path invalidated the timer) until reopened.
+    private func resumeIdleMeteringIfNeeded() {
+        guard popoverWantsMetering, !isStreaming else { return }
+        startIdleMetering()
     }
 
     // MARK: - Device Classification
@@ -356,8 +441,14 @@ class StreamingAudioService: ObservableObject {
     private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
         let ringBufferLock = self.ringBuffer
         let tapState = self.tapState
+        let rmsLock = self.rmsLock
         logger.info("Installing input tap at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            // Always meter so the popover VU reflects real mic level even when
+            // idle (warmed-but-not-streaming). The lock write is cheap.
+            let rms = Self.computeRMS(buffer)
+            rmsLock.withLock { $0 = rms }
+
             guard self?.isStreaming ?? false else { return }
             tapState.withLock { state in
                 state.recordCallback()
@@ -497,12 +588,14 @@ class StreamingAudioService: ObservableObject {
         audioEngine = nil
         isEngineWarmed = false
         ringBuffer.withLock { $0.removeAll() }
+        rmsLock.withLock { $0 = 0 }
         resetTapHealth()
     }
 
     private var retiredEngines: [AVAudioEngine] = []
 
     func coolDown() {
+        stopRMSTimer()
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
         guard isEngineWarmed else { return }
@@ -817,11 +910,12 @@ class StreamingAudioService: ObservableObject {
             }
         }
         scheduleTapHealthCheck()
+        startRMSTimer()
     }
 
     // MARK: - Stop Streaming
 
-    func stopStreaming() async -> (text: String, url: URL)? {
+    func stopStreaming() async -> (text: String, url: URL, duration: TimeInterval)? {
         PipelineTrace.shared.log("STREAM", "stopStreaming() called")
         guard isStreaming else {
             logger.warning("Not streaming, ignoring stopStreaming()")
@@ -830,8 +924,12 @@ class StreamingAudioService: ObservableObject {
 
         defer {
             isStreaming = false
+            // If the mic-picker popover is still open, restart its metering timer —
+            // the teardown below invalidated it but the popover won't re-fire onAppear.
+            resumeIdleMeteringIfNeeded()
         }
 
+        stopRMSTimer()
         cancelTapHealthCheck()
         shouldStopFeeding.withLock { $0 = true }
         if let feedTask {
@@ -888,16 +986,14 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
 
-        if let startTime = recordingStartTime {
-            let duration = Date().timeIntervalSince(startTime)
-            if duration < 1.0 {
-                logger.info("Recording too short (\(String(format: "%.1f", duration), privacy: .public)s), discarding")
-                if let url = finalURL {
-                    try? FileManager.default.removeItem(at: url)
-                }
-                clearState()
-                return nil
+        let elapsed = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        if recordingStartTime != nil, elapsed < 1.0 {
+            logger.info("Recording too short (\(String(format: "%.1f", elapsed), privacy: .public)s), discarding")
+            if let url = finalURL {
+                try? FileManager.default.removeItem(at: url)
             }
+            clearState()
+            return nil
         }
 
         let finalText = confirmedText
@@ -914,7 +1010,7 @@ class StreamingAudioService: ObservableObject {
         speakerCaptureActiveForSession = false
         PipelineTrace.shared.stop()
         guard let url else { return nil }
-        return (text: finalText, url: url)
+        return (text: finalText, url: url, duration: elapsed)
     }
 
     // MARK: - Cancel Streaming
@@ -924,6 +1020,7 @@ class StreamingAudioService: ObservableObject {
 
         isStreaming = false
 
+        stopRMSTimer()
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
         shouldStopFeeding.withLock { $0 = true }
@@ -952,6 +1049,7 @@ class StreamingAudioService: ObservableObject {
         PipelineTrace.shared.stop()
 
         clearState()
+        resumeIdleMeteringIfNeeded()
     }
 
     // MARK: - Finalize Recording
@@ -963,6 +1061,12 @@ class StreamingAudioService: ObservableObject {
 
     func finalizeRecording(duration: TimeInterval = 0, applyCorrection: Bool = true, forceLLM: Bool = false) async -> StreamingResult? {
         guard let result = await stopStreaming() else { return nil }
+
+        // The authoritative duration is measured inside the streaming session
+        // (start→stop), not the caller's wall-clock — the mini-recorder path never
+        // passed one, which stored duration=0 and broke per-language stats. Prefer
+        // the measured value; fall back to any caller-supplied duration.
+        let resolvedDuration = Self.resolveDuration(measured: result.duration, caller: duration)
 
         var text = result.text
         let settings = Settings()
@@ -993,7 +1097,7 @@ class StreamingAudioService: ObservableObject {
         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
         let recording = Recording(
             id: UUID(), timestamp: timestamp, fileName: fileName,
-            transcription: text, duration: duration,
+            transcription: text, duration: resolvedDuration,
             status: .completed, progress: 1.0, sourceFileURL: nil
         )
 
