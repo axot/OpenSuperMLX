@@ -832,8 +832,8 @@ struct RecordingRow: View {
     let onRegenerate: () -> Void
     let isLast: Bool
     @StateObject private var audioRecorder = AudioRecorder.shared
-    @State private var isExpanded = false
     @State private var isHovered = false
+    @State private var didCopy = false
 
     init(recording: Recording, searchQuery: String, isLast: Bool = false,
          onDelete: @escaping () -> Void, onRegenerate: @escaping () -> Void) {
@@ -904,7 +904,10 @@ struct RecordingRow: View {
         // LazyVStack recycles row view instances; when a recycled slot is reused
         // for a different recording its @State isHovered can carry a stale `true`,
         // painting a not-yet-hovered row gray on scroll. Clear it on identity change.
-        .onChange(of: recording.id) { _, _ in isHovered = false }
+        .onChange(of: recording.id) { _, _ in
+            isHovered = false
+            didCopy = false
+        }
     }
 
     // MARK: - Content
@@ -944,10 +947,8 @@ struct RecordingRow: View {
                     .font(.system(size: 13.5))
                     .foregroundStyle(DesignTokens.txt)
                     .lineSpacing(3)
-                    .lineLimit(isExpanded ? nil : 2)
-                    .textSelection(.enabled)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onTapGesture { isExpanded.toggle() }
                 if isRegenerating {
                     ShimmerOverlay()
                         .transition(.opacity.animation(.easeInOut(duration: 0.3)))
@@ -1002,25 +1003,42 @@ struct RecordingRow: View {
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
             }
             Spacer(minLength: 8)
-            // Always laid out (fixed 26pt) so hover only fades it in — no row reflow.
-            Button {
-                if isPlaying {
-                    audioRecorder.stopPlaying()
-                } else {
-                    audioRecorder.playRecording(url: recording.url)
+            // Fixed-size circular buttons fade in on hover so the row never reflows.
+            HStack(spacing: 6) {
+                Button(action: copyTranscription) {
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10, weight: didCopy ? .semibold : .regular))
+                        .foregroundStyle(didCopy ? DesignTokens.acc : DesignTokens.txt2)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(DesignTokens.accSoft))
+                        .contentTransition(.symbolEffect(.replace))
                 }
-            } label: {
-                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(isPlaying ? DesignTokens.red : DesignTokens.acc)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(DesignTokens.accSoft))
-                    .contentTransition(.symbolEffect(.replace))
+                .buttonStyle(.plain)
+                .help("Copy text")
+                .opacity(copyButtonVisible ? 1 : 0)
+                .allowsHitTesting(copyButtonVisible)
+                .animation(.easeInOut(duration: 0.12), value: copyButtonVisible)
+
+                Button {
+                    if isPlaying {
+                        audioRecorder.stopPlaying()
+                    } else {
+                        audioRecorder.playRecording(url: recording.url)
+                    }
+                } label: {
+                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(isPlaying ? DesignTokens.red : DesignTokens.acc)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(DesignTokens.accSoft))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.plain)
+                .help(isPlaying ? "Stop" : "Play")
+                .opacity(playButtonVisible ? 1 : 0)
+                .allowsHitTesting(playButtonVisible)
+                .animation(.easeInOut(duration: 0.12), value: playButtonVisible)
             }
-            .buttonStyle(.plain)
-            .opacity(playButtonVisible ? 1 : 0)
-            .allowsHitTesting(playButtonVisible)
-            .animation(.easeInOut(duration: 0.12), value: playButtonVisible)
         }
         .foregroundStyle(DesignTokens.txt3)
         .frame(height: 26)
@@ -1029,6 +1047,19 @@ struct RecordingRow: View {
 
     private var playButtonVisible: Bool {
         (isHovered || isPlaying) && !isPending && recording.status != .failed
+    }
+
+    private var copyButtonVisible: Bool {
+        isHovered && !isPending && recording.status != .failed && !displayText.isEmpty
+    }
+
+    private func copyTranscription() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(recording.transcription, forType: .string)
+        didCopy = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            didCopy = false
+        }
     }
 
     // MARK: - Context menu
@@ -1042,10 +1073,7 @@ struct RecordingRow: View {
             } label: {
                 Label(isPlaying ? "Stop" : "Play", systemImage: isPlaying ? "stop.fill" : "play.fill")
             }
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(recording.transcription, forType: .string)
-            } label: {
+            Button(action: copyTranscription) {
                 Label("Copy text", systemImage: "doc.on.doc")
             }
         }
