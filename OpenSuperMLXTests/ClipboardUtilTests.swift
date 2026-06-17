@@ -77,7 +77,12 @@ final class ClipboardUtilRestorationTests: XCTestCase {
 
         ClipboardUtil.insertText("TRANSCRIBED_TEXT")
 
-        Thread.sleep(forTimeInterval: ClipboardUtil.pasteboardRestoreDelay + 0.2)
+        // Spin the run loop (rather than blocking it) so the main-queue restore can fire.
+        let restored = expectation(description: "restore window elapsed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardUtil.pasteboardRestoreDelay + 0.2) {
+            restored.fulfill()
+        }
+        wait(for: [restored], timeout: 2.0)
 
         XCTAssertEqual(pb.string(forType: .string), "PRESERVE_ME")
     }
