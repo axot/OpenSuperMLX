@@ -73,7 +73,7 @@ enum ShareCardModel {
         return [
             Bubble(label: "SESSIONS", value: s.sessions.formatted(), sub: "recorded",
                    size: .lg, anchor: UnitPoint(x: 0.5, y: 0.5), phase: 0),
-            Bubble(label: "TOP", value: "\(topValue)%", sub: "of users",
+            Bubble(label: "TOP", value: "\(topValue)%", sub: "generic baseline",
                    size: .sm, anchor: UnitPoint(x: 0.5, y: 0.14), phase: 1),
             Bubble(label: "STREAK", value: "\(s.streak)", sub: "days",
                    size: .sm, anchor: UnitPoint(x: 0.82, y: 0.2), phase: 2),
@@ -327,7 +327,7 @@ private struct HeroPanel: View {
                 ForEach(Array(heroes.enumerated()), id: \.offset) { idx, h in
                     HeroCard(tag: h.language.displayName.uppercased(),
                              topText: UsageStats.formatTop(100 - h.percentile),
-                             caption: "Faster than \(UsageStats.formatTop(h.percentile))% of all users",
+                             caption: "Estimated vs generic typing baseline",
                              emphasized: idx == 0)
                         .frame(maxWidth: .infinity)
                 }
