@@ -180,6 +180,14 @@ final class AppPreferences {
     @UserDefault(key: "speakerCaptureEnabled", defaultValue: false)
     var speakerCaptureEnabled: Bool
 
+    // MARK: - Transcript MCP
+
+    @UserDefault(key: "transcriptMCPEnabled", defaultValue: false)
+    var transcriptMCPEnabled: Bool
+
+    @UserDefault(key: "transcriptMCPPort", defaultValue: Int(TranscriptMCPHTTPServer.defaultPort))
+    var transcriptMCPPort: Int
+
     // MARK: - Output Device Classifications
 
     @OptionalUserDefault(key: "outputDeviceClassifications")

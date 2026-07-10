@@ -8,8 +8,11 @@
 import AppKit
 import AVFoundation
 import Combine
+import os.log
 import SwiftUI
 import UniformTypeIdentifiers
+
+private let appLogger = Logger(subsystem: "OpenSuperMLX", category: "App")
 
 struct OpenSuperMLXApp: App {
     @StateObject private var appState = AppState()
@@ -80,6 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var languageSubmenu: NSMenu?
     private var microphoneService = MicrophoneService.shared
     private var microphoneObserver: AnyCancellable?
+    private var transcriptMCPServer: TranscriptMCPHTTPServer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBarItem()
@@ -93,7 +97,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         
         OpenSuperMLXApp.startTranscriptionQueue()
+        startTranscriptMCPServerIfEnabled()
         observeMicrophoneChanges()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        transcriptMCPServer?.stop()
+        transcriptMCPServer = nil
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
@@ -144,6 +154,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .sink { [weak self] _ in
                 self?.updateStatusBarMenu()
             }
+    }
+
+    private func startTranscriptMCPServerIfEnabled() {
+        guard AppPreferences.shared.transcriptMCPEnabled else { return }
+        let configuredPort = AppPreferences.shared.transcriptMCPPort
+        guard let port = UInt16(exactly: configuredPort), port > 0 else {
+            appLogger.error("Transcript MCP server not started: invalid port \(configuredPort, privacy: .public)")
+            return
+        }
+
+        let server = TranscriptMCPHTTPServer(port: port)
+        do {
+            try server.start()
+            transcriptMCPServer = server
+        } catch {
+            appLogger.error("Transcript MCP server failed to start: \(error.localizedDescription, privacy: .public)")
+        }
     }
     
     private func setupStatusBarItem() {

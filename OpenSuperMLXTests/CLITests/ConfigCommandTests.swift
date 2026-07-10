@@ -38,6 +38,8 @@ final class ConfigCommandTests: XCTestCase {
         XCTAssertTrue(keys.contains("mlxLanguage"))
         XCTAssertTrue(keys.contains("temperature"))
         XCTAssertTrue(keys.contains("llmCorrectionEnabled"))
+        XCTAssertTrue(keys.contains("transcriptMCPEnabled"))
+        XCTAssertTrue(keys.contains("transcriptMCPPort"))
     }
 
     func testConfigListMasksSensitiveKeys() throws {
@@ -104,6 +106,15 @@ final class ConfigCommandTests: XCTestCase {
         XCTAssertEqual(testDefaults.double(forKey: "temperature"), 0.5, accuracy: 0.001)
     }
 
+    func testConfigSetIntegerValue() throws {
+        let result = ConfigSetCommand.executeSet(key: "transcriptMCPPort", value: "17654")
+        guard case .success(let entry) = result else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertEqual(entry.value, "17654")
+        XCTAssertEqual(testDefaults.integer(forKey: "transcriptMCPPort"), 17654)
+    }
+
     func testConfigSetInvalidKey() throws {
         let result = ConfigSetCommand.executeSet(key: "nonExistentKey", value: "whatever")
         guard case .failure(let error) = result else {
@@ -122,6 +133,14 @@ final class ConfigCommandTests: XCTestCase {
 
     func testConfigSetInvalidDoubleValue() throws {
         let result = ConfigSetCommand.executeSet(key: "temperature", value: "notanumber")
+        guard case .failure(let error) = result else {
+            XCTFail("Expected failure"); return
+        }
+        XCTAssertEqual(error, .invalidConfigValue)
+    }
+
+    func testConfigSetInvalidIntegerValue() throws {
+        let result = ConfigSetCommand.executeSet(key: "transcriptMCPPort", value: "notaport")
         guard case .failure(let error) = result else {
             XCTFail("Expected failure"); return
         }

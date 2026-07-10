@@ -65,6 +65,8 @@ class StreamingAudioService: ObservableObject {
     private var streamingSession: StreamingInferenceSession?
     private var wavWriter: StreamingWAVWriter?
     private var currentWAVURL: URL?
+    var transcriptSessionStore: TranscriptSessionStore = .shared
+    private(set) var currentTranscriptSessionID: String?
 
     private var feedTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
@@ -762,7 +764,9 @@ class StreamingAudioService: ObservableObject {
         }
 
         isStreaming = true
-        recordingStartTime = Date()
+        let startTime = Date()
+        recordingStartTime = startTime
+        beginTranscriptSession(startedAt: startTime)
         playNotificationSound()
         logger.info("Streaming started (engine pre-warmed)")
 
@@ -982,6 +986,7 @@ class StreamingAudioService: ObservableObject {
                 try? FileManager.default.removeItem(at: url)
             }
             ErrorToastManager.shared.show("No microphone audio received. Try recording again.")
+            endCurrentTranscriptSession(elapsedMs: currentTranscriptElapsedMs())
             clearState()
             return nil
         }
@@ -992,11 +997,13 @@ class StreamingAudioService: ObservableObject {
             if let url = finalURL {
                 try? FileManager.default.removeItem(at: url)
             }
+            endCurrentTranscriptSession(elapsedMs: currentTranscriptElapsedMs())
             clearState()
             return nil
         }
 
         let finalText = confirmedText
+        endCurrentTranscriptSession(finalText: finalText, elapsedMs: currentTranscriptElapsedMs())
         confirmedText = ""
         provisionalText = ""
         streamingSession = nil
@@ -1048,6 +1055,7 @@ class StreamingAudioService: ObservableObject {
         audioMixer = nil
         PipelineTrace.shared.stop()
 
+        endCurrentTranscriptSession(elapsedMs: currentTranscriptElapsedMs())
         clearState()
         resumeIdleMeteringIfNeeded()
     }
@@ -1137,6 +1145,75 @@ class StreamingAudioService: ObservableObject {
             provisionalText = ""
             logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public) → cleaned: \(cleaned.count, privacy: .public)")
         }
+
+        recordTranscriptEvent(event, elapsedMs: currentTranscriptElapsedMs())
+    }
+
+    @discardableResult
+    func beginTranscriptSession(startedAt: Date = Date()) -> String {
+        let sessionID = transcriptSessionStore.startSession(startedAt: startedAt)
+        currentTranscriptSessionID = sessionID
+        return sessionID
+    }
+
+    func endCurrentTranscriptSession(finalText: String? = nil, elapsedMs: Int? = nil, endedAt: Date = Date()) {
+        guard let sessionID = currentTranscriptSessionID else { return }
+        defer { currentTranscriptSessionID = nil }
+
+        do {
+            try transcriptSessionStore.endSession(
+                sessionID: sessionID,
+                finalText: finalText,
+                elapsedMs: elapsedMs,
+                endedAt: endedAt
+            )
+        } catch {
+            logger.error("Failed to end transcript session: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func recordTranscriptEvent(_ event: TranscriptionEvent, elapsedMs: Int) {
+        guard let sessionID = currentTranscriptSessionID else { return }
+
+        do {
+            switch event {
+            case .provisional(let text):
+                try transcriptSessionStore.recordDisplayUpdate(
+                    sessionID: sessionID,
+                    confirmedText: confirmedText,
+                    provisionalText: text,
+                    elapsedMs: elapsedMs
+                )
+            case .confirmed(let text):
+                try transcriptSessionStore.recordDisplayUpdate(
+                    sessionID: sessionID,
+                    confirmedText: text,
+                    provisionalText: provisionalText,
+                    elapsedMs: elapsedMs
+                )
+            case .displayUpdate(let confirmed, let provisional):
+                try transcriptSessionStore.recordDisplayUpdate(
+                    sessionID: sessionID,
+                    confirmedText: confirmed,
+                    provisionalText: provisional,
+                    elapsedMs: elapsedMs
+                )
+            case .stats:
+                break
+            case .ended(let fullText):
+                endCurrentTranscriptSession(
+                    finalText: RepetitionCleaner.clean(fullText),
+                    elapsedMs: elapsedMs
+                )
+            }
+        } catch {
+            logger.error("Failed to record transcript event: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func currentTranscriptElapsedMs(now: Date = Date()) -> Int {
+        guard let recordingStartTime else { return 0 }
+        return Int(max(0, now.timeIntervalSince(recordingStartTime)) * 1_000)
     }
 
     // MARK: - Private Helpers

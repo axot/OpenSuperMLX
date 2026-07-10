@@ -28,6 +28,32 @@ $BINARY benchmark audio.wav --expected-text "reference text" --json
 
 All commands accept `--json` (structured output to stdout) and `--quiet` (suppress stderr progress).
 
+## Transcript MCP Bridge
+
+The transcript MCP bridge is opt-in and binds only to `127.0.0.1`.
+
+```bash
+$BINARY config set transcriptMCPEnabled true
+$BINARY config set transcriptMCPPort 17653
+```
+
+Restart the app after changing these settings. Then register the local MCP endpoint from an agent client:
+
+```bash
+codex mcp add opensupermlx-transcript --url http://127.0.0.1:17653/mcp
+```
+
+Available tools:
+
+| Tool | Purpose |
+|---|---|
+| `get_transcript_delta` | Pull transcript segments after `after_cursor` |
+| `search_transcript` | Search final transcript text with bounded context |
+| `get_transcript_window` | Fetch nearby transcript context around a cursor |
+| `list_transcript_sessions` | List recent live transcript sessions |
+
+Tool responses keep human summaries in `content[].text`. Machine-readable values such as `next_cursor`, `segments`, and `matches` are returned only in `structuredContent`.
+
 ## Running CLI Tests
 
 ```bash

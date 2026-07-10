@@ -25,6 +25,7 @@ enum ConfigKeyType: String, Encodable {
     case string = "String"
     case bool = "Bool"
     case double = "Double"
+    case integer = "Int"
     case optionalString = "String?"
 }
 
@@ -54,6 +55,8 @@ enum ConfigRegistry {
         ConfigKeyInfo("debugMode", .bool, "false"),
         ConfigKeyInfo("playSoundOnRecordStart", .bool, "false"),
         ConfigKeyInfo("speakerCaptureEnabled", .bool, "false"),
+        ConfigKeyInfo("transcriptMCPEnabled", .bool, "false"),
+        ConfigKeyInfo("transcriptMCPPort", .integer, "17653"),
         ConfigKeyInfo("llmCorrectionEnabled", .bool, "false"),
         ConfigKeyInfo("llmProvider", .string, "bedrock"),
         ConfigKeyInfo("useCustomCorrectionPrompt", .bool, "false"),
@@ -93,6 +96,11 @@ enum ConfigRegistry {
                 return String(AppPreferences.store.double(forKey: info.key))
             }
             return info.defaultDescription
+        case .integer:
+            if AppPreferences.store.object(forKey: info.key) != nil {
+                return String(AppPreferences.store.integer(forKey: info.key))
+            }
+            return info.defaultDescription
         case .optionalString:
             return AppPreferences.store.string(forKey: info.key) ?? "null"
         }
@@ -115,6 +123,12 @@ enum ConfigRegistry {
                 return .invalidConfigValue
             }
             AppPreferences.store.set(doubleVal, forKey: info.key)
+            return nil
+        case .integer:
+            guard let intVal = Int(rawValue) else {
+                return .invalidConfigValue
+            }
+            AppPreferences.store.set(intVal, forKey: info.key)
             return nil
         case .optionalString:
             if rawValue.lowercased() == "null" {
