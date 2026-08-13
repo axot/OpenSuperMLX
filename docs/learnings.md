@@ -8,9 +8,9 @@ Consult before introducing native libraries, modifying build pipelines, or makin
 
 | Build Script | Purpose | What to Add |
 |---|---|---|
-| `run.sh` | Local dev build | cargo build + cp + install_name_tool + codesign (ad-hoc `--sign -`) |
+| `run.sh` | Local dev build | cargo build + cp + install_name_tool + codesign using one selected identity for the Debug app and native artifacts |
 | `notarize_app.sh` | Local release signing & notarization | cargo build + cp + install_name_tool + codesign (real identity `${CODE_SIGN_IDENTITY}` + `--timestamp`) |
-| `.github/workflows/release.yml` | GitHub Actions tagged release | Separate step with cargo build + cp + install_name_tool + codesign |
+| `.github/workflows/release.yml` | GitHub Actions tagged release | Separate step with cargo build + cp + install_name_tool + Developer ID Application codesign with hardened runtime and timestamp for nested native artifacts, followed by app and DMG notarization |
 | `OpenSuperMLX.xcodeproj/project.pbxproj` | Xcode project | PBXFileReference + PBXBuildFile (Frameworks) + PBXBuildFile (CopyFiles with CodeSignOnCopy) |
 | `Bridge.h` | C FFI bridging header | `#include` for the library's C header |
 
@@ -24,9 +24,9 @@ Added `libtext_processing_rs.dylib` to `run.sh` and `release.yml` but initially 
 
 ### Key Difference Between Build Scripts
 
-- **`run.sh`**: Uses ad-hoc signing (`--sign -`) — fine for local development
+- **`run.sh`**: Prefers one installed Developer ID Application identity, then `OpenSuperMLX Dev`, then ad-hoc; local Debug signatures have no timestamp or notarization
 - **`notarize_app.sh`**: Uses real Developer ID (`${CODE_SIGN_IDENTITY}` + `--timestamp`) — required for notarization and distribution
-- **`release.yml`**: Uses ad-hoc signing on CI (GitHub Actions doesn't have signing identity) — the Xcode build step handles final signing
+- **`release.yml`**: Imports a Developer ID Application certificate on CI, signs nested native artifacts with hardened runtime and timestamp, then notarizes the app and DMG
 
 Forgetting the signing difference will cause notarization to fail even if the library is present.
 

@@ -64,15 +64,9 @@ Download the latest build from the [GitHub releases page](https://github.com/axo
 
 ### macOS Security Approval
 
-OpenSuperMLX is not signed with an Apple Developer ID, so macOS may block the first launch.
+Official GitHub releases are signed with an Apple Developer ID and notarized by Apple. Download the DMG, install the app normally, and open it.
 
-1. Open the app.
-2. Go to **System Settings -> Privacy & Security**.
-3. Find the OpenSuperMLX security message.
-4. Click **Open Anyway**.
-5. Confirm the dialog.
-
-You only need to do this once.
+On first launch, macOS will request microphone and accessibility permissions. Grant them so OpenSuperMLX can record audio and paste transcripts into other apps.
 
 ## Requirements
 
