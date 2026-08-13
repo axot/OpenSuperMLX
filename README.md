@@ -70,7 +70,7 @@ On first launch, macOS will request microphone and accessibility permissions. Gr
 
 ## Requirements
 
-- macOS 14.0+
+- macOS 15.0+
 - Apple Silicon / ARM64 Mac
 
 ## Models

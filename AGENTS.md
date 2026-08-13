@@ -1,7 +1,7 @@
 # AGENTS.md — OpenSuperMLX
 
 macOS menu-bar app for real-time audio transcription using MLX on Apple Silicon.
-Swift 5 / SwiftUI, Xcode project, targeting macOS 14.0+ (Sonoma), ARM64 only.
+Swift 5 / SwiftUI, Xcode project, targeting macOS 15.0+ (Sequoia), ARM64 only.
 
 ## Agent Behavioral Guidelines
 
