@@ -161,9 +161,6 @@ if [[ $BUILD_STATUS -eq 0 ]]; then
         exit 0
     fi
     echo "Starting the app..."
-    # Remove quarantine attribute if exists
-    xattr -d com.apple.quarantine ./build/Build/Products/Debug/OpenSuperMLX.app 2>/dev/null || true
-    # Run the app and show logs
     ./build/Build/Products/Debug/OpenSuperMLX.app/Contents/MacOS/OpenSuperMLX
 else
     echo "Build failed!"
