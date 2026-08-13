@@ -128,7 +128,7 @@ case "$call_number" in
         expected_endpoint="repos/${GITHUB_REPOSITORY}/actions/workflows/4242/runs"
         if [[ "$endpoint" != "$expected_endpoint" || "$method" != "GET" || "$method_set" -ne 1 || \
               "$event" != "push" || "$status" != "completed" || "$head_sha" != "$GITHUB_SHA" || \
-              "$per_page" != "100" || "$paginate" -ne 1 || "$slurp" -ne 1 ]]; then
+              "$per_page" != "100" || "$paginate" -ne 0 || "$slurp" -ne 0 ]]; then
             echo "invalid workflow run listing request: $endpoint" >&2
             exit 64
         fi

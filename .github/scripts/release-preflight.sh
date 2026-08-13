@@ -85,9 +85,7 @@ selected_run_id="$(
         -f "status=completed" \
         -f "head_sha=$release_sha" \
         -f "per_page=100" \
-        --paginate \
-        --slurp \
-        --jq "[.[] | .workflow_runs[]? | select(.name == \"Build Check\" and .head_sha == \"$release_sha\" and .event == \"push\" and .status == \"completed\" and .conclusion == \"success\")] | sort_by(.id) | reverse | .[0].id // empty" \
+        --jq "[.workflow_runs[]? | select(.name == \"Build Check\" and .head_sha == \"$release_sha\" and .event == \"push\" and .status == \"completed\" and .conclusion == \"success\")] | sort_by(.id) | reverse | .[0].id // empty" \
         2>/dev/null
 )" || fail "could not query Build Check runs"
 [[ "$selected_run_id" =~ ^[1-9][0-9]*$ ]] || fail "no successful Build Check found for release commit"
