@@ -1,3 +1,5 @@
+
+
 # OpenSuperMLX
 
 Native speech-to-text for macOS. Press a shortcut anywhere, speak, and OpenSuperMLX turns your voice into clean text on your Apple Silicon Mac.
@@ -107,6 +109,8 @@ brew install cmake libomp rust ruby
 gem install xcpretty
 ./run.sh build
 ```
+
+For Swift-only changes after the initial build, use `./run.sh` (without `build`) for a fast incremental build and run cycle.
 
 For CI build details, see [.github/workflows/build.yml](.github/workflows/build.yml).
 
