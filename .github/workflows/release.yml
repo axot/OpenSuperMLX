@@ -2,9 +2,12 @@ name: Release
 
 on:
   push:
+    branches:
+      - ci/developer-id-signing
     tags:
       - '[0-9]*.[0-9]*.[0-9]*'
       - '!*-*'
+  workflow_dispatch:
 
 jobs:
   release:
@@ -17,6 +20,79 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Set up Developer ID signing and notarization
+        env:
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+
+          missing_secret=0
+          for secret_name in \
+            DEVELOPER_ID_CERTIFICATE_BASE64 \
+            DEVELOPER_ID_CERTIFICATE_PASSWORD \
+            APPLE_TEAM_ID \
+            APP_STORE_CONNECT_API_KEY_BASE64 \
+            APP_STORE_CONNECT_API_KEY_ID \
+            APP_STORE_CONNECT_API_ISSUER_ID; do
+            if [[ -z "${!secret_name:-}" ]]; then
+              echo "Missing required secret: $secret_name" >&2
+              missing_secret=1
+            fi
+          done
+          if [[ "$missing_secret" -ne 0 ]]; then
+            exit 1
+          fi
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/app-store-connect-api-key.p8"
+          KEYCHAIN_PATH="$RUNNER_TEMP/release-signing.keychain-db"
+          APP_ZIP_PATH="$RUNNER_TEMP/OpenSuperMLX.zip"
+          APP_NOTARY_RESULT_PATH="$RUNNER_TEMP/app-notary-result.json"
+          DMG_NOTARY_RESULT_PATH="$RUNNER_TEMP/dmg-notary-result.json"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 -D > "$NOTARY_KEY_PATH"
+          chmod 600 "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | \
+            awk '/"Developer ID Application:/{print $2}')"
+          SIGNING_IDENTITY_COUNT="$(printf '%s\n' "$SIGNING_IDENTITIES" | \
+            awk 'NF { count++ } END { print count + 0 }')"
+          if [[ "$SIGNING_IDENTITY_COUNT" -ne 1 ]]; then
+            echo "Expected exactly one Developer ID Application identity; found $SIGNING_IDENTITY_COUNT" >&2
+            exit 1
+          fi
+          SIGNING_IDENTITY="$SIGNING_IDENTITIES"
+
+          {
+            printf 'CERTIFICATE_PATH=%s\n' "$CERTIFICATE_PATH"
+            printf 'NOTARY_KEY_PATH=%s\n' "$NOTARY_KEY_PATH"
+            printf 'KEYCHAIN_PATH=%s\n' "$KEYCHAIN_PATH"
+            printf 'APP_ZIP_PATH=%s\n' "$APP_ZIP_PATH"
+            printf 'APP_NOTARY_RESULT_PATH=%s\n' "$APP_NOTARY_RESULT_PATH"
+            printf 'DMG_NOTARY_RESULT_PATH=%s\n' "$DMG_NOTARY_RESULT_PATH"
+            printf 'APPLE_TEAM_ID=%s\n' "$APPLE_TEAM_ID"
+            printf 'SIGNING_IDENTITY=%s\n' "$SIGNING_IDENTITY"
+            printf 'APP_STORE_CONNECT_API_KEY_ID=%s\n' "$APP_STORE_CONNECT_API_KEY_ID"
+            printf 'APP_STORE_CONNECT_API_ISSUER_ID=%s\n' "$APP_STORE_CONNECT_API_ISSUER_ID"
+          } >> "$GITHUB_ENV"
 
       - name: Select latest Xcode (Swift 6.2+)
         run: |
@@ -44,13 +120,15 @@ jobs:
           cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.dylib \
             ./build/libautocorrect_swift.dylib
           install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
-          codesign --force --sign - ./build/libautocorrect_swift.dylib
+          codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --options runtime --timestamp ./build/libautocorrect_swift.dylib
 
       - name: Copy libomp
         run: |
           cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
           install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
-          codesign --force --sign - ./build/libomp.dylib
+          codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --options runtime --timestamp ./build/libomp.dylib
 
       - name: Build text-processing-rs
         run: |
@@ -60,7 +138,8 @@ jobs:
             ./build/libtext_processing_rs.dylib
           install_name_tool -id "@rpath/libtext_processing_rs.dylib" \
             ./build/libtext_processing_rs.dylib
-          codesign --force --sign - ./build/libtext_processing_rs.dylib
+          codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --options runtime --timestamp ./build/libtext_processing_rs.dylib
           echo "✅ text-processing-rs build successful"
 
       - name: Build WeTextProcessing ITN processor
@@ -71,7 +150,8 @@ jobs:
             < patches/WeTextProcessing/001-fix-openfst-bi-table-copy-ctor.patch 2>/dev/null || true
           cmake --build WeTextProcessing/build -j8
           cp WeTextProcessing/build/bin/processor_main ./build/processor_main
-          codesign --force --sign - ./build/processor_main
+          codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --options runtime --timestamp ./build/processor_main
           echo "✅ WeTextProcessing build successful"
 
       - name: Resolve SPM packages and apply patches
@@ -88,24 +168,73 @@ jobs:
             -UseModernBuildSystem=YES \
             -clonedSourcePackagesDirPath SourcePackages \
             -skipUnavailableActions \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            ENABLE_HARDENED_RUNTIME=YES \
+            CODE_SIGN_ENTITLEMENTS=OpenSuperMLX/OpenSuperMLX.entitlements \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH --timestamp" \
             build 2>&1 | xcpretty --simple --color
 
-      - name: Ad-hoc sign app bundle
+      - name: Verify signed app bundle
         run: |
+          set -euo pipefail
           APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
           if [[ ! -d "$APP_PATH" ]]; then
             echo "❌ App not found at $APP_PATH"
             exit 1
           fi
-          # --deep signs all nested code (dylibs, frameworks, bundles) inside-out.
-          # Appropriate for ad-hoc signing; avoids the find -type f bug with .framework dirs.
-          codesign --force --deep --sign - "$APP_PATH"
-          echo "✅ Ad-hoc signed app bundle"
-          codesign -vv "$APP_PATH"
 
-      - name: Create DMG
+          codesign --verify --strict --verbose=2 "$APP_PATH"
+          codesign --verify --strict --verbose=2 \
+            "$APP_PATH/Contents/Frameworks/libautocorrect_swift.dylib"
+          codesign --verify --strict --verbose=2 \
+            "$APP_PATH/Contents/Frameworks/libomp.dylib"
+          codesign --verify --strict --verbose=2 \
+            "$APP_PATH/Contents/Frameworks/libtext_processing_rs.dylib"
+          codesign --verify --strict --verbose=2 \
+            "$APP_PATH/Contents/MacOS/processor_main"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+      - name: Notarize and staple app bundle
         run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
+          ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP_PATH"
+
+          submit_exit=0
+          xcrun notarytool submit "$APP_ZIP_PATH" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
+            --wait --output-format json > "$APP_NOTARY_RESULT_PATH" || submit_exit=$?
+          notarization_status="$(plutil -extract status raw -o - "$APP_NOTARY_RESULT_PATH" 2>/dev/null || true)"
+          submission_id="$(plutil -extract id raw -o - "$APP_NOTARY_RESULT_PATH" 2>/dev/null || true)"
+          if [[ "$notarization_status" != "Accepted" ]]; then
+            echo "App notarization failed with status: ${notarization_status:-unknown}" >&2
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$NOTARY_KEY_PATH" \
+                --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+                --issuer "$APP_STORE_CONNECT_API_ISSUER_ID" || true
+            fi
+            exit 1
+          fi
+          if [[ "$submit_exit" -ne 0 ]]; then
+            echo "App notarization command failed after returning Accepted" >&2
+            exit "$submit_exit"
+          fi
+
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+
+      - name: Create, sign, notarize, and staple DMG
+        run: |
+          set -euo pipefail
           APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
           if [[ ! -d "$APP_PATH" ]]; then
             echo "❌ App not found at $APP_PATH"
@@ -116,9 +245,58 @@ jobs:
           ln -s /Applications dmg_staging/Applications
           hdiutil create -volname "OpenSuperMLX" -srcfolder dmg_staging \
             -ov -format UDZO OpenSuperMLX.dmg
+          codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --timestamp OpenSuperMLX.dmg
+
+          submit_exit=0
+          xcrun notarytool submit OpenSuperMLX.dmg \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
+            --wait --output-format json > "$DMG_NOTARY_RESULT_PATH" || submit_exit=$?
+          notarization_status="$(plutil -extract status raw -o - "$DMG_NOTARY_RESULT_PATH" 2>/dev/null || true)"
+          submission_id="$(plutil -extract id raw -o - "$DMG_NOTARY_RESULT_PATH" 2>/dev/null || true)"
+          if [[ "$notarization_status" != "Accepted" ]]; then
+            echo "DMG notarization failed with status: ${notarization_status:-unknown}" >&2
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$NOTARY_KEY_PATH" \
+                --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+                --issuer "$APP_STORE_CONNECT_API_ISSUER_ID" || true
+            fi
+            exit 1
+          fi
+          if [[ "$submit_exit" -ne 0 ]]; then
+            echo "DMG notarization command failed after returning Accepted" >&2
+            exit "$submit_exit"
+          fi
+
+          xcrun stapler staple OpenSuperMLX.dmg
+          xcrun stapler validate OpenSuperMLX.dmg
+          codesign --verify --strict --verbose=2 OpenSuperMLX.dmg
+          hdiutil verify OpenSuperMLX.dmg
+          spctl --assess --type open --context context:primary-signature \
+            --verbose=4 OpenSuperMLX.dmg
           shasum -a 256 OpenSuperMLX.dmg > OpenSuperMLX.dmg.sha256
 
+      - name: Clean up signing credentials
+        if: always()
+        run: |
+          CERTIFICATE_PATH="${CERTIFICATE_PATH:-$RUNNER_TEMP/developer-id-application.p12}"
+          NOTARY_KEY_PATH="${NOTARY_KEY_PATH:-$RUNNER_TEMP/app-store-connect-api-key.p8}"
+          KEYCHAIN_PATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/release-signing.keychain-db}"
+          APP_ZIP_PATH="${APP_ZIP_PATH:-$RUNNER_TEMP/OpenSuperMLX.zip}"
+          APP_NOTARY_RESULT_PATH="${APP_NOTARY_RESULT_PATH:-$RUNNER_TEMP/app-notary-result.json}"
+          DMG_NOTARY_RESULT_PATH="${DMG_NOTARY_RESULT_PATH:-$RUNNER_TEMP/dmg-notary-result.json}"
+
+          rm -f "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH" "$APP_ZIP_PATH" \
+            "$APP_NOTARY_RESULT_PATH" "$DMG_NOTARY_RESULT_PATH"
+          if [[ -e "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || rm -f "$KEYCHAIN_PATH"
+          fi
+
       - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -151,8 +329,7 @@ jobs:
 
           1. Download **OpenSuperMLX.dmg** below
           2. Open the DMG and drag OpenSuperMLX to Applications
-          3. On first launch: right-click the app → **Open** (required for unsigned apps)
-          4. Grant microphone and accessibility permissions when prompted
+          3. Grant microphone and accessibility permissions when prompted
 
           ### Requirements
 
@@ -168,7 +345,7 @@ jobs:
             OpenSuperMLX.dmg.sha256
 
       - name: Update Homebrew tap
-        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && env.HOMEBREW_TAP_TOKEN != '' }}
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
