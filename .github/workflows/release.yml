@@ -161,8 +161,10 @@ jobs:
 
       - name: Build app (Release)
         run: |
+          set -euo pipefail
+
           xcodebuild -scheme OpenSuperMLX -configuration Release -jobs 8 \
-            -derivedDataPath build -quiet \
+            -derivedDataPath build \
             -destination 'platform=macOS,arch=arm64' \
             -skipPackagePluginValidation -skipMacroValidation \
             -UseModernBuildSystem=YES \
