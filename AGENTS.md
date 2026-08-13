@@ -430,12 +430,12 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 
 ## Release
 
-Official releases use `.github/workflows/release.yml` after a reviewed pull
-request has merged and post-merge CI is green on `master`:
+Official releases use `.github/workflows/release.yml` after the release branch
+has merged and post-merge CI is green on `master`:
 
 1. Add the version bump as the final, separate commit on the feature branch.
-2. Land the branch through a reviewed pull request, then verify the post-merge
-   Build Check is green at the merge commit.
+2. Merge the branch into `master`, then verify the post-merge Build Check is
+   green at the merge commit.
 3. Create one annotated `X.Y.Z` tag targeting that exact green merge commit
    and push the tag once. Do not retag or delete and re-push it.
 4. GitHub Actions uses credentials stored in GitHub Actions secrets to sign and

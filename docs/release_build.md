@@ -1,8 +1,8 @@
 ## Official release
 
 1. Add the version bump as the final, separate commit on the feature branch.
-2. Merge the branch through a reviewed pull request, then wait for the
-   post-merge Build Check on `master` to pass at the merge commit.
+2. Merge the branch into `master`, then wait for the post-merge Build Check to
+   pass at the merge commit.
 3. Create one annotated `X.Y.Z` tag targeting that exact green merge commit
    and push the tag once. Never retag or delete and re-push it.
 4. `.github/workflows/release.yml` builds the Release app, signs nested native

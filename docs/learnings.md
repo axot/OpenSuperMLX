@@ -92,14 +92,13 @@ Official releases are driven by `.github/workflows/release.yml`, triggered by pu
 
 ### Steps
 
-1. Create the feature or fix commit(s) on a branch and open a reviewed pull
-   request. Do not push directly to `master`.
+1. Create the feature or fix commit(s) on a branch.
 2. Create a **separate** version bump commit:
    - Update `MARKETING_VERSION` to the new version in `project.pbxproj`.
    - Increment `CURRENT_PROJECT_VERSION` by 1 in `project.pbxproj`.
    - Commit message: `chore: bump version to X.Y.Z`.
-3. After the pull request merges, require the post-merge Build Check on
-   `master` to pass at the merge SHA before tagging.
+3. Merge the branch into `master`, then require the post-merge Build Check to
+   pass at the merge SHA before tagging.
 4. Create one annotated `X.Y.Z` tag targeting that exact green merge SHA and
    push the tag once.
 5. Wait for `.github/workflows/release.yml` to build and sign the app and DMG,
