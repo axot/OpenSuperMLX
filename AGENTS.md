@@ -102,6 +102,8 @@ xcodebuild -scheme OpenSuperMLX -configuration Debug -jobs 8 \
 
 The fast-build command above signs with a `OpenSuperMLX Dev` self-signed cert. Why: macOS TCC (Accessibility, Microphone, Screen Recording) caches permissions per code-signing identity. Without a stable cert, every rebuild produces a new ad-hoc signature — TCC treats it as a new app and re-prompts. With a stable cert, cdhash changes per build but the designated requirement (cert SHA-1) stays the same, so permissions persist forever.
 
+`./run.sh` automatically prefers a single installed `Developer ID Application` identity, then falls back to `OpenSuperMLX Dev`, then ad-hoc signing. It applies the selected identity to the Debug app and its native dylibs/binaries. Local Debug signatures disable timestamps and Hardened Runtime and are not notarized; they are not distribution artifacts. Use `DEV_SIGN_IDENTITY` to select an installed identity explicitly.
+
 **One-time setup:**
 1. Open **Keychain Access** → **Certificate Assistant** → **Create a Certificate…**
 2. Name: `OpenSuperMLX Dev`. Identity Type: `Self Signed Root`. Certificate Type: `Code Signing`. Defaults otherwise.
@@ -113,7 +115,7 @@ The fast-build command above signs with a `OpenSuperMLX Dev` self-signed cert. W
 
 If you don't install the cert, swap the signing args in the build command above for `CODE_SIGNING_ALLOWED=NO` (the historical default). Permissions will reset every rebuild.
 
-`./run.sh` auto-detects the cert: if `OpenSuperMLX Dev` is in your keychain it signs with it; otherwise it falls back to ad-hoc. Override with `DEV_SIGN_IDENTITY=other-cert ./run.sh`.
+If no Developer ID identity is installed, `./run.sh` uses `OpenSuperMLX Dev` when available and otherwise falls back to ad-hoc signing.
 
 ## Tests
 
