@@ -179,7 +179,7 @@ jobs:
             ENABLE_HARDENED_RUNTIME=YES \
             CODE_SIGN_ENTITLEMENTS=OpenSuperMLX/OpenSuperMLX.entitlements \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH --timestamp" \
-            build 2>&1 | xcpretty --simple --color
+            build
 
       - name: Verify signed app bundle
         run: |
