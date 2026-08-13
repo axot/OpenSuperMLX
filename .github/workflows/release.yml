@@ -95,22 +95,29 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Select latest Xcode (Swift 6.2+)
+        id: select_xcode
         run: |
           LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           echo "Selecting $LATEST_XCODE"
           sudo xcode-select -s "$LATEST_XCODE"
           swift --version
 
+          XCODE_VERSION="$(xcodebuild -version)"
+          printf '%s\n' "$XCODE_VERSION"
+          CACHE_VERSION="$(printf '%s' "$XCODE_VERSION" | shasum -a 256 | awk '{print $1}')"
+          printf 'cache-version=%s\n' "$CACHE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SwiftPM cache
+        id: spm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: SourcePackages
+          key: spm-sourcepackages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.select_xcode.outputs.cache-version }}-${{ hashFiles('OpenSuperMLX.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'patches/**/*.patch', 'Scripts/resolve_and_patch.sh') }}
+          restore-keys: |
+            spm-sourcepackages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.select_xcode.outputs.cache-version }}-
+
       - name: Install dependencies
         run: brew install cmake libomp rust
-
-      - name: Set up Ruby (for xcpretty)
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.4'
-
-      - name: Install xcpretty
-        run: gem install xcpretty
 
       - name: Build Rust autocorrect dylib
         run: |
@@ -159,6 +166,13 @@ jobs:
           chmod +x ./Scripts/resolve_and_patch.sh
           ./Scripts/resolve_and_patch.sh
 
+      - name: Save SwiftPM cache
+        if: steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: SourcePackages
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
+
       - name: Build app (Release)
         run: |
           set -euo pipefail
@@ -177,7 +191,6 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
             ENABLE_HARDENED_RUNTIME=YES \
-            CODE_SIGN_ENTITLEMENTS=OpenSuperMLX/OpenSuperMLX.entitlements \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH --timestamp" \
             build
 
