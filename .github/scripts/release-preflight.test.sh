@@ -118,18 +118,11 @@ case "$call_number" in
         workflow_state="active"
         [[ "$scenario" == "wrong-workflow-name" ]] && workflow_name="Other Workflow"
         [[ "$scenario" == "inactive-workflow" ]] && workflow_state="disabled_manually"
-        if [[ -z "$jq_filter" ]]; then
-            printf '{"id":4242,"name":"%s","state":"%s","path":".github/workflows/build.yml"}\n' \
-                "$workflow_name" "$workflow_state"
-        elif [[ "$jq_filter" == *"@tsv"* ]]; then
-            printf '4242\t%s\t%s\n' "$workflow_name" "$workflow_state"
-        elif [[ "$jq_filter" == *name* ]]; then
-            printf '%s\n' "$workflow_name"
-        elif [[ "$jq_filter" == *state* ]]; then
-            printf '%s\n' "$workflow_state"
-        else
-            echo 4242
+        if [[ "$jq_filter" != *"@tsv"* ]]; then
+            echo "workflow metadata request must use a TSV projection" >&2
+            exit 64
         fi
+        printf '4242\t%s\t%s\n' "$workflow_name" "$workflow_state"
         ;;
     2)
         expected_endpoint="repos/${GITHUB_REPOSITORY}/actions/workflows/4242/runs"
@@ -148,17 +141,16 @@ case "$call_number" in
         [[ "$scenario" == "wrong-event" ]] && run_event="pull_request"
         [[ "$scenario" == "wrong-sha" ]] && run_sha="0000000000000000000000000000000000000000"
         if [[ -z "$jq_filter" ]]; then
-            printf '[{"workflow_runs":[{"id":1001,"workflow_id":4242,"name":"%s","head_sha":"%s","event":"%s","status":"completed","conclusion":"%s"}]}]\n' \
-                "$run_name" "$run_sha" "$run_event" "$run_conclusion"
-        else
-            matches=1
-            [[ "$scenario" == "missing" ]] && matches=0
-            [[ "$jq_filter" == *"Build Check"* && "$run_name" != "Build Check" ]] && matches=0
-            [[ "$jq_filter" == *head_sha* && "$run_sha" != "$GITHUB_SHA" ]] && matches=0
-            [[ "$jq_filter" == *event*push* && "$run_event" != "push" ]] && matches=0
-            [[ "$jq_filter" == *conclusion*success* && "$run_conclusion" != "success" ]] && matches=0
-            [[ "$matches" -eq 1 ]] && echo 1001
+            echo "workflow run listing request must select a run ID" >&2
+            exit 64
         fi
+        matches=1
+        [[ "$scenario" == "missing" ]] && matches=0
+        [[ "$jq_filter" == *"Build Check"* && "$run_name" != "Build Check" ]] && matches=0
+        [[ "$jq_filter" == *head_sha* && "$run_sha" != "$GITHUB_SHA" ]] && matches=0
+        [[ "$jq_filter" == *event*push* && "$run_event" != "push" ]] && matches=0
+        [[ "$jq_filter" == *conclusion*success* && "$run_conclusion" != "success" ]] && matches=0
+        [[ "$matches" -eq 1 ]] && echo 1001
         ;;
     3)
         expected_endpoint="repos/${GITHUB_REPOSITORY}/actions/runs/1001"
@@ -173,15 +165,12 @@ case "$call_number" in
         [[ "$scenario" == "failed" || "$scenario" == "refetch-failed" ]] && run_conclusion="failure"
         [[ "$scenario" == "wrong-event" || "$scenario" == "refetch-wrong-event" ]] && run_event="pull_request"
         [[ "$scenario" == "wrong-sha" || "$scenario" == "refetch-wrong-sha" ]] && run_sha="0000000000000000000000000000000000000000"
-        if [[ -z "$jq_filter" ]]; then
-            printf '{"id":1001,"workflow_id":4242,"name":"Build Check","head_sha":"%s","event":"%s","status":"completed","conclusion":"%s"}\n' \
-                "$run_sha" "$run_event" "$run_conclusion"
-        elif [[ "$jq_filter" == *"@tsv"* ]]; then
-            printf '4242\tBuild Check\t%s\tcompleted\t%s\t%s\n' \
-                "$run_event" "$run_conclusion" "$run_sha"
-        else
-            echo 1001
+        if [[ "$jq_filter" != *"@tsv"* ]]; then
+            echo "selected run request must use a TSV projection" >&2
+            exit 64
         fi
+        printf '4242\tBuild Check\t%s\tcompleted\t%s\t%s\n' \
+            "$run_event" "$run_conclusion" "$run_sha"
         ;;
     *)
         echo "unexpected extra gh api call: $endpoint" >&2
