@@ -59,6 +59,16 @@ assert_test_step_uses_pipefail() {
     fi
 }
 
+assert_hosted_tests_skip_audio_graph() {
+    local step_block
+
+    step_block="$(extract_workflow_step "Run integration tests (hosted)")"
+    if [[ "$step_block" != *"-skip-testing:OpenSuperMLXTests/StreamingAudioServiceGraphTests"* ]]; then
+        echo "hosted CI must skip hardware-dependent StreamingAudioServiceGraphTests" >&2
+        return 1
+    fi
+}
+
 create_command_stubs() {
     cat > "$FIXTURE_BIN/security" <<'STUB'
 #!/bin/bash
@@ -222,6 +232,8 @@ run_case "unit test step preserves xcodebuild failure" \
     assert_test_step_uses_pipefail "Run unit tests (hostless)"
 run_case "integration test step preserves xcodebuild failure" \
     assert_test_step_uses_pipefail "Run integration tests (hosted)"
+run_case "hosted tests skip hardware-dependent audio graph tests" \
+    assert_hosted_tests_skip_audio_graph
 run_case "libomp codesign failure stops run.sh" \
     assert_codesign_failure_stops_build 3 "libomp.dylib"
 run_case "processor_main codesign failure stops run.sh" \

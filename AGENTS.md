@@ -368,7 +368,7 @@ GitHub Actions on `master` branch and PRs (`.github/workflows/build.yml`):
 
 1. `./run.sh build` — full build
 2. Unit tests (hostless): `-only-testing:OpenSuperMLXUnitTests`
-3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `KeyboardLayoutProviderTests`
+3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `StreamingAudioServiceGraphTests`, `KeyboardLayoutProviderTests`
 
 The default test plan (`OpenSuperMLX.xctestplan`) passes `--skip-model-load` and skips `BenchmarkTests` + `JapaneseGarblingRegressionTests`. Separate `OpenSuperMLXBenchmarks.xctestplan` exists for benchmark runs.
 
