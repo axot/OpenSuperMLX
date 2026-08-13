@@ -29,7 +29,7 @@ jobs:
           printf 'cache-version=%s\n' "$CACHE_VERSION" >> "$GITHUB_OUTPUT"
       - name: Restore SwiftPM cache
         id: spm-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: SourcePackages
           key: spm-sourcepackages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.select_xcode.outputs.cache-version }}-${{ hashFiles('OpenSuperMLX.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'patches/**/*.patch', 'Scripts/resolve_and_patch.sh') }}
@@ -51,7 +51,7 @@ jobs:
           ./Scripts/resolve_and_patch.sh
       - name: Save SwiftPM cache
         if: steps.spm-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: SourcePackages
           key: ${{ steps.spm-cache.outputs.cache-primary-key }}
