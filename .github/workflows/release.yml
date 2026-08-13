@@ -364,7 +364,7 @@ jobs:
 
           ### Requirements
 
-          - macOS 14.0 or later
+          - macOS 15.0 or later
           - Apple Silicon (M1/M2/M3/M4) Mac
           EOF
           )
@@ -397,7 +397,7 @@ jobs:
             desc "Real-time audio transcription for macOS powered by MLX on Apple Silicon"
             homepage "https://github.com/axot/OpenSuperMLX"
 
-            depends_on macos: ">= :sonoma"
+            depends_on macos: ">= :sequoia"
             depends_on arch: :arm64
 
             app "OpenSuperMLX.app"

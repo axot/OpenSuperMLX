@@ -386,16 +386,16 @@ test_build_check_result() {
 }
 
 test_release_notes_macos_version() {
-    grep -F -- '- macOS 14.0 or later' "$RELEASE_WORKFLOW" >/dev/null
+    grep -F -- '- macOS 15.0 or later' "$RELEASE_WORKFLOW" >/dev/null
 }
 
-test_homebrew_sonoma_requirement() {
-    grep -F -- 'depends_on macos: ">= :sonoma"' "$RELEASE_WORKFLOW" >/dev/null
+test_homebrew_sequoia_requirement() {
+    grep -F -- 'depends_on macos: ">= :sequoia"' "$RELEASE_WORKFLOW" >/dev/null
 }
 
 test_no_stale_generated_release_metadata() {
-    if grep -E 'macOS 15\.1|depends_on macos:.*:sequoia' "$RELEASE_WORKFLOW" >/dev/null; then
-        echo "release.yml still generates macOS 15.1 or :sequoia metadata" >&2
+    if grep -E 'macOS 14(\.0)?|depends_on macos:.*:sonoma' "$RELEASE_WORKFLOW" >/dev/null; then
+        echo "release.yml still generates macOS 14 or :sonoma metadata" >&2
         return 1
     fi
 }
@@ -431,9 +431,9 @@ run_case "reject selected run that changed to failed" test_build_check_result re
 run_case "reject selected run with changed event" test_build_check_result refetch-wrong-event
 run_case "reject selected run with changed SHA" test_build_check_result refetch-wrong-sha
 run_case "reject gh API failure" test_build_check_result api-failure
-run_case "release notes require macOS 14.0 or later" test_release_notes_macos_version
-run_case "generated cask requires Sonoma" test_homebrew_sonoma_requirement
-run_case "generated release metadata has no stale Sequoia references" test_no_stale_generated_release_metadata
+run_case "release notes require macOS 15.0 or later" test_release_notes_macos_version
+run_case "generated cask requires Sequoia" test_homebrew_sequoia_requirement
+run_case "generated release metadata has no stale Sonoma references" test_no_stale_generated_release_metadata
 run_case "release workflow disallows workflow_dispatch" test_no_workflow_dispatch_trigger
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
