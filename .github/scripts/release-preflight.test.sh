@@ -284,7 +284,7 @@ run_case() {
     fi
 }
 
-test_workflow_dispatch_short_circuits() {
+test_workflow_dispatch_rejected() {
     local fixture="$TEMP_ROOT/workflow-dispatch"
 
     mkdir -p "$fixture/bin" "$fixture/empty"
@@ -301,19 +301,32 @@ STUB
     chmod +x "$fixture/bin/git" "$fixture/bin/gh"
     (
         cd "$fixture/empty"
-        PATH="$fixture/bin:/usr/bin:/bin" \
-        GITHUB_EVENT_NAME="workflow_dispatch" \
-        GITHUB_REF="refs/heads/master" \
-        GITHUB_REF_NAME="master" \
-        GITHUB_SHA="unavailable" \
-        GITHUB_REPOSITORY="test-owner/test-repo" \
-            /bin/bash "$IMPLEMENTATION"
+        export PATH="$fixture/bin:/usr/bin:/bin"
+        if GITHUB_EVENT_NAME="workflow_dispatch" \
+           GITHUB_REF="refs/heads/master" \
+           GITHUB_REF_NAME="master" \
+           GITHUB_SHA="unavailable" \
+           GITHUB_REPOSITORY="test-owner/test-repo" \
+               /bin/bash "$IMPLEMENTATION"
+        then
+            echo "preflight unexpectedly accepted workflow_dispatch" >&2
+            return 1
+        fi
     )
 }
 
 test_valid_release() {
     create_fixture
     expect_accept push 0.0.17 "$FIXTURE_SHA" success
+}
+
+test_lightweight_tag() {
+    create_fixture
+    git -C "$FIXTURE_REPO" tag -d 0.0.17 >/dev/null
+    git -C "$FIXTURE_REPO" tag 0.0.17
+    git -C "$FIXTURE_REPO" push --quiet origin :refs/tags/0.0.17
+    git -C "$FIXTURE_REPO" push --quiet origin refs/tags/0.0.17
+    expect_reject
 }
 
 test_malformed_tag() {
@@ -387,8 +400,16 @@ test_no_stale_generated_release_metadata() {
     fi
 }
 
-run_case "workflow_dispatch skips git and gh" test_workflow_dispatch_short_circuits
+test_no_workflow_dispatch_trigger() {
+    if grep -E '^[[:space:]]*workflow_dispatch:' "$RELEASE_WORKFLOW" >/dev/null; then
+        echo "release.yml must not permit workflow_dispatch releases" >&2
+        return 1
+    fi
+}
+
+run_case "reject workflow_dispatch release" test_workflow_dispatch_rejected
 run_case "valid 0.0.17 release provenance" test_valid_release
+run_case "reject lightweight release tag" test_lightweight_tag
 run_case "reject tag v0.0.17" test_malformed_tag v0.0.17
 run_case "reject tag 0.0" test_malformed_tag 0.0
 run_case "reject tag 0.0.17-rc1" test_malformed_tag 0.0.17-rc1
@@ -413,6 +434,7 @@ run_case "reject gh API failure" test_build_check_result api-failure
 run_case "release notes require macOS 14.0 or later" test_release_notes_macos_version
 run_case "generated cask requires Sonoma" test_homebrew_sonoma_requirement
 run_case "generated release metadata has no stale Sequoia references" test_no_stale_generated_release_metadata
+run_case "release workflow disallows workflow_dispatch" test_no_workflow_dispatch_trigger
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [[ "$FAIL_COUNT" -eq 0 ]]

@@ -8,10 +8,6 @@ fail() {
 }
 
 event_name="${GITHUB_EVENT_NAME:-}"
-if [[ "$event_name" == "workflow_dispatch" ]]; then
-    exit 0
-fi
-
 [[ "$event_name" == "push" ]] || fail "event must be push"
 
 ref_name="${GITHUB_REF_NAME:-}"
@@ -53,6 +49,10 @@ version_count="$(printf '%s\n' "$project_versions" | awk 'NF { count++ } END { p
 if ! git fetch --no-tags origin master:refs/remotes/origin/master >/dev/null 2>&1; then
     fail "could not fetch origin master"
 fi
+
+tag_object_type="$(git cat-file -t "refs/tags/${ref_name}" 2>/dev/null)" \
+    || fail "release tag does not exist"
+[[ "$tag_object_type" == "tag" ]] || fail "release tag must be an annotated tag"
 
 release_sha="$(git rev-parse --verify "${release_input_sha}^{commit}" 2>/dev/null)" \
     || fail "GITHUB_SHA is not a commit"
