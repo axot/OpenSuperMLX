@@ -9,23 +9,21 @@ Consult before introducing native libraries, modifying build pipelines, or makin
 | Build Script | Purpose | What to Add |
 |---|---|---|
 | `run.sh` | Local dev build | cargo build + cp + install_name_tool + codesign using one selected identity for the Debug app and native artifacts |
-| `notarize_app.sh` | Local release signing & notarization | cargo build + cp + install_name_tool + codesign (real identity `${CODE_SIGN_IDENTITY}` + `--timestamp`) |
 | `.github/workflows/release.yml` | GitHub Actions tagged release | Separate step with cargo build + cp + install_name_tool + Developer ID Application codesign with hardened runtime and timestamp for nested native artifacts, followed by app and DMG notarization |
 | `OpenSuperMLX.xcodeproj/project.pbxproj` | Xcode project | PBXFileReference + PBXBuildFile (Frameworks) + PBXBuildFile (CopyFiles with CodeSignOnCopy) |
 | `Bridge.h` | C FFI bridging header | `#include` for the library's C header |
 
 ### Incident: WeTextProcessing (2025)
 
-Added `processor_main` binary and FST files to `run.sh` and `release.yml` but forgot to add the copy step to `notarize_app.sh`. Result: the signed release build was missing `processor_main`, causing Chinese ITN to silently fail at runtime.
+Historically, `processor_main` and its FST files were added to `run.sh` and `release.yml` but omitted from `notarize_app.sh`. The legacy helper remains incomplete, so it must not be used to qualify release artifacts.
 
 ### Incident: text-processing-rs (2025)
 
-Added `libtext_processing_rs.dylib` to `run.sh` and `release.yml` but initially missed `notarize_app.sh`. Caught during pre-release review before any release was shipped.
+Historically, `libtext_processing_rs.dylib` was added to `run.sh` and `release.yml` but omitted from `notarize_app.sh`. This was caught before release and reinforces that the legacy helper is not a supported release path.
 
 ### Key Difference Between Build Scripts
 
 - **`run.sh`**: Prefers one installed Developer ID Application identity, then `OpenSuperMLX Dev`, then ad-hoc; local Debug signatures have no timestamp or notarization
-- **`notarize_app.sh`**: Uses real Developer ID (`${CODE_SIGN_IDENTITY}` + `--timestamp`) — required for notarization and distribution
 - **`release.yml`**: Imports a Developer ID Application certificate on CI, signs nested native artifacts with hardened runtime and timestamp, then notarizes the app and DMG
 
 Forgetting the signing difference will cause notarization to fail even if the library is present.
@@ -90,7 +88,7 @@ antirez's C implementation ([antirez/qwen-asr](https://github.com/antirez/qwen-a
 
 ## Release Flow (2026-04)
 
-Official releases are driven by `.github/workflows/release.yml`, triggered by pushing a tag matching `X.Y.Z`. There is no local script for official publication — CI handles build, DMG creation, GitHub Release, and Homebrew. `notarize_app.sh` remains a local/manual recovery tool.
+Official releases are driven by `.github/workflows/release.yml`, triggered by pushing a tag matching `X.Y.Z`. There is no local script for official publication — CI handles build, DMG creation, GitHub Release, and Homebrew. `notarize_app.sh` remains only as a legacy, release-incomplete helper.
 
 ### Steps
 

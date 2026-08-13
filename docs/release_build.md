@@ -14,10 +14,12 @@ the workflow succeeds, verify the GitHub assets, checksums, signatures,
 notarization, and Homebrew installation. Delete the branch and worktree only
 after those checks pass.
 
-## Local manual notarization
+## Legacy local notarization helper
 
-This is for local testing or manual recovery only. It is not the official
-release path.
+`notarize_app.sh` assumes native artifacts are already built. It is not
+release-complete, is not a supported recovery path, and must not be used to
+qualify a release artifact. GitHub Actions is the only supported release
+signing and notarization path.
 
 ```shell
 ./notarize_app.sh "$CODE_SIGN_IDENTITY"
