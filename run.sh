@@ -114,8 +114,7 @@ echo "Copying libomp.dylib..."
 rm -f ./build/libomp.dylib
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
 install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
-codesign "${CODESIGN_ARGS[@]}" ./build/libomp.dylib
-if [[ $? -ne 0 ]]; then
+if ! codesign "${CODESIGN_ARGS[@]}" ./build/libomp.dylib; then
     echo "Error: libomp.dylib codesign failed." >&2
     exit 1
 fi
@@ -140,8 +139,7 @@ else
 fi
 
 if [ -f ./build/processor_main ]; then
-    codesign "${CODESIGN_ARGS[@]}" ./build/processor_main
-    if [[ $? -ne 0 ]]; then
+    if ! codesign "${CODESIGN_ARGS[@]}" ./build/processor_main; then
         echo "Error: processor_main codesign failed." >&2
         exit 1
     fi
