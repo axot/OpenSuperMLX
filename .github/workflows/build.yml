@@ -18,6 +18,8 @@ jobs:
           submodules: recursive
       - name: Test release preflight
         run: bash .github/scripts/release-preflight.test.sh
+      - name: Test build safety
+        run: bash .github/scripts/build-safety.test.sh
       - name: Select latest Xcode (Swift 6.2+)
         id: select_xcode
         run: |
@@ -61,6 +63,7 @@ jobs:
         run: ./run.sh build 
       - name: Run unit tests (hostless)
         run: |
+          set -o pipefail
           xcodebuild test -scheme OpenSuperMLX \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath build \
@@ -69,6 +72,7 @@ jobs:
             -only-testing:OpenSuperMLXUnitTests 2>&1 | xcpretty
       - name: Run integration tests (hosted)
         run: |
+          set -o pipefail
           xcodebuild test -scheme OpenSuperMLX \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath build \
