@@ -90,18 +90,24 @@ antirez's C implementation ([antirez/qwen-asr](https://github.com/antirez/qwen-a
 
 ## Release Flow (2026-04)
 
-Releases are driven by `.github/workflows/release.yml`, triggered by pushing a tag matching `X.Y.Z`. There is no local release script — CI handles build, DMG creation, and GitHub Release.
+Official releases are driven by `.github/workflows/release.yml`, triggered by pushing a tag matching `X.Y.Z`. There is no local script for official publication — CI handles build, DMG creation, GitHub Release, and Homebrew. `notarize_app.sh` remains a local/manual recovery tool.
 
 ### Steps
 
-1. Create the feature/fix commit(s) and push to `master`.
+1. Create the feature or fix commit(s) on a branch and open a reviewed pull
+   request. Do not push directly to `master`.
 2. Create a **separate** version bump commit:
    - Update `MARKETING_VERSION` to the new version in `project.pbxproj`.
    - Increment `CURRENT_PROJECT_VERSION` by 1 in `project.pbxproj`.
    - Commit message: `chore: bump version to X.Y.Z`.
-3. Push the version bump commit.
-4. Create and push the tag: `git tag -a X.Y.Z -m "Release X.Y.Z" && git push origin X.Y.Z`.
-5. Wait for the Release workflow to complete on GitHub Actions.
+3. After the pull request merges, require the post-merge Build Check on
+   `master` to pass at the merge SHA before tagging.
+4. Create one annotated `X.Y.Z` tag targeting that exact green merge SHA and
+   push the tag once.
+5. Wait for `.github/workflows/release.yml` to build and sign the app and DMG,
+   notarize and staple them, publish the GitHub Release, and update Homebrew.
+6. Verify the GitHub assets, checksums, signatures, notarization, and Homebrew
+   installation. Delete the branch and worktree last, after release proof.
 
 ### Rules
 

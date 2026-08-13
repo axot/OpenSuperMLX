@@ -424,15 +424,28 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 | [`docs/logging.md`](docs/logging.md) | **Adding or reading Logger statements.** Covers `os.Logger` setup, privacy annotations, and `log stream` / `log show` commands. |
 | [`docs/learnings.md`](docs/learnings.md) | **Before any release, or when touching native libraries.** Past mistakes and the New Native Library Checklist. |
 | [`docs/memory.md`](docs/memory.md) | **Profiling memory or touching streaming pipeline.** MLX GPU memory budget, encoder dtype, streaming memory invariants, and red flags for memory regressions. |
-| [`docs/release_build.md`](docs/release_build.md) | **Building a release.** Notarization command (`notarize_app.sh`). |
+| [`docs/release_build.md`](docs/release_build.md) | **Making a release.** Official tag-driven CI flow and local manual notarization. |
 | [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
 | [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality issues.** Pipeline trace, WAV analysis, known issue patterns (clipping, pops, gaps). |
 
 ## Release
 
+Official releases use `.github/workflows/release.yml` after a reviewed pull
+request has merged and post-merge CI is green on `master`:
+
+1. Add the version bump as the final, separate commit on the feature branch.
+2. Land the branch through a reviewed pull request, then verify the post-merge
+   Build Check is green at the merge commit.
+3. Create one annotated `X.Y.Z` tag targeting that exact green merge commit
+   and push the tag once. Do not retag or delete and re-push it.
+4. GitHub Actions uses credentials stored in GitHub Actions secrets to sign and
+   notarize the app and DMG, publish the GitHub Release, and update Homebrew.
+5. Verify the release assets, checksums, signatures, notarization, and
+   Homebrew installation before deleting the branch or worktree.
+
+Local manual notarization is not the official release path:
+
 ```bash
-./make_release.sh <version> "<code_sign_identity>" [github_token]
-# Notarize only:
 ./notarize_app.sh "<code_sign_identity>"
 ```
 
