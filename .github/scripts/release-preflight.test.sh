@@ -390,7 +390,7 @@ test_release_notes_macos_version() {
 }
 
 test_homebrew_sequoia_requirement() {
-    grep -F -- 'depends_on macos: ">= :sequoia"' "$RELEASE_WORKFLOW" >/dev/null
+    grep -F -- 'depends_on macos: :sequoia' "$RELEASE_WORKFLOW" >/dev/null
 }
 
 test_no_stale_generated_release_metadata() {
