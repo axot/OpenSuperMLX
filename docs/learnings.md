@@ -104,7 +104,7 @@ Official releases are driven by `.github/workflows/release.yml`, triggered by pu
 5. Wait for `.github/workflows/release.yml` to build and sign the app and DMG,
    notarize and staple them, publish the GitHub Release, and update Homebrew.
 6. Verify the GitHub assets, checksums, signatures, notarization, and Homebrew
-   installation. Delete the branch and worktree last, after release proof.
+   installation. Delete the branch last, after release proof.
 
 ### Rules
 

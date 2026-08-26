@@ -407,24 +407,6 @@ All plans MUST follow **Test-Driven Development (TDD)** — plans that list impl
 3. **Implement minimally** — Write the minimum production code needed to make the failing tests pass (green phase).
 4. **Refactor** — Clean up implementation while keeping tests green.
 
-### Work Tree Requirement (MANDATORY)
-
-All plan execution MUST happen in a dedicated `git worktree` — never directly in the main working tree.
-
-```bash
-# Create worktree + feature branch for the plan
-git worktree add ../OpenSuperMLX-<plan-name> -b <branch-name>
-
-# All implementation happens inside the worktree
-# After PR merge, clean up
-git worktree remove ../OpenSuperMLX-<plan-name>
-```
-
-- Worktree path: sibling of project root (`../OpenSuperMLX-<plan-name>`)
-- One feature branch per plan, created at worktree add time
-- Main working tree stays clean for reviews, hotfixes, and ad-hoc work
-- Remove worktree after the plan's PR merges
-
 ## Reference Docs
 
 | File | When to consult |
@@ -450,7 +432,7 @@ has merged and post-merge CI is green on `master`:
 4. GitHub Actions uses credentials stored in GitHub Actions secrets to sign and
    notarize the app and DMG, publish the GitHub Release, and update Homebrew.
 5. Verify the release assets, checksums, signatures, notarization, and
-   Homebrew installation before deleting the branch or worktree.
+   Homebrew installation before deleting the branch.
 
 `notarize_app.sh` is a legacy local helper. It assumes native artifacts are
 already built, is not release-complete, and must not be used to qualify a

@@ -11,8 +11,8 @@
 
 Signing and notarization credentials are held in GitHub Actions secrets. After
 the workflow succeeds, verify the GitHub assets, checksums, signatures,
-notarization, and Homebrew installation. Delete the branch and worktree only
-after those checks pass.
+notarization, and Homebrew installation. Delete the branch only after those
+checks pass.
 
 ## Legacy local notarization helper
 
