@@ -12,6 +12,7 @@ class TranscriptionQueue: ObservableObject {
 
     private let transcriptionService: TranscriptionService
     private let recordingStore: RecordingStore
+    private let onMissingAudio: (String) -> Void
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "TranscriptionQueue")
     private var processingTask: Task<Void, Never>?
     private var currentTranscriptionTask: Task<Void, Never>?
@@ -21,7 +22,24 @@ class TranscriptionQueue: ObservableObject {
     private init() {
         self.transcriptionService = TranscriptionService.shared
         self.recordingStore = RecordingStore.shared
+        self.onMissingAudio = { message in
+            ErrorToastManager.shared.show(message)
+        }
         setupProgressObserver()
+    }
+
+    init(
+        transcriptionService: TranscriptionService,
+        recordingStore: RecordingStore,
+        onMissingAudio: @escaping (String) -> Void = { _ in },
+        observesProgress: Bool = true
+    ) {
+        self.transcriptionService = transcriptionService
+        self.recordingStore = recordingStore
+        self.onMissingAudio = onMissingAudio
+        if observesProgress {
+            setupProgressObserver()
+        }
     }
     
     private func setupProgressObserver() {
@@ -77,25 +95,42 @@ class TranscriptionQueue: ObservableObject {
     private func cleanupMissingFiles() async {
         let pendingRecordings = recordingStore.getPendingRecordings()
 
-        let recordingsToDelete = await Task.detached(priority: .utility) {
+        let missingRecordings = await Task.detached(priority: .utility) {
             var toDelete: [Recording] = []
+            var toFail: [Recording] = []
+            var sourceUpdates: [(id: UUID, path: String)] = []
             for recording in pendingRecordings {
-                guard let sourceURLString = recording.sourceFileURL,
-                      !sourceURLString.isEmpty else {
-                    toDelete.append(recording)
+                if let sourceURL = Self.resolveRegenerationSource(
+                    for: recording,
+                    fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                ) {
+                    if sourceURL.path != recording.sourceFileURL {
+                        sourceUpdates.append((recording.id, sourceURL.path))
+                    }
                     continue
                 }
 
-                let sourceURL = URL(fileURLWithPath: sourceURLString)
-                if !FileManager.default.fileExists(atPath: sourceURL.path) {
+                if Self.shouldDeleteMissingPendingRecording(recording) {
                     toDelete.append(recording)
+                } else {
+                    toFail.append(recording)
                 }
             }
-            return toDelete
+            return (toDelete: toDelete, toFail: toFail, sourceUpdates: sourceUpdates)
         }.value
         
-        for recording in recordingsToDelete {
+        for recording in missingRecordings.toDelete {
             recordingStore.deleteRecording(recording)
+        }
+        for recording in missingRecordings.toFail {
+            await markFailure(recording, message: "Source file not found")
+        }
+        for update in missingRecordings.sourceUpdates {
+            do {
+                try await recordingStore.updateSourceFileURL(update.id, sourceURL: update.path)
+            } catch {
+                logger.error("Failed to restore stored audio source: \(error, privacy: .public)")
+            }
         }
     }
 
@@ -149,23 +184,20 @@ class TranscriptionQueue: ObservableObject {
 
     func requeueRecording(_ recording: Recording) async {
         let sourceURL: URL? = await Task.detached(priority: .userInitiated) {
-            if let existingSource = recording.sourceFileURL,
-               !existingSource.isEmpty,
-               FileManager.default.fileExists(atPath: existingSource) {
-                return URL(fileURLWithPath: existingSource)
-            } else if FileManager.default.fileExists(atPath: recording.url.path) {
-                return recording.url
-            }
-            return nil
+            Self.resolveRegenerationSource(
+                for: recording,
+                fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            )
         }.value
         
         guard let sourceURL = sourceURL else {
-            await recordingStore.updateRecordingProgressOnlySync(
+            await recordingStore.updateRecordingStatusOnly(
                 recording.id,
-                transcription: "Cannot regenerate: audio file not found",
                 progress: 0.0,
-                status: .failed
+                status: .failed,
+                isRegeneration: false
             )
+            onMissingAudio("Audio file not found. Original transcript was kept.")
             return
         }
 
@@ -185,6 +217,20 @@ class TranscriptionQueue: ObservableObject {
         startProcessingQueue()
     }
 
+    nonisolated static func resolveRegenerationSource(
+        for recording: Recording,
+        fileExists: (URL) -> Bool
+    ) -> URL? {
+        if let existingSource = recording.sourceFileURL,
+           !existingSource.isEmpty {
+            let sourceURL = URL(fileURLWithPath: existingSource)
+            if fileExists(sourceURL) {
+                return sourceURL
+            }
+        }
+        return fileExists(recording.url) ? recording.url : nil
+    }
+
     private func processQueue() async {
         while let recording = recordingStore.getNextPendingRecording() {
             currentRecordingId = recording.id
@@ -201,12 +247,7 @@ class TranscriptionQueue: ObservableObject {
 
         guard let sourceURLString = recording.sourceFileURL,
               !sourceURLString.isEmpty else {
-            await recordingStore.updateRecordingProgressOnlySync(
-                recording.id,
-                transcription: "Source file not found",
-                progress: 0.0,
-                status: .failed
-            )
+            await markFailure(recording, message: "Source file not found")
             return
         }
 
@@ -217,18 +258,11 @@ class TranscriptionQueue: ObservableObject {
         }.value
         
         guard sourceExists else {
-            await recordingStore.updateRecordingProgressOnlySync(
-                recording.id,
-                transcription: "Source file not found",
-                progress: 0.0,
-                status: .failed
-            )
+            await markFailure(recording, message: "Source file not found")
             return
         }
 
-        let isRegeneration = !recording.transcription.isEmpty && 
-            recording.transcription != "In queue..." && 
-            recording.transcription != "Starting transcription..."
+        let isRegeneration = Self.hasOriginalTranscription(recording)
 
         if isRegeneration {
             await recordingStore.updateRecordingStatusOnly(
@@ -287,12 +321,9 @@ class TranscriptionQueue: ObservableObject {
 
             } catch {
                 if !isRecordingCancelled(recording.id) && !Task.isCancelled {
-                    await recordingStore.updateRecordingProgressOnlySync(
-                        recording.id,
-                        transcription: "Failed to transcribe: \(error.localizedDescription)",
-                        progress: 0.0,
-                        status: .failed,
-                        isRegeneration: false
+                    await markFailure(
+                        recording,
+                        message: "Failed to transcribe: \(error.localizedDescription)"
                     )
                 }
             }
@@ -301,6 +332,37 @@ class TranscriptionQueue: ObservableObject {
         await currentTranscriptionTask?.value
         currentTranscriptionTask = nil
         clearCancellation(recording.id)
+    }
+
+    private nonisolated static func hasOriginalTranscription(_ recording: Recording) -> Bool {
+        !recording.transcription.isEmpty
+            && recording.transcription != "In queue..."
+            && recording.transcription != "Starting transcription..."
+    }
+
+    nonisolated static func shouldDeleteMissingPendingRecording(
+        _ recording: Recording
+    ) -> Bool {
+        !hasOriginalTranscription(recording)
+    }
+
+    private func markFailure(_ recording: Recording, message: String) async {
+        if Self.hasOriginalTranscription(recording) {
+            await recordingStore.updateRecordingStatusOnly(
+                recording.id,
+                progress: 0.0,
+                status: .failed,
+                isRegeneration: false
+            )
+        } else {
+            await recordingStore.updateRecordingProgressOnlySync(
+                recording.id,
+                transcription: message,
+                progress: 0.0,
+                status: .failed,
+                isRegeneration: false
+            )
+        }
     }
 
 }
