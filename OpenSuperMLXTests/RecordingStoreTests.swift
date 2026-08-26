@@ -64,6 +64,50 @@ final class RecordingStoreTests: XCTestCase {
         XCTAssertEqual(fetched.first?.status, .completed)
     }
 
+    func testFileNameExistsMatchesStoredRecording() async throws {
+        try await sut.addRecordingSync(makeRecording(fileName: "known.m4a"))
+
+        let knownFileExists = try await sut.fileNameExists("known.m4a")
+        let missingFileExists = try await sut.fileNameExists("missing.wav")
+
+        XCTAssertTrue(knownFileExists)
+        XCTAssertFalse(missingFileExists)
+    }
+
+    func testPendingRecordingsDirectoryIsProcessScoped() {
+        XCTAssertEqual(
+            Recording.pendingRecordingsDirectory.deletingLastPathComponent(),
+            Recording.pendingRecordingsRootDirectory
+        )
+        XCTAssertEqual(
+            Recording.pendingRecordingsDirectory.lastPathComponent,
+            String(ProcessInfo.processInfo.processIdentifier)
+        )
+    }
+
+    func testCleanupPendingDirectoriesPreservesLiveProcesses() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PendingRecordingCleanupTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["111", "222", "333", "unknown"] {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(name),
+                withIntermediateDirectories: true
+            )
+        }
+
+        Recording.cleanupStalePendingDirectories(
+            at: root,
+            currentProcessID: 111,
+            isProcessRunning: { $0 == 333 }
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("111").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("222").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("333").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("unknown").path))
+    }
+
     func testFetchRecordingsCount_ReflectsTotalNotPageSize() async throws {
         let initial = try await sut.fetchRecordingsCount()
         XCTAssertEqual(initial, 0)

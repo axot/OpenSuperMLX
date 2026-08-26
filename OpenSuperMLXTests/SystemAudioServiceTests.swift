@@ -85,10 +85,10 @@ final class SystemAudioServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testStopCaptureReturnsNilWhenNotCapturing() async throws {
+    func testStopAndDrainReturnsEmptyWhenNotCapturing() async throws {
         let service = SystemAudioService.shared
-        let url = await service.stopCapture()
-        XCTAssertNil(url)
+        let samples = await service.stopAndDrain()
+        XCTAssertTrue(samples.isEmpty)
     }
 
     @MainActor

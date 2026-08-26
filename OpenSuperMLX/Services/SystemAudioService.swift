@@ -106,8 +106,8 @@ final class SystemAudioService: NSObject, ObservableObject {
         }
     }
 
-    func stopCapture() async -> URL? {
-        guard isCapturing, let stream else { return nil }
+    func stopAndDrain() async -> [Float] {
+        guard isCapturing, let stream else { return [] }
 
         do {
             try await stream.stopCapture()
@@ -120,57 +120,11 @@ final class SystemAudioService: NSObject, ObservableObject {
         nextExpectedAudioTime.withLock { $0 = nil }
         PipelineTrace.shared.log("SCK", "capture stopped")
 
-        let samples = accumulatedSamples.withLock { buf -> [Float] in
+        return accumulatedSamples.withLock { buf -> [Float] in
             let result = buf
             buf.removeAll()
             return result
         }
-
-        guard !samples.isEmpty else {
-            logger.info("System audio capture stopped — no samples captured")
-            return nil
-        }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("system_audio_\(Date().timeIntervalSince1970).wav")
-
-        do {
-            try writeSamplesToWAV(samples, url: url)
-            logger.info("System audio capture stopped, WAV at: \(url.lastPathComponent, privacy: .public)")
-            return url
-        } catch {
-            logger.error("Failed to write system audio WAV: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
-
-    // MARK: - WAV Writing
-
-    private func writeSamplesToWAV(_ samples: [Float], url: URL) throws {
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: activeSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw SystemAudioCaptureError.audioFileWriteFailed
-        }
-
-        let audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
-
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        ) else {
-            throw SystemAudioCaptureError.audioFileWriteFailed
-        }
-
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { src in
-            buffer.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
-        }
-
-        try audioFile.write(from: buffer)
     }
 
     // MARK: - Sample Conversion
@@ -306,5 +260,4 @@ extension SystemAudioService: SCStreamOutput {
 enum SystemAudioCaptureError: Error {
     case noDisplayAvailable
     case applicationNotFound(String)
-    case audioFileWriteFailed
 }

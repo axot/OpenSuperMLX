@@ -108,8 +108,25 @@ class TranscriptionQueue: ObservableObject {
             }.value) ?? 0.0
 
             let timestamp = Date()
-            let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
-            let id = UUID()
+            var id = UUID()
+            var fileName = RecordingAudioFormat.makeFileName(
+                timestamp: timestamp,
+                id: id,
+                pathExtension: url.pathExtension
+            )
+            while try await recordingStore.fileNameExists(fileName)
+                || FileManager.default.fileExists(
+                    atPath: Recording.recordingsDirectory
+                        .appendingPathComponent(fileName).path
+                )
+            {
+                id = UUID()
+                fileName = RecordingAudioFormat.makeFileName(
+                    timestamp: timestamp,
+                    id: id,
+                    pathExtension: url.pathExtension
+                )
+            }
 
             let recording = Recording(
                 id: id,

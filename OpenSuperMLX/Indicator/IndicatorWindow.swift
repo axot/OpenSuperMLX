@@ -134,8 +134,13 @@ class IndicatorViewModel: ObservableObject {
                 startBlinking()
             }
             
-            Task.detached { [recorder] in
-                recorder.startRecording()
+            Task.detached { [weak self, recorder] in
+                guard !recorder.startRecording() else { return }
+                await MainActor.run {
+                    self?.state = .idle
+                    self?.isStreamingMode = false
+                    self?.stopBlinking()
+                }
             }
         }
     }
@@ -160,7 +165,13 @@ class IndicatorViewModel: ObservableObject {
                     return
                 }
 
-                self.recordingStore.addRecording(result.recording)
+                if let recording = result.recording {
+                    self.recordingStore.addRecording(recording)
+                } else if result.audioSaveFailed {
+                    ErrorToastManager.shared.show(
+                        "Audio could not be saved. The transcript will still be inserted."
+                    )
+                }
 
                 guard let finalText = await self.runLLMCorrectionIfNeeded(on: result.text) else {
                     self.isStreamingMode = false
@@ -168,8 +179,7 @@ class IndicatorViewModel: ObservableObject {
                     return
                 }
 
-                if finalText != result.text {
-                    var updatedRecording = result.recording
+                if finalText != result.text, var updatedRecording = result.recording {
                     updatedRecording.transcription = finalText
                     self.recordingStore.updateRecording(updatedRecording)
                 }
@@ -189,39 +199,49 @@ class IndicatorViewModel: ObservableObject {
             
             state = .decoding
             
-            if let tempURL = recorder.stopRecording() {
-                decodingTask = Task { [weak self] in
-                    guard let self = self else { return }
-                    
-                    do {
-                        let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
-                        
-                        guard let finalText = await self.runLLMCorrectionIfNeeded(on: rawText) else {
-                            self.delegate?.didFinishDecoding()
-                            return
-                        }
-                        
-                        let timestamp = Date()
-                        let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
-                        let recording = Recording(
-                            id: UUID(), timestamp: timestamp, fileName: fileName,
-                            transcription: finalText, duration: 0,
-                            status: .completed, progress: 1.0, sourceFileURL: nil
-                        )
-                        
-                        try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
-                        self.recordingStore.addRecording(recording)
-                        
-                        self.insertText(finalText)
-                    } catch {
-                        logger.error("Error transcribing audio: \(error, privacy: .public)")
-                        try? FileManager.default.removeItem(at: tempURL)
-                    }
-                    
+            decodingTask = Task { [weak self] in
+                guard let self = self else { return }
+
+                guard let tempURL = await self.recorder.stopRecording() else {
                     self.delegate?.didFinishDecoding()
+                    return
                 }
-            } else {
-                logger.warning("No recording URL found after stopping recorder")
+                    
+                do {
+                    let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
+
+                    guard let finalText = await self.runLLMCorrectionIfNeeded(on: rawText) else {
+                        self.delegate?.didFinishDecoding()
+                        return
+                    }
+
+                    let timestamp = Date()
+                    let id = UUID()
+                    let fileName = RecordingAudioFormat.makeFileName(
+                        timestamp: timestamp,
+                        id: id,
+                        isTaken: { candidate in
+                            FileManager.default.fileExists(
+                                atPath: Recording.recordingsDirectory
+                                    .appendingPathComponent(candidate).path
+                            )
+                        }
+                    )
+                    let recording = Recording(
+                        id: id, timestamp: timestamp, fileName: fileName,
+                        transcription: finalText, duration: 0,
+                        status: .completed, progress: 1.0, sourceFileURL: nil
+                    )
+
+                    try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
+                    self.recordingStore.addRecording(recording)
+
+                    self.insertText(finalText)
+                } catch {
+                    logger.error("Error transcribing audio: \(error, privacy: .public)")
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
+
                 self.delegate?.didFinishDecoding()
             }
         }

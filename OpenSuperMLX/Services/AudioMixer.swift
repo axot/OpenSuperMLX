@@ -112,6 +112,13 @@ final class AudioMixer: @unchecked Sendable {
         downsample(samples, from: inputSampleRate, to: outputSampleRate)
     }
 
+    func drainCarryOver() -> [Float] {
+        let samples = micCarryOver.isEmpty ? sysCarryOver : micCarryOver
+        micCarryOver.removeAll()
+        sysCarryOver.removeAll()
+        return samples
+    }
+
     func reset() {
         sysAGC.reset()
         micCarryOver.removeAll()

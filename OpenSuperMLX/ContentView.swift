@@ -5,6 +5,7 @@
 //  Created by user on 05.02.2025.
 //
 
+import AppKit
 import AVFoundation
 import Combine
 import os
@@ -257,8 +258,14 @@ class ContentViewModel: ObservableObject {
                 startDurationTimerIfNeeded()
             }
             
-            Task.detached { [recorder] in
-                recorder.startRecording()
+            Task.detached { [weak self, recorder] in
+                guard !recorder.startRecording() else { return }
+                await MainActor.run {
+                    self?.state = .idle
+                    self?.stopBlinking()
+                    self?.stopDurationTimer()
+                    self?.recordingDuration = 0
+                }
             }
         }
     }
@@ -281,14 +288,22 @@ class ContentViewModel: ObservableObject {
                     return
                 }
 
-                self.recordingStore.addRecording(result.recording)
+                if let recording = result.recording {
+                    self.recordingStore.addRecording(recording)
 
-                if !self.currentSearchQuery.isEmpty {
-                    self.shouldClearSearch = true
-                    self.currentSearchQuery = ""
+                    if !self.currentSearchQuery.isEmpty {
+                        self.shouldClearSearch = true
+                        self.currentSearchQuery = ""
+                    }
+                    self.recordings.insert(recording, at: 0)
+                    self.totalCount += 1
+                } else if result.audioSaveFailed {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(result.text, forType: .string)
+                    ErrorToastManager.shared.show(
+                        "Audio could not be saved. The transcript was copied."
+                    )
                 }
-                self.recordings.insert(result.recording, at: 0)
-                self.totalCount += 1
 
                 if let error = LLMCorrectionService.shared.lastErrorMessage {
                     ErrorToastManager.shared.show(error)
@@ -300,17 +315,33 @@ class ContentViewModel: ObservableObject {
                 self.recordingDuration = 0
                 self.isStreamingMode = false
             }
-        } else if let tempURL = recorder.stopRecording() {
+        } else {
             Task { [weak self] in
                 guard let self = self else { return }
+
+                guard let tempURL = await self.recorder.stopRecording() else {
+                    self.state = .idle
+                    self.recordingDuration = 0
+                    return
+                }
 
                 do {
                     let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
 
                     let timestamp = Date()
-                    let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
+                    let id = UUID()
+                    let fileName = RecordingAudioFormat.makeFileName(
+                        timestamp: timestamp,
+                        id: id,
+                        isTaken: { candidate in
+                            FileManager.default.fileExists(
+                                atPath: Recording.recordingsDirectory
+                                    .appendingPathComponent(candidate).path
+                            )
+                        }
+                    )
                     let recording = Recording(
-                        id: UUID(), timestamp: timestamp, fileName: fileName,
+                        id: id, timestamp: timestamp, fileName: fileName,
                         transcription: text, duration: self.recordingDuration,
                         status: .completed, progress: 1.0, sourceFileURL: nil
                     )
@@ -338,9 +369,6 @@ class ContentViewModel: ObservableObject {
                 self.state = .idle
                 self.recordingDuration = 0
             }
-        } else {
-            state = .idle
-            recordingDuration = 0
         }
     }
 

@@ -1,5 +1,7 @@
+import Darwin
 import Foundation
 import os
+
 import GRDB
 
 enum RecordingStatus: String, Codable {
@@ -40,6 +42,40 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         ).first!
         let appDirectory = applicationSupport.appendingPathComponent(Bundle.main.bundleIdentifier!)
         return appDirectory.appendingPathComponent("recordings")
+    }
+
+    static var pendingRecordingsRootDirectory: URL {
+        recordingsDirectory.appendingPathComponent(".pending")
+    }
+
+    static var pendingRecordingsDirectory: URL {
+        pendingRecordingsRootDirectory
+            .appendingPathComponent(String(ProcessInfo.processInfo.processIdentifier))
+    }
+
+    static func cleanupStalePendingDirectories(
+        at rootDirectory: URL = pendingRecordingsRootDirectory,
+        currentProcessID: Int32 = ProcessInfo.processInfo.processIdentifier,
+        fileManager: FileManager = .default,
+        isProcessRunning: (Int32) -> Bool = processIsRunning
+    ) {
+        let directories = (try? fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )) ?? []
+
+        for directory in directories {
+            guard let processID = Int32(directory.lastPathComponent) else { continue }
+            guard processID == currentProcessID || !isProcessRunning(processID) else { continue }
+            try? fileManager.removeItem(at: directory)
+        }
+    }
+
+    private static func processIsRunning(_ processID: Int32) -> Bool {
+        if kill(processID, 0) == 0 {
+            return true
+        }
+        return errno == EPERM
     }
 
     var url: URL {
@@ -98,6 +134,15 @@ class RecordingStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(
                 at: appDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: Recording.pendingRecordingsRootDirectory,
+                withIntermediateDirectories: true
+            )
+            Recording.cleanupStalePendingDirectories()
+            try FileManager.default.createDirectory(
+                at: Recording.pendingRecordingsDirectory,
+                withIntermediateDirectories: true
+            )
             dbQueue = try DatabaseQueue(path: dbPath.path)
             try Self.runMigrations(on: dbQueue)
         } catch {
@@ -164,6 +209,14 @@ class RecordingStore: ObservableObject {
     nonisolated func fetchRecordingsCount() async throws -> Int {
         try await dbQueue.read { db in
             try Recording.fetchCount(db)
+        }
+    }
+
+    nonisolated func fileNameExists(_ fileName: String) async throws -> Bool {
+        try await dbQueue.read { db in
+            try Recording
+                .filter(Recording.Columns.fileName == fileName)
+                .fetchCount(db) > 0
         }
     }
 

@@ -58,20 +58,31 @@ public class AudioUtils {
 public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> (Int, MLXArray) {
     let audioFile = try AVAudioFile(forReading: url)
     let format = audioFile.processingFormat
-    let frameCount = AVAudioFrameCount(audioFile.length)
-
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw AudioUtils.AudioUtilsErrors.cannotCreateAudioBuffer
-    }
-
-    try audioFile.read(into: buffer)
-
-    guard let floatChannelData = buffer.floatChannelData else {
-        throw AudioUtils.AudioUtilsErrors.cannotReadFloatChannelData
-    }
-
     let sourceSampleRate = Int(format.sampleRate)
-    let samples = Array(UnsafeBufferPointer(start: floatChannelData[0], count: Int(buffer.frameLength)))
+    let chunkCapacity = AVAudioFrameCount(min(max(audioFile.length, 1), 65_536))
+    var samples: [Float] = []
+    samples.reserveCapacity(Int(audioFile.length))
+
+    while audioFile.framePosition < audioFile.length {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkCapacity) else {
+            throw AudioUtils.AudioUtilsErrors.cannotCreateAudioBuffer
+        }
+
+        let remainingFrames = audioFile.length - audioFile.framePosition
+        try audioFile.read(
+            into: buffer,
+            frameCount: AVAudioFrameCount(min(Int64(chunkCapacity), remainingFrames))
+        )
+        guard buffer.frameLength > 0 else { break }
+        guard let floatChannelData = buffer.floatChannelData else {
+            throw AudioUtils.AudioUtilsErrors.cannotReadFloatChannelData
+        }
+        samples.append(contentsOf: UnsafeBufferPointer(
+            start: floatChannelData[0],
+            count: Int(buffer.frameLength)
+        ))
+    }
+
     let targetSampleRate = sampleRate ?? sourceSampleRate
 
     if targetSampleRate <= 0 {

@@ -20,11 +20,11 @@ final class StreamingTapHealthTests: XCTestCase {
     func testRecordedSamplesMarkSessionCaptureAvailable() {
         var health = StreamingCaptureHealth()
 
-        health.recordSamplesWritten(1600)
-        health.recordSamplesWritten(-10)
+        health.recordSamplesCaptured(1600)
+        health.recordSamplesCaptured(-10)
 
         XCTAssertTrue(health.hasCapturedSamples)
-        XCTAssertEqual(health.samplesWritten, 1600)
+        XCTAssertEqual(health.samplesCaptured, 1600)
     }
 
     func testTapResetDoesNotEraseSessionCaptureState() {
@@ -32,7 +32,7 @@ final class StreamingTapHealthTests: XCTestCase {
         var captureHealth = StreamingCaptureHealth()
 
         tapHealth.recordCallback()
-        captureHealth.recordSamplesWritten(1600)
+        captureHealth.recordSamplesCaptured(1600)
         tapHealth = StreamingTapHealth()
 
         XCTAssertTrue(tapHealth.needsRecovery)
