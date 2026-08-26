@@ -90,6 +90,18 @@ If you see any of these in profiling, there is a memory regression:
 - `Memory.cacheMemory` growing beyond ~200 MB between resets
 - `accumulatedMelFrameCount` exceeding `2 × resetIntervalChunks × chunkSizeMelFrames` (~18,000 frames)
 
+## Recording Save Recovery Buffer
+
+Streaming capture also retains mono 16 kHz Int16 PCM until the recording is saved or the user confirms Cancel. This buffer is deliberately duration-proportional and separate from the model's bounded streaming state:
+
+| Duration | Recovery PCM |
+|---|---:|
+| 1 minute | 1.92 MB |
+| 30 minutes | 57.6 MB |
+| 1 hour | 115.2 MB |
+
+The detached feed task is the sole owner while recording. Stop and Cancel await that task before transferring or releasing the buffer. AAC failure does not stop PCM collection. Successful persistence or confirmed Cancel releases the full buffer; Retry keeps it unchanged and re-encodes all samples.
+
 ### Reference: antirez/qwen-asr
 
 The C reference implementation ([antirez/qwen-asr](https://github.com/antirez/qwen-asr)) achieves flat memory by:

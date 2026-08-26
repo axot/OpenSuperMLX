@@ -12,7 +12,10 @@ Sys → ScreenCaptureKit (matched rate) → accumulatedSamples → drain
                                             AudioMixer.mix()
                                          AGC → ceiling → resample → carry-over → tanh
                                                          ↓
-                                              StreamingWAVWriter (16kHz)
+                          ┌──────────────┴──────────────┐
+                          ↓                             ↓
+             AACRecordingWriter             PCMRetryBuffer (Int16)
+             16kHz mono, 48kbps              retained until save/cancel
 ```
 
 **Note on AEC:** VPIO (`setVoiceProcessingEnabled`) was removed. AEC is now handled at the routing layer via `OutputDeviceClassifier`: if the active output device is classified as a speaker AND the user enabled system-audio capture, the routing forces mic-only to avoid the speaker→mic echo path. Headphone outputs allow free mic+sys mixing.
@@ -30,16 +33,28 @@ Sys → ScreenCaptureKit (matched rate) → accumulatedSamples → drain
 [STREAM] streaming started speakerEnabled=true  ← speaker capture on?
 [SCK]    capture started                        ← ScreenCaptureKit active
 [FEED]   mic=4800 sys=4800 out=1600             ← per-cycle: raw counts + output
-[WAV]    wrote 1600 samples                     ← what actually hit disk
+[ARCHIVE] wrote 1600 samples                    ← what actually hit disk
 ```
 
 **Healthy pattern:** `mic=4800 sys=4800 out=1600` (steady, matched counts)
 **Jitter:** `sys=5760` or `sys=6720` (SCK delivered extra callbacks — carry-over handles this)
 **Spike:** `mic=43200 sys=44160` (feed loop was blocked — check if transcription inference stalled)
 
-## Analyzing a WAV File
+## Analyzing a Recording
 
-All recordings are 16kHz Float32 mono. Use Python:
+New recordings are 16kHz mono AAC-LC M4A at 48kbps. Verify their container metadata first:
+
+```bash
+afinfo RECORDING.m4a
+```
+
+For sample-level analysis, decode a copy to 16kHz Float32 WAV:
+
+```bash
+afconvert RECORDING.m4a /tmp/recording-analysis.wav -f WAVE -d LEF32@16000
+```
+
+Legacy recordings are 16kHz Float32 WAV. Analyze either a legacy file or the decoded copy with Python:
 
 ```bash
 python3 -c "
@@ -67,6 +82,18 @@ for a,b in zip(np.where(d==1)[0]+1, np.where(d==-1)[0]+1):
     if dur>10 and a>sr: print(f'  Gap @{a/sr:.2f}s {dur:.0f}ms')
 "
 ```
+
+## Save Recovery
+
+If direct AAC writing, validation, final installation, or database insertion fails after streaming stops, the transcript and complete Int16 audio remain in memory. The recovery panel offers:
+
+- **Retry** — streaming recordings re-encode the entire PCM buffer; non-streaming recordings revalidate their completed temporary M4A. Both use atomic installation and idempotent database persistence.
+- **Copy Transcript** — copies the final corrected text without releasing recovery state.
+- **Cancel Save** — requires confirmation, removes coordinator-owned temporary/orphan files, and releases the buffer.
+
+A failed Retry leaves the same panel and buffer active. New recordings and normal app termination remain blocked until Retry succeeds or Cancel is confirmed. Force quit and process crashes cannot preserve an in-memory recovery.
+
+For Debug builds, set `"forceRecordingSaveFailure": true` in `dev_config.json` to exercise this panel without filling the disk.
 
 ## Known Issue Patterns
 
