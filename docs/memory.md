@@ -42,10 +42,10 @@ Use CLI mode to profile without GUI overhead:
 
 ```bash
 ./build/Build/Products/Debug/OpenSuperMLX.app/Contents/MacOS/OpenSuperMLX \
-  --transcribe ~/path/to/audio.wav --language auto
+  transcribe ~/path/to/audio.wav --language auto
 ```
 
-To add memory checkpoints, insert in `CLITranscribe.swift`:
+To add memory checkpoints to the active CLI path, insert them in `OpenSuperMLX/CLI/Commands/TranscribeCommand.swift`:
 
 ```swift
 let act = String(format: "%.1f", Double(Memory.activeMemory) / 1e6)

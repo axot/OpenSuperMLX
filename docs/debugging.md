@@ -6,7 +6,7 @@ Reproduction strategy and diagnostic logging for bug investigations. The debuggi
 
 Reproduce the issue **outside the GUI** whenever possible, in this priority order:
 
-1. **CLI first** — use `--transcribe` or other CLI modes to reproduce the issue end-to-end. If the relevant code path has no CLI entry point, **add one** so the bug can be reproduced and verified without launching the app.
+1. **CLI first** — use the `transcribe` subcommand or another CLI command to reproduce the issue end-to-end. If the relevant code path has no CLI entry point, **add one** so the bug can be reproduced and verified without launching the app.
 2. **Unit test** — when the problem is clearly scoped to a single function or module's output, write a focused test case to reproduce it.
 
 If neither CLI nor unit test can reproduce the issue (e.g., the bug is in a GUI component itself like button rendering or shortcut capture), **stop and report to the user** — explain what was attempted, why it cannot be reproduced programmatically, and let the user decide how to proceed.

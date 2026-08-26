@@ -19,7 +19,7 @@ Install with Homebrew: `brew tap axot/tap && brew install --cask opensupermlx`. 
 - **Works from any app**: tap or hold a global shortcut, then paste the transcript back where you were writing.
 - **Feels native on macOS**: menu-bar app, keyboard-first flow, mic picker, searchable transcript history, and drag-and-drop audio import.
 - **Runs locally with MLX**: transcription runs on-device by default through [MLX](https://github.com/ml-explore/mlx-swift); optional LLM correction sends text only to the provider you configure.
-- **Handles real multilingual work**: automatic language detection, English/Chinese/Japanese/Korean support, and Asian language autocorrect.
+- **Handles real multilingual work**: automatic language detection, 19 selectable languages, and Asian autocorrect for Chinese, Japanese, and Korean.
 - **Tracks the habit**: a stats dashboard shows sessions, streaks, speaking time, time saved, and estimates against a generic typing-speed baseline.
 
 ## Core Workflow
@@ -44,11 +44,15 @@ Shortcuts are customizable in **Settings -> Shortcuts**.
 
 - Real-time streaming transcription so text appears while you speak
 - Searchable local transcript history
+- Space-efficient captured recordings stored as 16 kHz mono AAC/M4A at 48 kbps, with existing WAV and M4A history still supported; imported audio keeps its original format
+- Recoverable finalization: streaming capture retains PCM for retry, while completed non-streaming M4A files can retry installation and history persistence
 - Drag-and-drop audio file transcription with queue processing
+- Optional system-audio capture when using headphones; speaker output automatically falls back to mic-only capture to avoid echo
 - Built-in model picker and custom Hugging Face model IDs
 - Microphone switching for built-in, external, Bluetooth, and Apple Continuity devices
-- Optional AWS Bedrock LLM post-transcription correction
+- Optional AWS Bedrock or OpenAI-compatible post-transcription correction
 - CLI harness for transcription, diagnostics, queues, models, and benchmarks
+- Opt-in local Transcript MCP bridge for agent access to live transcript sessions
 - First-launch onboarding for permissions and model setup
 
 ## Installation
@@ -69,6 +73,8 @@ Download the latest build from the [GitHub releases page](https://github.com/axo
 Official GitHub releases are signed with an Apple Developer ID and notarized by Apple. Download the DMG, install the app normally, and open it.
 
 On first launch, macOS will request microphone and accessibility permissions. Grant them so OpenSuperMLX can record audio and paste transcripts into other apps.
+
+System-audio capture also requires Screen Recording permission when you enable that feature.
 
 ## Requirements
 
@@ -110,7 +116,7 @@ gem install xcpretty
 ./run.sh build
 ```
 
-For Swift-only changes after the initial build, use `./run.sh` (without `build`) for a fast incremental build and run cycle.
+For Swift-only changes after the initial build, use the fast incremental `xcodebuild` command in [AGENTS.md](AGENTS.md). Use `./run.sh` to rebuild every native component and launch the app, or `./run.sh build` to build without launching.
 
 For CI build details, see [.github/workflows/build.yml](.github/workflows/build.yml).
 
@@ -119,8 +125,10 @@ For CI build details, see [.github/workflows/build.yml](.github/workflows/build.
 If you run into an issue:
 
 1. Search existing GitHub issues.
-2. Open a new issue with reproduction steps.
-3. Include system information and relevant logs.
+2. Run the CLI's `diagnose --json` command and collect relevant unified logs using [docs/logging.md](docs/logging.md).
+3. Open a new issue with reproduction steps and the diagnostic output.
+
+If a **Recording Not Saved** panel appears, free disk space or fix the storage problem, then choose **Retry**. **Copy Transcript** preserves the text on the clipboard; **Cancel Save** permanently discards the recoverable audio and transcript after confirmation. See [docs/audio-diagnostics.md](docs/audio-diagnostics.md) for recording analysis and recovery details.
 
 ## Acknowledgments
 

@@ -26,8 +26,8 @@ logger.debug("[DEBUG] Verbose info: \(details, privacy: .public)")
 ## Reading Logs
 
 ```bash
-# Stream live (filter by category)
-/usr/bin/log stream --process OpenSuperMLX --predicate 'category == "FillerDebug"' --level debug
+# Stream live (filter by an existing category)
+/usr/bin/log stream --process OpenSuperMLX --predicate 'category == "StreamingAudioService"' --level debug
 
 # Stream all app logs
 /usr/bin/log stream --process OpenSuperMLX --level debug

@@ -1,13 +1,13 @@
 # Audio Diagnostics
 
-Quick reference for diagnosing audio quality issues in speaker capture (mic + system audio mixing).
+Quick reference for diagnosing capture quality, recording storage, and save recovery.
 
 ## Pipeline Overview
 
 ```
-Mic → AVAudioEngine tap (48kHz) → ringBuffer → drain every ~100ms
+Mic → AVAudioEngine tap (native rate) → ringBuffer → drain every ~100ms
                                                          ↓
-Sys → ScreenCaptureKit (matched rate) → accumulatedSamples → drain
+Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
                                                          ↓
                                             AudioMixer.mix()
                                          AGC → ceiling → resample → carry-over → tanh
@@ -44,6 +44,8 @@ Sys → ScreenCaptureKit (matched rate) → accumulatedSamples → drain
 
 New recordings are 16kHz mono AAC-LC M4A at 48kbps. Verify their container metadata first:
 
+The active archive directory is shown under **Settings → Transcriptions Directory**. On disk it resolves to `~/Library/Application Support/<bundle-id>/recordings/`; process-owned recovery staging uses its `.pending/<pid>/` subdirectory.
+
 ```bash
 afinfo RECORDING.m4a
 ```
@@ -54,7 +56,7 @@ For sample-level analysis, decode a copy to 16kHz Float32 WAV:
 afconvert RECORDING.m4a /tmp/recording-analysis.wav -f WAVE -d LEF32@16000
 ```
 
-Legacy recordings are 16kHz Float32 WAV. Analyze either a legacy file or the decoded copy with Python:
+Legacy mono recordings are 16kHz Float32 WAV. Analyze either a legacy mono file or the decoded copy with Python:
 
 ```bash
 python3 -c "
@@ -83,9 +85,15 @@ for a,b in zip(np.where(d==1)[0]+1, np.where(d==-1)[0]+1):
 "
 ```
 
+### Channel Layout
+
+New recordings are mono before they reach storage or ASR, so they do not lose a channel. The current file loader reads the first channel from imported or legacy stereo audio; it does not downmix all channels. Convert stereo files to mono before import if speech exists only in another channel, and before using the Float32 WAV analysis script above.
+
 ## Save Recovery
 
-If direct AAC writing, validation, final installation, or database insertion fails after streaming stops, the transcript and complete Int16 audio remain in memory. The recovery panel offers:
+Streaming capture retains complete Int16 audio alongside the AAC writer, so AAC writing, validation, installation, and database failures can enter recovery. Non-streaming capture relies on `AVAudioRecorder` to finish an M4A first; only later validation, installation, or database failures can enter recovery. A non-streaming encoder failure before a completed M4A cannot be retried.
+
+When recovery is available, the panel offers:
 
 - **Retry** — streaming recordings re-encode the entire PCM buffer; non-streaming recordings revalidate their completed temporary M4A. Both use atomic installation and idempotent database persistence.
 - **Copy Transcript** — copies the final corrected text without releasing recovery state.
@@ -93,7 +101,11 @@ If direct AAC writing, validation, final installation, or database insertion fai
 
 A failed Retry leaves the same panel and buffer active. New recordings and normal app termination remain blocked until Retry succeeds or Cancel is confirmed. Force quit and process crashes cannot preserve an in-memory recovery.
 
-For Debug builds, set `"forceRecordingSaveFailure": true` in `dev_config.json` to exercise this panel without filling the disk.
+For Debug builds, set `"forceRecordingSaveFailure": true` in the project-root `dev_config.json` to exercise this panel without filling the disk.
+
+### Missing Audio During Regeneration
+
+Regenerate validates the selected recording's source file when the user requests the operation. If neither the original import nor the archived recording exists, OpenSuperMLX marks regeneration as failed, shows **Audio file not found. Original transcript was kept.**, and leaves the existing transcript unchanged. It does not scan every historical audio file when loading the recordings list.
 
 ## Known Issue Patterns
 
@@ -112,8 +124,8 @@ For Debug builds, set `"forceRecordingSaveFailure": true` in `dev_config.json` t
 ### Sample Rate Mismatch
 - **Symptom:** sys audio pitch-shifted ~9%, periodic zero-padding gaps
 - **Check:** trace shows `out` much larger than expected (e.g., out=2089 when expecting ~1600)
-- **Cause:** mic at 48kHz, sys at 44100Hz, mixed as same rate
-- **Fixed by:** SCK `sampleRate` matches mic native rate; independent resampling
+- **Cause:** mic and system audio delivered at different rates but mixed as if they matched
+- **Fixed by:** independent mic and system-audio resampling before mixing
 
 ### Callback Jitter Gaps
 - **Symptom:** variable chunk sizes, intermittent near-zero regions in continuous audio

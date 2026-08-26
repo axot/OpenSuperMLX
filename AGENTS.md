@@ -159,12 +159,15 @@ For full command reference, test commands, and error codes, see [`docs/cli.md`](
 
 ```
 OpenSuperMLX/                    # Main app target
-├── main.swift                   # Entry point: CLI (--transcribe) or GUI
-├── CLITranscribe.swift          # CLI transcription mode
+├── main.swift                   # Entry point: CLI subcommands or GUI
 ├── OpenSuperMLXApp.swift        # AppState, AppDelegate, menu bar
 ├── ContentView.swift            # Main UI (recording list, search, mic picker)
 ├── Settings.swift               # Settings UI + SettingsViewModel + Settings value type
-├── AudioRecorder.swift          # AVAudioRecorder/Player wrapper (singleton)
+├── AACRecordingWriter.swift     # Incremental AAC-LC archive writer
+├── AudioRecorder.swift          # Non-streaming recorder/player wrapper (singleton)
+├── PCMRetryBuffer.swift         # In-memory Int16 recovery audio
+├── RecordingAudioFormat.swift   # Recording codec settings and collision-safe names
+├── RecordingSaveCoordinator.swift # Atomic install, persistence, Retry/Cancel lifecycle
 ├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
 ├── TranscriptionService.swift   # Transcription orchestration (singleton)
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
@@ -197,10 +200,15 @@ OpenSuperMLX/                    # Main app target
 │   ├── LLMCorrectionService.swift # Post-transcription LLM correction
 │   ├── LLMProvider.swift          # LLM provider protocol
 │   ├── OpenAICompatibleLLMProvider.swift # OpenAI-compatible LLM provider
-│   └── SystemAudioService.swift   # System audio capture
+│   ├── OutputDeviceClassifier.swift # Speaker/headphone routing policy
+│   ├── SystemAudioService.swift   # System audio capture
+│   ├── TranscriptMCPHandler.swift # Transcript MCP tool dispatch
+│   ├── TranscriptMCPHTTPServer.swift # Loopback MCP HTTP transport
+│   └── TranscriptSessionStore.swift # Bounded live transcript sessions
 ├── Models/
 │   └── Recording.swift          # Recording model + RecordingStore (GRDB)
 ├── Indicator/                   # Floating mini-recorder overlay
+│   └── RecordingRecoveryPanel.swift # Save-failure Retry/Copy/Cancel panel
 ├── Onboarding/                  # First-launch onboarding flow
 ├── Utils/
 │   ├── AppPreferences.swift     # UserDefaults wrappers (@UserDefault, @OptionalUserDefault)
@@ -213,6 +221,7 @@ OpenSuperMLX/                    # Main app target
 │   ├── LanguageUtil.swift       # Language code ↔ display name mapping
 │   ├── NemoTextProcessing.swift # English inverse text normalization (text-processing-rs)
 │   ├── NotificationName+App.swift  # Typed Notification.Name extensions
+│   ├── PipelineTrace.swift        # Debug-mode audio pipeline traces
 │   ├── RepetitionCleaner.swift  # Remove repeated text from transcription output
 │   └── RMSNormalizer.swift      # Audio RMS level normalization
 ├── Bridge.h                     # Bridging header (autocorrect + text-processing-rs)
@@ -274,7 +283,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 - **MVVM**: `@StateObject` ViewModels with `ObservableObject`
 - **Protocol abstraction**: `TranscriptionEngine` protocol, `MLXEngine` implementation
 - **Communication**: `NotificationCenter` with typed `Notification.Name` extensions
-- **Recording flow**: ShortcutManager → IndicatorViewModel.startRecording() → StreamingAudioService or AudioRecorder
+- **Recording flow**: ShortcutManager → IndicatorViewModel.startRecording() → StreamingAudioService or AudioRecorder → RecordingSaveCoordinator
 - **User-facing notifications**: `ErrorToastManager.shared.show("message")` — floating toast at top of screen. Use for any user-facing warning or status message (mic disconnected, LLM errors, etc.). Defined in `Indicator/ErrorToastManager.swift`. Auto-dismissable with close button.
 
 ### Concurrency
@@ -426,7 +435,7 @@ git worktree remove ../OpenSuperMLX-<plan-name>
 | [`docs/memory.md`](docs/memory.md) | **Profiling memory or touching streaming pipeline.** MLX GPU memory budget, encoder dtype, streaming memory invariants, and red flags for memory regressions. |
 | [`docs/release_build.md`](docs/release_build.md) | **Making a release.** Official tag-driven CI flow and legacy local notarization limitations. |
 | [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
-| [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality issues.** Pipeline trace, WAV analysis, known issue patterns (clipping, pops, gaps). |
+| [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality or save issues.** Pipeline trace, AAC/WAV analysis, channel handling, recovery flow, and known issue patterns. |
 
 ## Release
 

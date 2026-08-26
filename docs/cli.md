@@ -23,10 +23,27 @@ $BINARY transcribe audio.wav --json
 $BINARY stream-simulate audio.wav --json
 
 # Run benchmark with accuracy check
-$BINARY benchmark audio.wav --expected-text "reference text" --json
+$BINARY benchmark audio.wav --reference-text "reference text" --json
 ```
 
-All commands accept `--json` (structured output to stdout) and `--quiet` (suppress stderr progress).
+All commands accept `--json` (structured output to stdout), `--quiet` (suppress stderr progress), and `--verbose`. The verbose flag is currently reserved; commands parse it but do not emit additional output yet.
+
+## Command Reference
+
+| Command | Purpose | Main arguments and subcommands |
+|---|---|---|
+| `transcribe <file>` | Transcribe one audio file | `--language`, `--model`, `--no-correction`, `--temperature` |
+| `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--model`, `--chunk-duration` |
+| `correct <text>` | Apply configured LLM correction | `--file`, `--provider`, `--prompt` |
+| `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
+| `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
+| `queue` | Manage imported-file transcription | `add <files>...`, `status`, `process` |
+| `mic` | Inspect or select input devices | `list`, `select <device>` |
+| `model` | Manage the model catalog and selection | `list`, `select <name>`, `add <repo-id>`, `remove <name>`; `download <name>` is a stub and does not fetch files yet |
+| `benchmark <file>` | Measure accuracy, speed, and memory | `--language`, `--model`, `--runs`, `--wer-threshold`, `--reference-text`, `--suite` |
+| `diagnose` | Print an environment snapshot | No command-specific arguments |
+
+Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for generated usage and defaults.
 
 ## Transcript MCP Bridge
 
@@ -53,6 +70,25 @@ Available tools:
 | `list_transcript_sessions` | List recent live transcript sessions |
 
 Tool responses keep human summaries in `content[].text`. Machine-readable values such as `next_cursor`, `segments`, and `matches` are returned only in `structuredContent`.
+
+## Error Codes
+
+With `--json`, command failures are written to stderr as `{"status":"error","command":"...","error":{"code":"...","message":"..."}}`.
+
+| Code | Meaning |
+|---|---|
+| `model_not_found` | The requested model is not in the catalog |
+| `model_not_cached` | The model must be downloaded before use |
+| `model_load_failed` | The selected model could not be loaded |
+| `audio_file_not_found` | The input path does not exist |
+| `audio_format_unsupported` | The audio file cannot be decoded |
+| `transcription_failed` | Transcription did not complete |
+| `stream_timeout` | Streaming simulation exceeded its time limit |
+| `llm_correction_failed` | Post-transcription correction failed |
+| `database_error` | A recording database operation failed |
+| `audio_file_missing` | A history entry no longer has usable audio |
+| `invalid_config_key` | The configuration key is unknown |
+| `invalid_config_value` | The value does not match the key's type |
 
 ## Running CLI Tests
 
