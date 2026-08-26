@@ -74,6 +74,17 @@ final class RecordingStoreTests: XCTestCase {
         XCTAssertFalse(missingFileExists)
     }
 
+    func testRecordingExistsMatchesStoredID() async throws {
+        let recording = makeRecording(fileName: "known-id.m4a")
+        try await sut.addRecordingSync(recording)
+
+        let knownRecordingExists = try await sut.recordingExists(recording.id)
+        let missingRecordingExists = try await sut.recordingExists(UUID())
+
+        XCTAssertTrue(knownRecordingExists)
+        XCTAssertFalse(missingRecordingExists)
+    }
+
     func testPendingRecordingsDirectoryIsProcessScoped() {
         XCTAssertEqual(
             Recording.pendingRecordingsDirectory.deletingLastPathComponent(),

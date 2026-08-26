@@ -36,6 +36,41 @@ struct StreamingCaptureHealth: Equatable {
     }
 }
 
+struct StreamingFeedState: Sendable {
+    let archive: StreamingAACArchive
+    private(set) var retryBuffer = PCMRetryBuffer()
+    private var didReportArchiveFailure = false
+
+    init(archive: StreamingAACArchive) {
+        self.archive = archive
+    }
+
+    mutating func append(_ samples: [Float]) -> Error? {
+        retryBuffer.append(samples)
+        if let error = archive.failure {
+            guard !didReportArchiveFailure else { return nil }
+            didReportArchiveFailure = true
+            return error
+        }
+        if let error = archive.write(samples) {
+            didReportArchiveFailure = true
+            return error
+        }
+        return nil
+    }
+}
+
+struct StreamingCaptureOutcome {
+    let text: String
+    let duration: TimeInterval
+    let audioURL: URL?
+    let storageError: RecordingStorageError?
+    let retryBuffer: PCMRetryBuffer
+    let recordingID: UUID
+    let timestamp: Date
+    let fileName: String
+}
+
 // MARK: - StreamingAudioService
 
 @MainActor
@@ -69,7 +104,7 @@ class StreamingAudioService: ObservableObject {
     var transcriptSessionStore: TranscriptSessionStore = .shared
     private(set) var currentTranscriptSessionID: String?
 
-    private var feedTask: Task<Void, Never>?
+    private var feedTask: Task<StreamingFeedState, Never>?
     private var eventTask: Task<Void, Never>?
     private var tapHealthTask: Task<Void, Never>?
     private var recordingStartTime: Date?
@@ -888,6 +923,7 @@ class StreamingAudioService: ObservableObject {
         let captureStateRef = self.captureState
         let sampleRate = self.nativeSampleRate
         feedTask = Task.detached { [weak self] in
+            var feedState = StreamingFeedState(archive: archive)
             var consecutiveEmptyDrains = 0
             var feedIterationCount = 0
             var lastStatusLogTime = ContinuousClock.now
@@ -928,7 +964,7 @@ class StreamingAudioService: ObservableObject {
                     let split = Self.splitArchiveAndInferenceSamples(samples16k)
                     captureStateRef.withLock { $0.recordSamplesCaptured(split.archive.count) }
 
-                    if let error = archive.write(split.archive) {
+                    if let error = feedState.append(split.archive) {
                         PipelineTrace.shared.log("ARCHIVE", "write FAILED: \(error)")
                         logger.error("Failed to write AAC chunk: \(error, privacy: .public)")
                     } else if archive.failure == nil {
@@ -978,6 +1014,7 @@ class StreamingAudioService: ObservableObject {
 
                 guard await Self.waitForNextFeedIteration() else { break }
             }
+            return feedState
         }
         scheduleTapHealthCheck()
         startRMSTimer()
@@ -992,7 +1029,8 @@ class StreamingAudioService: ObservableObject {
         let recordingID: UUID
         let timestamp: Date
         let fileName: String
-        let audioSaveFailed: Bool
+        let storageError: Error?
+        let retryBuffer: PCMRetryBuffer
     }
 
     func stopStreaming() async -> StreamingStopResult? {
@@ -1012,10 +1050,18 @@ class StreamingAudioService: ObservableObject {
         stopRMSTimer()
         cancelTapHealthCheck()
         shouldStopFeeding.withLock { $0 = true }
+        let completedFeedState: StreamingFeedState?
         if let feedTask {
-            _ = await feedTask.value
+            completedFeedState = await feedTask.value
+        } else {
+            completedFeedState = aacArchive.map { StreamingFeedState(archive: $0) }
         }
         feedTask = nil
+        guard var feedState = completedFeedState else {
+            logger.error("Missing feed state while stopping streaming")
+            clearState()
+            return nil
+        }
         audioMixer?.stopTrace()
         PipelineTrace.shared.log("STREAM", "feed loop stopped")
 
@@ -1047,7 +1093,7 @@ class StreamingAudioService: ObservableObject {
                     session.feedAudio(samples: remaining16k)
                 }
                 captureState.withLock { $0.recordSamplesCaptured(remaining16k.count) }
-                if let error = aacArchive?.write(remaining16k) {
+                if let error = feedState.append(remaining16k) {
                     logger.error("Failed to write final AAC chunk: \(error, privacy: .public)")
                 }
             }
@@ -1063,18 +1109,14 @@ class StreamingAudioService: ObservableObject {
         eventTask = nil
 
         let finalURL: URL?
-        var archiveError = aacArchive?.failure
-        if let archive = aacArchive {
-            switch archive.finalize() {
-            case .success(let url):
-                finalURL = url
-            case .failure(let error):
-                archiveError = error
-                finalURL = nil
-                logger.error("Failed to finalize AAC archive: \(error, privacy: .public)")
-            }
-        } else {
+        var archiveError = feedState.archive.failure
+        switch feedState.archive.finalize() {
+        case .success(let url):
+            finalURL = url
+        case .failure(let error):
+            archiveError = error
             finalURL = nil
+            logger.error("Failed to finalize AAC archive: \(error, privacy: .public)")
         }
         aacArchive = nil
 
@@ -1132,22 +1174,31 @@ class StreamingAudioService: ObservableObject {
             recordingID: recordingID,
             timestamp: timestamp,
             fileName: fileName,
-            audioSaveFailed: archiveError != nil || finalURL == nil
+            storageError: archiveError,
+            retryBuffer: feedState.retryBuffer
         )
     }
 
     // MARK: - Cancel Streaming
 
-    func cancelStreaming() {
+    func cancelStreaming() async {
         guard isStreaming else { return }
-
-        isStreaming = false
+        defer {
+            isStreaming = false
+            resumeIdleMeteringIfNeeded()
+        }
 
         stopRMSTimer()
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
         shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
+        let completedFeedState: StreamingFeedState?
+        if let feedTask {
+            completedFeedState = await feedTask.value
+        } else {
+            completedFeedState = nil
+        }
         feedTask = nil
         eventTask?.cancel()
         eventTask = nil
@@ -1156,11 +1207,13 @@ class StreamingAudioService: ObservableObject {
         streamingSession = nil
 
         if speakerCaptureActiveForSession {
-            Task { _ = await SystemAudioService.shared.stopAndDrain() }
+            _ = await SystemAudioService.shared.stopAndDrain()
         }
         speakerCaptureActiveForSession = false
 
-        aacArchive?.cancel()
+        (completedFeedState?.archive ?? aacArchive)?.cancel()
+        var retryBuffer = completedFeedState?.retryBuffer
+        retryBuffer?.release()
         aacArchive = nil
         currentRecordingID = nil
         currentRecordingFileName = nil
@@ -1171,7 +1224,6 @@ class StreamingAudioService: ObservableObject {
 
         endCurrentTranscriptSession(elapsedMs: currentTranscriptElapsedMs())
         clearState()
-        resumeIdleMeteringIfNeeded()
     }
 
     // MARK: - Finalize Recording
@@ -1179,11 +1231,15 @@ class StreamingAudioService: ObservableObject {
     struct StreamingResult {
         let text: String
         let recording: Recording?
-        let audioSaveFailed: Bool
     }
 
     func finalizeRecording(duration: TimeInterval = 0, applyCorrection: Bool = true, forceLLM: Bool = false) async -> StreamingResult? {
-        guard let result = await stopStreaming() else { return nil }
+        let saveCoordinator = RecordingSaveCoordinator.shared
+        guard saveCoordinator.reserveSave() else { return nil }
+        guard let result = await stopStreaming() else {
+            saveCoordinator.releaseSaveReservation()
+            return nil
+        }
 
         // The authoritative duration is measured inside the streaming session
         // (start→stop), not the caller's wall-clock — the mini-recorder path never
@@ -1216,50 +1272,22 @@ class StreamingAudioService: ObservableObject {
             text = await LLMCorrectionService.shared.correctTranscription(text, forceEnabled: forceLLM)
         }
 
-        var recording: Recording?
-        var audioSaveFailed = result.audioSaveFailed
-        if let temporaryURL = result.url {
-            let originalURL = Recording.recordingsDirectory
-                .appendingPathComponent(result.fileName)
-            let fileName = FileManager.default.fileExists(atPath: originalURL.path)
-                ? RecordingAudioFormat.makeFileName(
-                    timestamp: result.timestamp,
-                    id: result.recordingID,
-                    isTaken: { candidate in
-                        FileManager.default.fileExists(
-                            atPath: Recording.recordingsDirectory.appendingPathComponent(candidate).path
-                        )
-                    }
-                )
-                : result.fileName
-            let candidate = Recording(
-                id: result.recordingID,
-                timestamp: result.timestamp,
-                fileName: fileName,
-                transcription: text,
-                duration: resolvedDuration,
-                status: .completed,
-                progress: 1.0,
-                sourceFileURL: nil
-            )
+        let captureOutcome = StreamingCaptureOutcome(
+            text: text,
+            duration: resolvedDuration,
+            audioURL: result.url,
+            storageError: result.storageError.map(RecordingStorageError.classify),
+            retryBuffer: result.retryBuffer,
+            recordingID: result.recordingID,
+            timestamp: result.timestamp,
+            fileName: result.fileName
+        )
 
-            do {
-                try AudioRecorder.shared.moveTemporaryRecording(
-                    from: temporaryURL,
-                    to: candidate.url
-                )
-                recording = candidate
-            } catch {
-                audioSaveFailed = true
-                try? FileManager.default.removeItem(at: temporaryURL)
-                logger.error("Error moving recording: \(error, privacy: .public)")
-            }
-        }
+        let recording = await saveCoordinator.saveReserved(captureOutcome)
 
         return StreamingResult(
             text: text,
-            recording: recording,
-            audioSaveFailed: audioSaveFailed
+            recording: recording
         )
     }
 

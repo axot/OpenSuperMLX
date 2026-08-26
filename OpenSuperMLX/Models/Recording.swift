@@ -220,6 +220,14 @@ class RecordingStore: ObservableObject {
         }
     }
 
+    nonisolated func recordingExists(_ id: UUID) async throws -> Bool {
+        try await dbQueue.read { db in
+            try Recording
+                .filter(Recording.Columns.id == id)
+                .fetchCount(db) > 0
+        }
+    }
+
     func getPendingRecordings() -> [Recording] {
         do {
             return try dbQueue.read { db in
@@ -420,6 +428,14 @@ class RecordingStore: ObservableObject {
                 logger.error("Failed to delete recording: \(error, privacy: .public)")
             }
         }
+    }
+
+    func deleteRecordingSync(_ recording: Recording) async throws {
+        try await deleteRecordingFromDB(recording)
+        NotificationCenter.default.post(
+            name: Self.recordingsDidUpdateNotification,
+            object: nil
+        )
     }
     
     private nonisolated func deleteRecordingFromDB(_ recording: Recording) async throws {

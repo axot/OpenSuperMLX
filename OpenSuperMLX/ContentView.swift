@@ -36,6 +36,8 @@ class ContentViewModel: ObservableObject {
     private let recorder: AudioRecorder = .shared
     private let recordingStore = RecordingStore.shared
     private let streamingService = StreamingAudioService.shared
+    private let saveCoordinator: RecordingSaveCoordinator
+    private let recoveryPresenter: () -> Void
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "ContentView")
     private var currentPage = 0
     private let pageSize = 100
@@ -47,7 +49,14 @@ class ContentViewModel: ObservableObject {
 
     // MARK: - Init
 
-    init() {
+    init(
+        saveCoordinator: RecordingSaveCoordinator? = nil,
+        recoveryPresenter: (() -> Void)? = nil
+    ) {
+        self.saveCoordinator = saveCoordinator ?? .shared
+        self.recoveryPresenter = recoveryPresenter ?? {
+            RecordingRecoveryPanelController.shared.show()
+        }
         recorder.$isConnecting
             .receive(on: RunLoop.main)
             .sink { [weak self] isConnecting in
@@ -214,6 +223,10 @@ class ContentViewModel: ObservableObject {
     }
 
     func startRecording() {
+        guard !saveCoordinator.blocksNewRecording else {
+            recoveryPresenter()
+            return
+        }
         if AppPreferences.shared.debugMode {
             let traceDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
             try? FileManager.default.createDirectory(at: traceDir, withIntermediateDirectories: true)
@@ -289,20 +302,14 @@ class ContentViewModel: ObservableObject {
                 }
 
                 if let recording = result.recording {
-                    self.recordingStore.addRecording(recording)
-
                     if !self.currentSearchQuery.isEmpty {
                         self.shouldClearSearch = true
                         self.currentSearchQuery = ""
                     }
                     self.recordings.insert(recording, at: 0)
                     self.totalCount += 1
-                } else if result.audioSaveFailed {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(result.text, forType: .string)
-                    ErrorToastManager.shared.show(
-                        "Audio could not be saved. The transcript was copied."
-                    )
+                } else {
+                    self.recoveryPresenter()
                 }
 
                 if let error = LLMCorrectionService.shared.lastErrorMessage {
@@ -324,6 +331,10 @@ class ContentViewModel: ObservableObject {
                     self.recordingDuration = 0
                     return
                 }
+                guard self.saveCoordinator.reserveSave() else {
+                    self.recoveryPresenter()
+                    return
+                }
 
                 do {
                     let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
@@ -340,21 +351,24 @@ class ContentViewModel: ObservableObject {
                             )
                         }
                     )
-                    let recording = Recording(
-                        id: id, timestamp: timestamp, fileName: fileName,
-                        transcription: text, duration: self.recordingDuration,
-                        status: .completed, progress: 1.0, sourceFileURL: nil
+                    let request = EncodedRecordingSaveRequest(
+                        text: text,
+                        duration: self.recordingDuration,
+                        audioURL: tempURL,
+                        recordingID: id,
+                        timestamp: timestamp,
+                        fileName: fileName
                     )
-
-                    try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
-                    self.recordingStore.addRecording(recording)
-
-                    if !self.currentSearchQuery.isEmpty {
-                        self.shouldClearSearch = true
-                        self.currentSearchQuery = ""
+                    if let recording = await self.saveCoordinator.saveReservedEncodedRecording(request) {
+                        if !self.currentSearchQuery.isEmpty {
+                            self.shouldClearSearch = true
+                            self.currentSearchQuery = ""
+                        }
+                        self.recordings.insert(recording, at: 0)
+                        self.totalCount += 1
+                    } else {
+                        self.recoveryPresenter()
                     }
-                    self.recordings.insert(recording, at: 0)
-                    self.totalCount += 1
 
                     if let error = LLMCorrectionService.shared.lastErrorMessage {
                         ErrorToastManager.shared.show(error)
@@ -362,6 +376,7 @@ class ContentViewModel: ObservableObject {
 
                     logger.info("Transcription result: \(text.prefix(100), privacy: .public)")
                 } catch {
+                    self.saveCoordinator.releaseSaveReservation()
                     logger.error("Error transcribing audio: \(error, privacy: .public)")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
@@ -374,7 +389,7 @@ class ContentViewModel: ObservableObject {
 
     func cancelRecording() {
         if isStreamingMode {
-            streamingService.cancelStreaming()
+            Task { await streamingService.cancelStreaming() }
         }
         isStreamingMode = false
         state = .idle

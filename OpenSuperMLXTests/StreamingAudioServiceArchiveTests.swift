@@ -65,4 +65,76 @@ final class StreamingAudioServiceArchiveTests: XCTestCase {
 
         XCTAssertEqual(samples.count, 2_000)
     }
+
+    func testFeedStateRetainsSamplesWhenArchiveInitializationFailed() {
+        let archive = StreamingAACArchive(
+            url: URL(fileURLWithPath: "/tmp/unwritten-retry.m4a"),
+            writerFactory: { _ in throw ArchiveTestError.failure }
+        )
+        var state = StreamingFeedState(archive: archive)
+
+        let error = state.append([0.1, 0.2, 0.3])
+
+        XCTAssertNotNil(error)
+        XCTAssertEqual(state.retryBuffer.count, 3)
+    }
+
+    func testCancelledFeedTaskTransfersOwnedRetryBuffer() async {
+        let archive = StreamingAACArchive(
+            url: URL(fileURLWithPath: "/tmp/cancelled-feed.m4a"),
+            writerFactory: { _ in NoOpAACWriter() }
+        )
+        let task = Task.detached { () -> StreamingFeedState in
+            var state = StreamingFeedState(archive: archive)
+            _ = state.append([0.1, 0.2])
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return state }
+            _ = state.append([0.3])
+            return state
+        }
+
+        task.cancel()
+        let state = await task.value
+
+        XCTAssertEqual(state.retryBuffer.count, 2)
+    }
+
+    func testCaptureOutcomePreservesTextWithoutAudioURL() {
+        var buffer = PCMRetryBuffer()
+        buffer.append([0.1, 0.2])
+
+        let outcome = StreamingCaptureOutcome(
+            text: "preserved transcript",
+            duration: 2,
+            audioURL: nil,
+            storageError: RecordingStorageError.classify(ArchiveTestError.failure),
+            retryBuffer: buffer,
+            recordingID: UUID(),
+            timestamp: Date(),
+            fileName: "recording.m4a"
+        )
+
+        XCTAssertEqual(outcome.text, "preserved transcript")
+        XCTAssertNil(outcome.audioURL)
+        XCTAssertNotNil(outcome.storageError)
+        XCTAssertEqual(outcome.retryBuffer.count, 2)
+    }
+}
+
+private enum ArchiveTestError: Error {
+    case failure
+}
+
+private final class NoOpAACWriter: AACRecordingWriting {
+    var framesWritten = 0
+
+    func writeChunk(_ samples: [Float]) throws {
+        framesWritten += samples.count
+    }
+
+    func finalize() throws -> URL {
+        URL(fileURLWithPath: "/tmp/no-op.m4a")
+    }
+
+    func cancel() {}
 }

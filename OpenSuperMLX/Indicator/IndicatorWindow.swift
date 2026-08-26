@@ -1,9 +1,10 @@
+import AVFoundation
 import Cocoa
 import Combine
 import os.log
 import SwiftUI
 
-enum RecordingState {
+enum RecordingState: Equatable {
     case idle
     case connecting
     case recording
@@ -33,18 +34,28 @@ class IndicatorViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "IndicatorViewModel")
     
-    private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
     private let transcriptionQueue: TranscriptionQueue
     private let streamingService = StreamingAudioService.shared
+    private let saveCoordinator: RecordingSaveCoordinator
+    private let recoveryPresenter: () -> Void
+    private let textInserter: (String) -> Void
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
     private var micDisconnectObserver: NSObjectProtocol?
 
-    init() {
-        self.recordingStore = RecordingStore.shared
+    init(
+        saveCoordinator: RecordingSaveCoordinator? = nil,
+        recoveryPresenter: (() -> Void)? = nil,
+        textInserter: ((String) -> Void)? = nil
+    ) {
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
+        self.saveCoordinator = saveCoordinator ?? .shared
+        self.recoveryPresenter = recoveryPresenter ?? {
+            RecordingRecoveryPanelController.shared.show()
+        }
+        self.textInserter = textInserter ?? { ClipboardUtil.insertText($0) }
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -99,6 +110,10 @@ class IndicatorViewModel: ObservableObject {
     }
     
     func startRecording() {
+        guard !saveCoordinator.blocksNewRecording else {
+            recoveryPresenter()
+            return
+        }
         if AppPreferences.shared.debugMode {
             let traceDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
             try? FileManager.default.createDirectory(at: traceDir, withIntermediateDirectories: true)
@@ -158,34 +173,27 @@ class IndicatorViewModel: ObservableObject {
             decodingTask = Task { [weak self] in
                 guard let self = self else { return }
 
-                guard let result = await self.streamingService.finalizeRecording(applyCorrection: false) else {
+                guard let result = await self.streamingService.finalizeRecording(
+                    applyCorrection: true,
+                    forceLLM: self.forceLLMCorrection
+                ) else {
                     self.state = .idle
                     self.isStreamingMode = false
                     self.delegate?.didFinishDecoding()
                     return
                 }
+                guard !Task.isCancelled else { return }
 
-                if let recording = result.recording {
-                    self.recordingStore.addRecording(recording)
-                } else if result.audioSaveFailed {
-                    ErrorToastManager.shared.show(
-                        "Audio could not be saved. The transcript will still be inserted."
-                    )
+                if result.recording == nil {
+                    self.recoveryPresenter()
                 }
 
-                guard let finalText = await self.runLLMCorrectionIfNeeded(on: result.text) else {
-                    self.isStreamingMode = false
-                    self.delegate?.didFinishDecoding()
-                    return
+                if let error = LLMCorrectionService.shared.lastErrorMessage {
+                    ErrorToastManager.shared.show(error)
                 }
 
-                if finalText != result.text, var updatedRecording = result.recording {
-                    updatedRecording.transcription = finalText
-                    self.recordingStore.updateRecording(updatedRecording)
-                }
-
-                self.insertText(finalText)
-                logger.info("Transcription result: \(finalText.prefix(100), privacy: .public)")
+                self.insertText(result.text)
+                logger.info("Transcription result: \(result.text.prefix(100), privacy: .public)")
 
                 self.isStreamingMode = false
                 self.delegate?.didFinishDecoding()
@@ -206,11 +214,18 @@ class IndicatorViewModel: ObservableObject {
                     self.delegate?.didFinishDecoding()
                     return
                 }
+                guard self.saveCoordinator.reserveSave() else {
+                    self.recoveryPresenter()
+                    self.delegate?.didFinishDecoding()
+                    return
+                }
                     
                 do {
                     let rawText = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), applyCorrection: false)
 
                     guard let finalText = await self.runLLMCorrectionIfNeeded(on: rawText) else {
+                        self.saveCoordinator.releaseSaveReservation()
+                        try? FileManager.default.removeItem(at: tempURL)
                         self.delegate?.didFinishDecoding()
                         return
                     }
@@ -227,17 +242,17 @@ class IndicatorViewModel: ObservableObject {
                             )
                         }
                     )
-                    let recording = Recording(
-                        id: id, timestamp: timestamp, fileName: fileName,
-                        transcription: finalText, duration: 0,
-                        status: .completed, progress: 1.0, sourceFileURL: nil
+                    let request = EncodedRecordingSaveRequest(
+                        text: finalText,
+                        duration: (try? AVAudioPlayer(contentsOf: tempURL).duration) ?? 0,
+                        audioURL: tempURL,
+                        recordingID: id,
+                        timestamp: timestamp,
+                        fileName: fileName
                     )
-
-                    try self.recorder.moveTemporaryRecording(from: tempURL, to: recording.url)
-                    self.recordingStore.addRecording(recording)
-
-                    self.insertText(finalText)
+                    await self.completeNonStreamingSave(request, finalText: finalText)
                 } catch {
+                    self.saveCoordinator.releaseSaveReservation()
                     logger.error("Error transcribing audio: \(error, privacy: .public)")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
@@ -248,7 +263,19 @@ class IndicatorViewModel: ObservableObject {
     }
     
     func insertText(_ text: String) {
-        ClipboardUtil.insertText(text)
+        textInserter(text)
+    }
+
+    func completeNonStreamingSave(
+        _ request: EncodedRecordingSaveRequest,
+        finalText: String
+    ) async {
+        let recording = await saveCoordinator.saveReservedEncodedRecording(request)
+        guard !Task.isCancelled else { return }
+        if recording == nil {
+            recoveryPresenter()
+        }
+        insertText(finalText)
     }
     
     // MARK: - LLM Correction
@@ -308,7 +335,7 @@ class IndicatorViewModel: ObservableObject {
         hideTimer = nil
         cancelActiveTasks()
         if isStreamingMode {
-            streamingService.cancelStreaming()
+            Task { await streamingService.cancelStreaming() }
             isStreamingMode = false
         }
         if let obs = micDisconnectObserver {
@@ -323,7 +350,7 @@ class IndicatorViewModel: ObservableObject {
         hideTimer = nil
         cancelActiveTasks()
         if isStreamingMode {
-            streamingService.cancelStreaming()
+            Task { await streamingService.cancelStreaming() }
             isStreamingMode = false
         } else {
             recorder.cancelRecording()

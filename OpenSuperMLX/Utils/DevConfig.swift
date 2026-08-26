@@ -6,6 +6,7 @@ struct DevConfig {
     static let shared = DevConfig()
     
     let forceShowOnboarding: Bool?
+    let forceRecordingSaveFailure: Bool
     
     private init() {
         let filePath = (
@@ -20,10 +21,12 @@ struct DevConfig {
               let data = FileManager.default.contents(atPath: filePath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             forceShowOnboarding = nil
+            forceRecordingSaveFailure = false
             return
         }
         
         forceShowOnboarding = json["forceShowOnboarding"] as? Bool
+        forceRecordingSaveFailure = json["forceRecordingSaveFailure"] as? Bool ?? false
     }
 }
 #endif

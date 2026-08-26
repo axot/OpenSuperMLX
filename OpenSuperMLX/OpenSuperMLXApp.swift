@@ -77,6 +77,7 @@ class AppState: ObservableObject {
     }
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
@@ -84,6 +85,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var microphoneService = MicrophoneService.shared
     private var microphoneObserver: AnyCancellable?
     private var transcriptMCPServer: TranscriptMCPHTTPServer?
+    private let saveCoordinator: RecordingSaveCoordinator
+    private let recoveryPresenter: () -> Void
+
+    override convenience init() {
+        self.init(
+            saveCoordinator: .shared,
+            recoveryPresenter: { RecordingRecoveryPanelController.shared.show() }
+        )
+    }
+
+    init(
+        saveCoordinator: RecordingSaveCoordinator,
+        recoveryPresenter: @escaping () -> Void
+    ) {
+        self.saveCoordinator = saveCoordinator
+        self.recoveryPresenter = recoveryPresenter
+        super.init()
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBarItem()
@@ -104,6 +123,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationWillTerminate(_ notification: Notification) {
         transcriptMCPServer?.stop()
         transcriptMCPServer = nil
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard saveCoordinator.blocksNewRecording else { return .terminateNow }
+        recoveryPresenter()
+        return .terminateCancel
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
