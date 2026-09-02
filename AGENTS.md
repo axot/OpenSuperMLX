@@ -123,16 +123,19 @@ If no Developer ID identity is installed, `./run.sh` uses `OpenSuperMLX Dev` whe
 # All unit tests
 xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  -skipPackagePluginValidation -skipMacroValidation \
   CODE_SIGNING_ALLOWED=NO -only-testing:OpenSuperMLXTests
 
 # Single test class
 xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  -skipPackagePluginValidation -skipMacroValidation \
   CODE_SIGNING_ALLOWED=NO -only-testing:OpenSuperMLXTests/ITNProcessorTests
 
 # Single test method
 xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  -skipPackagePluginValidation -skipMacroValidation \
   CODE_SIGNING_ALLOWED=NO \
   -only-testing:OpenSuperMLXTests/ITNProcessorTests/testCleanDuplicateChinesePunctuation
 ```
