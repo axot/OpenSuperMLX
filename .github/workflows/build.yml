@@ -53,6 +53,8 @@ jobs:
         run: |
           chmod +x ./Scripts/resolve_and_patch.sh
           ./Scripts/resolve_and_patch.sh
+      - name: Verify SPM resolution is reproducible
+        run: git diff --exit-code -- OpenSuperMLX.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
       - name: Save SwiftPM cache
         if: steps.spm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
@@ -68,6 +70,8 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath SourcePackages \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             -only-testing:OpenSuperMLXUnitTests 2>&1 | xcpretty
       - name: Run integration tests (hosted)
@@ -77,6 +81,8 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath SourcePackages \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             -only-testing:OpenSuperMLXTests \
             -skip-testing:OpenSuperMLXTests/BenchmarkTests \

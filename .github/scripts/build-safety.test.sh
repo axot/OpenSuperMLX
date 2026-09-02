@@ -59,6 +59,32 @@ assert_test_step_uses_pipefail() {
     fi
 }
 
+assert_test_step_skips_package_validation() {
+    local step_name="$1"
+    local step_block
+
+    step_block="$(extract_workflow_step "$step_name")"
+    if [[ "$step_block" != *"-skipPackagePluginValidation"* ]]; then
+        printf '%s must skip Swift package plug-in validation\n' "$step_name" >&2
+        return 1
+    fi
+    if [[ "$step_block" != *"-skipMacroValidation"* ]]; then
+        printf '%s must skip Swift macro validation\n' "$step_name" >&2
+        return 1
+    fi
+}
+
+assert_spm_resolution_is_reproducible() {
+    local step_block
+
+    step_block="$(extract_workflow_step "Verify SPM resolution is reproducible")"
+    if [[ "$step_block" != *"git diff --exit-code --"* ||
+          "$step_block" != *"OpenSuperMLX.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"* ]]; then
+        echo "CI must fail when SPM resolution rewrites Package.resolved" >&2
+        return 1
+    fi
+}
+
 assert_hosted_tests_skip_audio_graph() {
     local step_block
 
@@ -232,6 +258,12 @@ run_case "unit test step preserves xcodebuild failure" \
     assert_test_step_uses_pipefail "Run unit tests (hostless)"
 run_case "integration test step preserves xcodebuild failure" \
     assert_test_step_uses_pipefail "Run integration tests (hosted)"
+run_case "unit tests allow declared Swift package plug-ins" \
+    assert_test_step_skips_package_validation "Run unit tests (hostless)"
+run_case "integration tests allow declared Swift package plug-ins" \
+    assert_test_step_skips_package_validation "Run integration tests (hosted)"
+run_case "SPM resolution must leave Package.resolved unchanged" \
+    assert_spm_resolution_is_reproducible
 run_case "hosted tests skip hardware-dependent audio graph tests" \
     assert_hosted_tests_skip_audio_graph
 run_case "libomp codesign failure stops run.sh" \
