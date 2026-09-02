@@ -36,7 +36,7 @@ class ContinuousChunkProcessor {
 
     private let config: StreamingConfig
     private let model: Qwen3ASRModel
-    private let tokenizer: any Tokenizer
+    private let tokenizer: any Tokenizers.Tokenizer
 
     private var encoderCache: EncoderWindowCache
     private var accumulatedMel: MLXArray?
@@ -51,7 +51,7 @@ class ContinuousChunkProcessor {
     private var prevPrefillEmbeds: MLXArray?
     private(set) var allDecodedTokens: [Int] = []
 
-    init(model: Qwen3ASRModel, tokenizer: any Tokenizer, config: StreamingConfig) {
+    init(model: Qwen3ASRModel, tokenizer: any Tokenizers.Tokenizer, config: StreamingConfig) {
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
