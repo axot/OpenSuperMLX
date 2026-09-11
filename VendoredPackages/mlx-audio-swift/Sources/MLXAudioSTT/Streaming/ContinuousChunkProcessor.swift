@@ -132,6 +132,13 @@ class ContinuousChunkProcessor {
             isFinal: isFinal
         )
 
+        if isFinal {
+            return Self.finalizeDecodedTokens(
+                history: &allDecodedTokens, guardAction: guardAction,
+                committer: &textCommitter, config: config
+            )
+        }
+
         switch guardAction {
         case .recoveryReset:
             let stable = textCommitter.stableTokens
@@ -151,10 +158,9 @@ class ContinuousChunkProcessor {
                 allDecodedTokens = filteredNewTokens
             }
 
-            let commitResult = textCommitter.processChunkTokens(allDecodedTokens, isFinal: isFinal)
+            let commitResult = textCommitter.processChunkTokens(allDecodedTokens, isFinal: false)
 
-            if !isFinal
-                && config.pastTextConditioning
+            if config.pastTextConditioning
                 && chunkIndex >= config.coldStartChunks
                 && (chunkIndex + 1) % config.resetIntervalChunks == 0
             {
@@ -388,6 +394,33 @@ class ContinuousChunkProcessor {
     }
 
     // MARK: - Static Helpers (Testable)
+
+    static func finalizeDecodedTokens(
+        history: inout [Int],
+        guardAction: GuardAction,
+        committer: inout StreamingTextCommitter,
+        config: StreamingConfig
+    ) -> ChunkProcessingResult {
+        let acceptedTokenCount = history.count
+        switch guardAction {
+        case .recoveryReset:
+            cpLogger.warning("final decode rejected: retaining \(acceptedTokenCount, privacy: .public) accepted tokens")
+        case .ok(let newTokens) where newTokens.isEmpty:
+            cpLogger.info("final decode has no replacement text: retaining \(acceptedTokenCount, privacy: .public) accepted tokens")
+        case .ok(let newTokens):
+            let rollback = config.pastTextConditioning
+                ? min(config.rollbackTokens, history.count) : history.count
+            history = Array(history.dropLast(rollback)) + newTokens
+        }
+
+        let result = committer.processChunkTokens(history, isFinal: true)
+        return ChunkProcessingResult(
+            confirmedTokens: result.confirmedTokens,
+            provisionalTokens: result.provisionalTokens,
+            newlyEmittedTokens: result.newlyEmittedTokens,
+            action: .normal
+        )
+    }
 
     static func findEmbeddingPrefixMatch(current: MLXArray, previous: MLXArray?) -> Int {
         guard let previous = previous else { return 0 }
