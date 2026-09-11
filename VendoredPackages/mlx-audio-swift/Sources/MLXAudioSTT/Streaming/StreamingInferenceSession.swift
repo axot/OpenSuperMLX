@@ -42,6 +42,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var lastFullResetSampleCount: Int = 0
     private var postResetSilenceWarned: Bool = false
     private var previousConfirmedText: String = ""
+    private var finalizationBaseline: String = ""
 
     private var chunkProcessor: ContinuousChunkProcessor?
     private var chunkMelBuffer: MLXArray?
@@ -204,22 +205,13 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 provisionalText = ""
             }
 
-            let newlyEmittedText: String
-            if safeConfirmedText.hasPrefix(previousConfirmedText) {
-                newlyEmittedText = String(safeConfirmedText.dropFirst(previousConfirmedText.count))
-            } else if !safeConfirmedText.isEmpty && !previousConfirmedText.isEmpty {
-                let commonLen = zip(safeConfirmedText, previousConfirmedText)
-                    .prefix(while: { $0 == $1 }).count
-                let divergent = String(safeConfirmedText.dropFirst(commonLen))
-                Self.logger.warning("Confirmed text prefix changed at offset \(commonLen, privacy: .public) — emitting from divergence point")
-                newlyEmittedText = divergent
-            } else {
-                newlyEmittedText = safeConfirmedText
-            }
-            previousConfirmedText = safeConfirmedText
-            if result.action == .periodicReset || result.action == .recoveryReset {
-                previousConfirmedText = ""
-            }
+            let newlyEmittedText = Self.consumeConfirmedText(
+                safeConfirmedText,
+                previousText: &previousConfirmedText,
+                finalizationBaseline: &finalizationBaseline,
+                isFinal: isFinal,
+                action: result.action
+            )
 
             let displayConfirmed: String = shared.withLock { state in
                 state.committedTokenIds = result.confirmedTokens
@@ -264,6 +256,36 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     // MARK: - Decoder Helpers
 
+    static func consumeConfirmedText(
+        _ confirmedText: String,
+        previousText: inout String,
+        finalizationBaseline: inout String,
+        isFinal: Bool,
+        action: ChunkAction
+    ) -> String {
+        let baseline = isFinal ? finalizationBaseline : previousText
+        let newlyEmittedText: String
+        if confirmedText.hasPrefix(baseline) {
+            newlyEmittedText = String(confirmedText.dropFirst(baseline.count))
+        } else if !confirmedText.isEmpty && !baseline.isEmpty {
+            let commonPrefixLength = zip(confirmedText, baseline)
+                .prefix(while: { $0 == $1 }).count
+            Self.logger.warning("Confirmed text prefix changed at offset \(commonPrefixLength, privacy: .public) — emitting from divergence point")
+            newlyEmittedText = String(confirmedText.dropFirst(commonPrefixLength))
+        } else {
+            newlyEmittedText = confirmedText
+        }
+        previousText = confirmedText
+        if !finalizationBaseline.hasPrefix(confirmedText) {
+            finalizationBaseline = confirmedText
+        }
+        if action == .periodicReset || action == .recoveryReset {
+            previousText = ""
+            finalizationBaseline = ""
+        }
+        return newlyEmittedText
+    }
+
     static func resolveEffectiveLanguage(configLanguage: String, detectedLanguage: String) -> String {
         let configLang = configLanguage.trimmingCharacters(in: .whitespaces).lowercased()
         if !configLang.isEmpty && configLang != "auto" {
@@ -290,6 +312,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         hasProducedFirstToken = false
         postResetSilenceWarned = false
         previousConfirmedText = ""
+        finalizationBaseline = ""
         shared.withLock {
             $0.committedTokenIds = []
             $0.chunkCount = 0

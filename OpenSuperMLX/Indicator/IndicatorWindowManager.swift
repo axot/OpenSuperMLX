@@ -21,22 +21,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         viewModel = newViewModel
 
         if window == nil {
-            // NSPanel for full-screen space compatibility
-            let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-
-            panel.isFloatingPanel = true
-            panel.backgroundColor = .clear
-            panel.isOpaque = false
-            panel.hasShadow = false
-            panel.ignoresMouseEvents = true
-            panel.hidesOnDeactivate = false
-
-            self.window = panel
+            window = Self.makePanel()
         }
 
         let targetScreen = point.flatMap { FocusUtils.screenContaining(point: $0) } ?? NSScreen.main
@@ -66,6 +51,25 @@ class IndicatorWindowManager: IndicatorViewDelegate {
 
         window?.orderFront(nil)
         return newViewModel
+    }
+
+    static func makePanel() -> NSPanel {
+        // NSPanel for full-screen space compatibility
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        panel.isFloatingPanel = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.canHide = false
+        panel.hidesOnDeactivate = false
+        return panel
     }
     
     func stopRecording() {
