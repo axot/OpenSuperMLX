@@ -64,6 +64,8 @@ public enum TranscriptionEvent: Sendable {
 
 public struct StreamingStats: Sendable {
     public var isComplete: Bool = true
+    /// Present only on the event announcing a newly skipped recording range.
+    public var recoveryGap: StreamingTranscriptionGap?
     public var encodedWindowCount: Int
     public var totalAudioSeconds: Double
     public var tokensPerSecond: Double
@@ -85,5 +87,34 @@ public struct StreamingStats: Sendable {
         self.realTimeFactor = realTimeFactor
         self.peakMemoryGB = peakMemoryGB
         self.chunkElapsedSeconds = chunkElapsedSeconds
+    }
+}
+
+// MARK: - Transcription Gaps
+
+public struct StreamingTranscriptionGap: Sendable, Equatable, Encodable {
+    public let startSeconds: Double
+    public let endSeconds: Double
+    public let reason: String
+
+    public init(startSeconds: Double, endSeconds: Double, reason: String) {
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
+        self.reason = reason
+    }
+
+    public var timeRange: String {
+        "\(Self.timestamp(startSeconds))–\(Self.timestamp(endSeconds))"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+        case reason
+    }
+
+    private static func timestamp(_ seconds: Double) -> String {
+        let tenths = Int((seconds * 10).rounded())
+        return String(format: "%02d:%02d.%d", tenths / 600, tenths / 10 % 60, tenths % 10)
     }
 }

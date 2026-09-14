@@ -63,10 +63,15 @@ after the recovery endpoint is processed once. Watchdogs measure consumed audio,
 so a large feed does not count queued audio as time already spent decoding.
 Inference resets preserve the frontend, queued mel, and accepted pending tail.
 
-If recovery cannot finish, inference is suspended and `is_complete` is false in
-the CLI result. Recording continues in the app so the saved audio can be
-transcribed later. Successful recovery does not guarantee correct words at the
-boundary or remove misrecognitions already present in the checkpoint.
+If recovery cannot finish, the checkpointed range is skipped and transcription
+continues from its end with fresh inference state. The frontend and queued audio
+are preserved. `is_complete` stays false, and the CLI result's `gaps` array reports
+each skipped range with `start_seconds`, `end_seconds`, and `reason`. These positions
+refer to the source recording; synthetic tail silence is excluded. Recording
+continues in the app, which reports the file name, time range, and failure reason
+in error logs and in the pipeline trace when Debug Mode is enabled.
+Successful recovery does not guarantee correct words at the boundary or remove
+misrecognitions already present in the checkpoint.
 
 ```bash
 $BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --json --verbose
@@ -74,9 +79,10 @@ $BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --di
 ```
 
 `--chunk-duration` controls file feeding, not the 2-second decode cadence.
-Recovery log ranges are inference mel-frame coordinates (100 frames/second),
-not archive timestamps across capture drops or full stream resets. The existing
-capture backpressure policy is unchanged. This path does not alter the separate
+Recovery-attempt mel ranges are inference coordinates (100 frames/second).
+Failure reports additionally include recording positions that account for
+capture backpressure drops and inference resets. The existing capture
+backpressure policy is unchanged. This path does not alter the separate
 `transcribe` command.
 
 ## Transcript MCP Bridge

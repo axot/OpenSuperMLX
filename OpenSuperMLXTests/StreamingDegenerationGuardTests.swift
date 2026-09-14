@@ -46,6 +46,7 @@ final class StreamingDegenerationGuardTests: XCTestCase {
         )
 
         XCTAssertEqual(action, .recoveryReset)
+        XCTAssertEqual(guard_.rejectionReason, "block_pattern period=3 repetitions=4 candidate_tokens=12")
     }
 
     func testBlockPatternInPrefixPlusNew() {
@@ -105,6 +106,7 @@ final class StreamingDegenerationGuardTests: XCTestCase {
         )
 
         XCTAssertEqual(action, .ok(filteredNewTokens: [1, 2, 3, 4, 5, 6, 7, 8]))
+        XCTAssertNil(guard_.rejectionReason)
     }
 
     // MARK: - CJK uses same threshold
@@ -134,6 +136,12 @@ final class StreamingDegenerationGuardTests: XCTestCase {
         )
 
         XCTAssertEqual(action, .recoveryReset)
+        XCTAssertEqual(guard_.rejectionReason, "single_token_run dropped=8 threshold=8")
+        _ = guard_.evaluateChunk(
+            prefixTokens: [], newChunkTokens: [1, 2, 3],
+            stableTokenCount: 0, hitMaxTokens: false, isFinal: false
+        )
+        XCTAssertNil(guard_.rejectionReason)
     }
 
     // MARK: - Stagnation counter reset

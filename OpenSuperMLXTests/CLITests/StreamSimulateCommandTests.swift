@@ -4,6 +4,7 @@
 import XCTest
 
 import ArgumentParser
+import MLXAudioSTT
 @testable import OpenSuperMLX
 
 @MainActor
@@ -79,5 +80,21 @@ final class StreamSimulateCommandTests: XCTestCase {
         XCTAssertEqual(data?["chunk_duration_s"] as? Double, 0.5)
         XCTAssertEqual(data?["intermediate_updates"] as? Int, 8)
         XCTAssertEqual(data?["is_complete"] as? Bool, true)
+    }
+
+    func testIncompleteResultIncludesTheSkippedAudioLocations() throws {
+        let result = StreamSimulateResult(
+            text: "before after", language: "auto", model: "test",
+            audioDurationS: 20, processingTimeS: 1, chunksFed: 40,
+            chunkDurationS: 0.5, intermediateUpdates: 10, isComplete: false,
+            gaps: [.init(startSeconds: 8, endSeconds: 10, reason: "token_limit")]
+        )
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any]
+        let gaps = object?["gaps"] as? [[String: Any]]
+        XCTAssertEqual(object?["is_complete"] as? Bool, false)
+        XCTAssertEqual(gaps?.count, 1)
+        XCTAssertEqual(gaps?.first?["start_seconds"] as? Double, 8)
+        XCTAssertEqual(gaps?.first?["end_seconds"] as? Double, 10)
+        XCTAssertEqual(gaps?.first?["reason"] as? String, "token_limit")
     }
 }

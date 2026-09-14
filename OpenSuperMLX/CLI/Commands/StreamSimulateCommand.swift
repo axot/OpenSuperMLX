@@ -4,6 +4,7 @@
 import Foundation
 
 import ArgumentParser
+import MLXAudioSTT
 
 struct StreamSimulateCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -103,7 +104,8 @@ struct StreamSimulateCommand: ParsableCommand {
                 chunksFed: injectionResult.chunksFed,
                 chunkDurationS: chunkDuration,
                 intermediateUpdates: injectionResult.intermediateUpdates,
-                isComplete: injectionResult.isComplete
+                isComplete: injectionResult.isComplete,
+                gaps: injectionResult.gaps
             )
             return .success(data)
         } catch let error as StreamingAudioError {
@@ -133,6 +135,7 @@ struct StreamSimulateResult: Encodable {
     let chunkDurationS: Double
     let intermediateUpdates: Int
     var isComplete: Bool = true
+    var gaps: [StreamingTranscriptionGap] = []
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
@@ -142,5 +145,6 @@ struct StreamSimulateResult: Encodable {
         case chunkDurationS = "chunk_duration_s"
         case intermediateUpdates = "intermediate_updates"
         case isComplete = "is_complete"
+        case gaps
     }
 }

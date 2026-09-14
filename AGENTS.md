@@ -164,7 +164,7 @@ When changing this path, preserve these invariants:
 - Bind recovery to saved mel-frame/text checkpoints. Preserve that checkpoint's complete accepted text, including its pending tail; never promote the rejected candidate. A checkpoint is not a word timestamp: do not assume the last five tokens belong entirely to the last audio window.
 - Re-decode retained mel with empty text conditioning, a fresh encoder cache, and fresh decoder KV. Replace the affected suffix atomically. Preserve real repetitions and leading spaces at the frozen boundary through later emissions, resets, and stop.
 - Process queued mel once. Inference watchdogs count consumed mel frames, excluding recovery replay; inference resets preserve the frontend, queued mel, and accepted pending text.
-- Failed recovery freezes accepted text and suspends inference while recording continues. Stop must finalize accepted pending tokens exactly once, even without residual mel; cancellation must suppress later completion.
+- Failed recovery preserves the checkpoint text, skips the affected audio range, and continues with fresh inference while preserving the frontend and queued mel. Report the failure reason and saved-recording time range, accounting for backpressure drops and inference resets; transcript completeness stays false. Stop must finalize accepted pending tokens exactly once, even without residual mel; cancellation must suppress later completion.
 - Text similarity and `is_complete` are not hallucination-confidence scores. Unit tests establish state behavior; use audio replay to assess transcription quality and boundary words.
 
 Run the relevant hosted tests when editing these components:
@@ -177,6 +177,9 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -only-testing:OpenSuperMLXTests/StreamingWindowRecoveryTests \
   -only-testing:OpenSuperMLXTests/StreamingInferenceSessionTests \
   -only-testing:OpenSuperMLXTests/StreamingInferenceSessionRecoveryTests \
+  -only-testing:OpenSuperMLXTests/StreamingInferenceSessionGapTests \
+  -only-testing:OpenSuperMLXTests/StreamingAudioTimelineTests \
+  -only-testing:OpenSuperMLXTests/StreamingTypesTests \
   -only-testing:OpenSuperMLXTests/StreamSimulateCommandTests
 ```
 

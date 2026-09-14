@@ -17,6 +17,7 @@ struct ChunkProcessingResult {
     let provisionalTokens: [Int]
     let newlyEmittedTokens: [Int]
     let action: ChunkAction
+    var rejectionReason: String? = nil
 }
 
 // MARK: - ChunkAction
@@ -108,7 +109,8 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
             cpLogger.info("chunk[\(self.chunkIndex)] coldStart: accMel=\(self.accumulatedMelFrameCount) encWin=\(self.encodedWindowCount)")
             return ChunkProcessingResult(
                 confirmedTokens: [], provisionalTokens: [],
-                newlyEmittedTokens: [], action: .coldStart
+                newlyEmittedTokens: [], action: .coldStart,
+                rejectionReason: "audio_features_unavailable"
             )
         }
 
@@ -153,9 +155,11 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
         let newTokenIds = Self.filterTextTokens(rawNewTokenIds)
         if decoded.repeated || (isRecovery && hitMaxTokens) {
+            let reason = decoded.repeated ? "history_repetition" : "token_limit"
             return ChunkProcessingResult(
                 confirmedTokens: textCommitter.stableTokens, provisionalTokens: [],
-                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected
+                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected,
+                rejectionReason: "\(reason) generated_tokens=\(rawNewTokenIds.count) limit=\(isRecovery ? 256 : config.maxNewTokensPerChunk) eos=false"
             )
         }
 
@@ -170,7 +174,8 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
         if guardAction == .recoveryReset && (config.repetitionRecoveryEnabled || isRecovery) {
             return ChunkProcessingResult(
                 confirmedTokens: textCommitter.stableTokens, provisionalTokens: [],
-                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected
+                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected,
+                rejectionReason: "\(degenerationGuard.rejectionReason ?? "degeneration") generated_tokens=\(rawNewTokenIds.count) eos=\(!hitMaxTokens)"
             )
         }
 

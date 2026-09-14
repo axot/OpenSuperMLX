@@ -23,6 +23,7 @@ struct StreamingDegenerationGuard: Sendable {
     let droppedTokensRecovery: Int
 
     private(set) var stagnantChunkCount: Int = 0
+    private(set) var rejectionReason: String?
 
     init(
         maxSingleTokenRun: Int = 12,
@@ -47,6 +48,7 @@ struct StreamingDegenerationGuard: Sendable {
         hitMaxTokens: Bool,
         isFinal: Bool
     ) -> GuardAction {
+        rejectionReason = nil
         let (filteredNew, droppedCount) = suppressSingleTokenRuns(
             prefixTokens: prefixTokens,
             newChunkTokens: newChunkTokens
@@ -54,13 +56,15 @@ struct StreamingDegenerationGuard: Sendable {
 
         if droppedCount >= droppedTokensRecovery {
             let threshold = droppedTokensRecovery
+            rejectionReason = "single_token_run dropped=\(droppedCount) threshold=\(threshold)"
             guardLogger.warning("RECOVERY: singleTokenRun dropped=\(droppedCount) (threshold=\(threshold))")
             stagnantChunkCount = 0
             return .recoveryReset
         }
 
         let candidateTokens = prefixTokens + filteredNew
-        if hasBlockPattern(candidateTokens) {
+        if let period = blockPatternPeriod(candidateTokens) {
+            rejectionReason = "block_pattern period=\(period) repetitions=\(blockPatternMinReps) candidate_tokens=\(candidateTokens.count)"
             guardLogger.warning("RECOVERY: blockPattern detected in \(candidateTokens.count) tokens")
             stagnantChunkCount = 0
             return .recoveryReset
@@ -74,6 +78,7 @@ struct StreamingDegenerationGuard: Sendable {
             guardLogger.info("stagnation: advance=\(candidateAdvance) count=\(count)/\(threshold) candidates=\(candidateTokens.count) stable=\(stableTokenCount)")
             if stagnantChunkCount >= stagnationThreshold {
                 let reached = stagnantChunkCount
+                rejectionReason = "stagnation chunks=\(reached) advance=\(candidateAdvance)"
                 guardLogger.warning("RECOVERY: stagnation threshold reached (\(reached) chunks)")
                 stagnantChunkCount = 0
                 return .recoveryReset
@@ -91,6 +96,7 @@ struct StreamingDegenerationGuard: Sendable {
 
     mutating func resetStagnation() {
         stagnantChunkCount = 0
+        rejectionReason = nil
     }
 
     // MARK: - Layer 1: Single-token run suppression
@@ -136,8 +142,8 @@ struct StreamingDegenerationGuard: Sendable {
 
     // MARK: - Layer 2: Block pattern detection
 
-    private func hasBlockPattern(_ tokens: [Int]) -> Bool {
-        guard blockPatternMaxPeriod >= 2 else { return false }
+    private func blockPatternPeriod(_ tokens: [Int]) -> Int? {
+        guard blockPatternMaxPeriod >= 2 else { return nil }
         for period in 2...blockPatternMaxPeriod {
             let requiredLength = period * blockPatternMinReps
             guard tokens.count >= requiredLength else { continue }
@@ -158,9 +164,9 @@ struct StreamingDegenerationGuard: Sendable {
                 }
             }
 
-            if allMatch { return true }
+            if allMatch { return period }
         }
 
-        return false
+        return nil
     }
 }

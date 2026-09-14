@@ -12,6 +12,9 @@ final class StreamingWindowRecoveryTests: XCTestCase {
         XCTAssertEqual(recovery.activeCheckpoint?.frame, 0)
         XCTAssertEqual(recovery.render("ABCD"), "accepted ABCDABCD")
         XCTAssertEqual(recovery.render(" word"), "accepted ABCD word")
+        recovery.reset(confirmedPrefix: "after gap", frame: 1000)
+        XCTAssertEqual(recovery.begin(endFrame: 1200, availableStartFrame: 1000)?.frame, 1000)
+        XCTAssertEqual(recovery.render(" more"), "after gap more")
     }
 
     func testRecoveryFreezesPreviousWindowIncludingItsPendingTail() {

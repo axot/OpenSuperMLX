@@ -67,3 +67,23 @@ final class StreamingAudioServiceTranscriptTests: XCTestCase {
         XCTAssertTrue(store.listSessions().isEmpty)
     }
 }
+
+final class StreamingAudioServiceFinalTextTests: XCTestCase {
+    func testGapFinalizationPreservesRealRepetitionsAcrossSegments() {
+        let text = "同じ言葉。同じ言葉。同じ言葉。"
+        XCTAssertEqual(StreamingAudioService.finalizedText(text, hasGaps: true), text)
+    }
+
+    func testCompleteSessionStillCleansRepeatedSentences() {
+        XCTAssertEqual(
+            StreamingAudioService.finalizedText("同じ言葉。同じ言葉。同じ言葉。", hasGaps: false),
+            "同じ言葉。同じ言葉。"
+        )
+    }
+
+    func testGapFinalizationPreservesEmptyTextAndBoundaryWhitespace() {
+        for text in ["", " before  after ", "甲\u{200B}乙"] {
+            XCTAssertEqual(StreamingAudioService.finalizedText(text, hasGaps: true), text)
+        }
+    }
+}

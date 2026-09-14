@@ -11,10 +11,13 @@ struct StreamingWindowRecovery: Sendable {
     private let maximumWindows: Int
     private var checkpoints = [Checkpoint(frame: 0, text: "")]
     private var lastAccepted = Checkpoint(frame: 0, text: "")
+    private var windowOrigin = 0
     private(set) var activeCheckpoint: Checkpoint?
 
     var checkpointCount: Int { checkpoints.count }
+    var earliestCheckpointFrame: Int { checkpoints[0].frame }
     var acceptedText: String { lastAccepted.text }
+    var acceptedFrame: Int { lastAccepted.frame }
 
     init(windowFrames: Int, maximumWindows: Int) {
         precondition(windowFrames > 0 && maximumWindows > 0)
@@ -27,9 +30,9 @@ struct StreamingWindowRecovery: Sendable {
     mutating func record(endFrame: Int, confirmed: String, pending: String) {
         let snapshot = Checkpoint(frame: endFrame, text: confirmed + pending)
         let boundary: Checkpoint?
-        if endFrame % windowFrames == 0 {
+        if (endFrame - windowOrigin) % windowFrames == 0 {
             boundary = snapshot
-        } else if endFrame / windowFrames > lastAccepted.frame / windowFrames {
+        } else if (endFrame - windowOrigin) / windowFrames > (lastAccepted.frame - windowOrigin) / windowFrames {
             boundary = lastAccepted
         } else {
             boundary = nil
@@ -45,18 +48,23 @@ struct StreamingWindowRecovery: Sendable {
 
     mutating func begin(endFrame: Int, availableStartFrame: Int) -> Checkpoint? {
         guard endFrame > availableStartFrame else { return nil }
-        let windowStart = (endFrame - 1) / windowFrames * windowFrames
+        let windowStart = max(
+            availableStartFrame,
+            windowOrigin + (endFrame - windowOrigin - 1) / windowFrames * windowFrames
+        )
         guard let checkpoint = checkpoints.last(where: {
             $0.frame <= windowStart && $0.frame >= availableStartFrame
         }) else { return nil }
         activeCheckpoint = checkpoint
+        windowOrigin = checkpoint.frame
         checkpoints.removeAll { $0.frame > checkpoint.frame }
         lastAccepted = checkpoint
         return checkpoint
     }
 
-    mutating func reset(confirmedPrefix: String = "") {
-        let checkpoint = Checkpoint(frame: 0, text: confirmedPrefix)
+    mutating func reset(confirmedPrefix: String = "", frame: Int = 0) {
+        let checkpoint = Checkpoint(frame: frame, text: confirmedPrefix)
+        windowOrigin = frame
         checkpoints = [checkpoint]
         lastAccepted = checkpoint
         activeCheckpoint = checkpoint

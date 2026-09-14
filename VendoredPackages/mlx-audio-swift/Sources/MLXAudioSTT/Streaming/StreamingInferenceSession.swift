@@ -45,8 +45,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private var previousConfirmedText: String = ""
     private var finalizationBaseline: String = ""
     private var windowRecovery: StreamingWindowRecovery
-    private var inferenceFailed = false
-    private var failedRecoveryMel: MLXArray?
+    private var hasTranscriptionGaps = false
+    private var nextProcessorMelFrame = 0
+    private var audioTimeline: StreamingAudioTimeline
 
     private var chunkProcessor: (any StreamingChunkProcessing)?
     private var chunkMelBuffer: MLXArray?
@@ -57,9 +58,14 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     public let events: AsyncStream<TranscriptionEvent>
 
-    public convenience init(model: Qwen3ASRModel, config: StreamingConfig = StreamingConfig()) {
+    /// `sourceSampleLimit` excludes synthetic file-replay padding from reported gap positions.
+    public convenience init(
+        model: Qwen3ASRModel, config: StreamingConfig = StreamingConfig(),
+        sourceSampleLimit: Int? = nil
+    ) {
         self.init(
             config: config, sampleRate: model.sampleRate, melBins: model.config.audioConfig.numMelBins,
+            sourceSampleLimit: sourceSampleLimit,
             vadSegmenter: VADSegmenter(),
             decodeTokens: { model.tokenizer?.decode(tokens: $0) ?? "" },
             makeProcessor: { config, offset in
@@ -72,13 +78,15 @@ public class StreamingInferenceSession: @unchecked Sendable {
     }
 
     init(
-        config: StreamingConfig, sampleRate: Int, melBins: Int, vadSegmenter: VADSegmenter? = nil,
+        config: StreamingConfig, sampleRate: Int, melBins: Int, sourceSampleLimit: Int? = nil,
+        vadSegmenter: VADSegmenter? = nil,
         decodeTokens: @escaping ([Int]) -> String,
         makeProcessor: @escaping (StreamingConfig, Int) -> (any StreamingChunkProcessing)?
     ) {
         self.decodeTokens = decodeTokens
         self.makeProcessor = makeProcessor
         self.config = config
+        self.audioTimeline = StreamingAudioTimeline(sourceSampleLimit: sourceSampleLimit)
         self.windowRecovery = StreamingWindowRecovery(
             windowFrames: config.encoderWindowSizeMelFrames, maximumWindows: config.maxEncoderWindows
         )
@@ -109,14 +117,15 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     // MARK: - Audio Input
 
-    public func feedAudio(samples: [Float]) {
+    /// `skippedSamples` counts archived samples omitted immediately before this input batch.
+    public func feedAudio(samples: [Float], skippedSamples: Int = 0) {
         sessionLock.withLock { _ in
             guard isActive else {
                 Self.logger.warning("feedAudio: isActive=false, dropping \(samples.count) samples")
                 return
             }
             totalSamplesFed += samples.count
-            guard !inferenceFailed else { return }
+            audioTimeline.append(sampleCount: samples.count, skippedSamples: skippedSamples)
 
             _ = vadSegmenter?.feedSamples(samples)
             if let newMelFrames = melProcessor.process(samples: samples) {
@@ -124,6 +133,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 let chunksBefore = chunkProcessor?.chunkIndex ?? 0
                 let feedStart = ContinuousClock.now
                 processAccumulatedChunks()
+                let inferenceEndFrame = chunkProcessor?.endMelFrame ?? nextProcessorMelFrame
+                let earliestFrame = processedMelFrameCount - inferenceEndFrame
+                    + windowRecovery.earliestCheckpointFrame
+                audioTimeline.discardOffsets(before: max(0, earliestFrame) * 160)
                 let feedMs = feedStart.duration(to: .now).milliseconds
                 let chunksAfter = chunkProcessor?.chunkIndex ?? 0
                 let chunksProcessed = chunksAfter - chunksBefore
@@ -164,7 +177,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private func processChunk(melFrames: MLXArray, isFinal: Bool) {
         processedMelFrameCount += melFrames.dim(0)
         if chunkProcessor == nil {
-            chunkProcessor = makeProcessor(config, 0)
+            chunkProcessor = makeProcessor(config, nextProcessorMelFrame)
         }
         guard var processor = chunkProcessor else { return }
 
@@ -177,25 +190,39 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if result.action == .repetitionDetected {
             guard let checkpoint = windowRecovery.begin(
                 endFrame: processor.endMelFrame, availableStartFrame: processor.melFrameOffset
-            ), let replay = processor.recoveryMel(from: checkpoint.frame) else {
-                emitResult(processor.finalizeAccepted(), processor: processor, isFinal: true, startTime: startTime)
-                suspendInference(frozenText: shared.withLock { $0.mergedCommittedText })
+            ) else {
+                skipFailedRecovery(
+                    frozenText: windowRecovery.acceptedText, startFrame: windowRecovery.acceptedFrame,
+                    endFrame: processor.endMelFrame, reason: "checkpoint_unavailable"
+                )
+                return
+            }
+            guard let replay = processor.recoveryMel(from: checkpoint.frame) else {
+                skipFailedRecovery(
+                    frozenText: checkpoint.text, startFrame: checkpoint.frame,
+                    endFrame: processor.endMelFrame, reason: "recovery_mel_unavailable"
+                )
                 return
             }
             Self.logger.warning("Window recovery: inference mel [\(checkpoint.frame, privacy: .public), \(processor.endMelFrame, privacy: .public)); checkpointCharacters=\(checkpoint.text.count, privacy: .public), fresh encoder/prefix/KV")
             var recoveryConfig = config
             recoveryConfig.coldStartChunks = 0
             guard let replacement = makeProcessor(recoveryConfig, checkpoint.frame) else {
-                failedRecoveryMel = replay
-                suspendInference(frozenText: checkpoint.text)
+                skipFailedRecovery(
+                    frozenText: checkpoint.text, startFrame: checkpoint.frame,
+                    endFrame: processor.endMelFrame, reason: "processor_unavailable"
+                )
                 return
             }
             let candidate = replacement.processChunk(
                 melFrames: replay, language: lang, isFinal: isFinal, isRecovery: true
             )
             guard candidate.action == .normal else {
-                failedRecoveryMel = replay
-                suspendInference(frozenText: checkpoint.text)
+                skipFailedRecovery(
+                    frozenText: checkpoint.text, startFrame: checkpoint.frame,
+                    endFrame: processor.endMelFrame,
+                    reason: candidate.rejectionReason ?? "unexpected_recovery_action=\(candidate.action)"
+                )
                 return
             }
             chunkProcessor = replacement
@@ -345,7 +372,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
             peakMemoryGB: Double(Memory.peakMemory) / 1e9,
             chunkElapsedSeconds: decodeTime
         )
-        stats.isComplete = !inferenceFailed
+        stats.isComplete = !hasTranscriptionGaps
         continuation?.yield(.stats(stats))
         if hasProducedFirstToken && processedMelFrameCount - lastDecodeMelFrame > 100 * 20 {
             Self.logger.warning("No-decode watchdog: \(String(format: "%.1f", Double(self.processedMelFrameCount - self.lastDecodeMelFrame) / 100.0), privacy: .public)s without decode output — resetting inference context")
@@ -353,24 +380,41 @@ public class StreamingInferenceSession: @unchecked Sendable {
         }
     }
 
-    private func suspendInference(frozenText: String) {
-        inferenceFailed = true
+    private func skipFailedRecovery(frozenText: String, startFrame: Int, endFrame: Int, reason: String) {
+        let startSample = max(0, processedMelFrameCount - (endFrame - startFrame)) * 160
+        let sourceRange = audioTimeline.sourceRange(for: startSample..<(processedMelFrameCount * 160))
+        let gap = StreamingTranscriptionGap(
+            startSeconds: Double(sourceRange.lowerBound) / 16000,
+            endSeconds: Double(sourceRange.upperBound) / 16000,
+            reason: reason
+        )
+        hasTranscriptionGaps = hasTranscriptionGaps || !sourceRange.isEmpty
         chunkProcessor = nil
-        chunkMelBuffer = nil
-        chunkMelFrameCount = 0
-        melProcessor.reset()
-        vadSegmenter?.reset()
+        nextProcessorMelFrame = endFrame
+        windowRecovery.reset(confirmedPrefix: frozenText, frame: endFrame)
+        emptyRecoveryResets = 0
+        lastDecodeMelFrame = processedMelFrameCount
+        lastFullResetMelFrame = processedMelFrameCount
+        hasProducedFirstToken = false
+        postResetSilenceWarned = false
         previousConfirmedText = ""
         finalizationBaseline = ""
         shared.withLock {
             $0.mergedCommittedText = frozenText
             $0.committedTokenIds = []
+            $0.chunkCount = 0
         }
         continuation?.yield(.displayUpdate(confirmedText: frozenText, provisionalText: ""))
         var stats = StreamingStats(totalAudioSeconds: Double(totalSamplesFed) / 16000)
-        stats.isComplete = false
+        stats.isComplete = !hasTranscriptionGaps
+        if !sourceRange.isEmpty { stats.recoveryGap = gap }
         continuation?.yield(.stats(stats))
-        Self.logger.error("Window recovery failed; inference suspended with incomplete transcript. Recording input must be retained for retranscription.")
+        if sourceRange.isEmpty {
+            Self.logger.error("Window recovery failed in padding: reason=\(reason, privacy: .public); inference mel [\(startFrame, privacy: .public), \(endFrame, privacy: .public)); no recording audio skipped")
+        } else {
+            Self.logger.error("Window recovery failed: reason=\(reason, privacy: .public); skipped recording \(gap.timeRange, privacy: .public) [\(gap.startSeconds, privacy: .public), \(gap.endSeconds, privacy: .public))s, inference mel [\(startFrame, privacy: .public), \(endFrame, privacy: .public)); continuing with fresh inference")
+        }
+        Memory.clearCache()
     }
 
     // MARK: - Decoder Helpers
@@ -428,7 +472,7 @@ public class StreamingInferenceSession: @unchecked Sendable {
         let acceptedText = windowRecovery.acceptedText
         windowRecovery.reset(confirmedPrefix: acceptedText)
         chunkProcessor = nil
-        failedRecoveryMel = nil
+        nextProcessorMelFrame = 0
         emptyRecoveryResets = 0
         lastDecodeMelFrame = processedMelFrameCount
         lastFullResetMelFrame = processedMelFrameCount
@@ -451,7 +495,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
         chunkProcessor = nil
         chunkMelBuffer = nil
         chunkMelFrameCount = 0
-        failedRecoveryMel = nil
     }
 
     private func resetSharedState() {
@@ -482,17 +525,15 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
         sessionLock.withLock { _ in
             guard continuation != nil && !Task.isCancelled else { return }
-            if !inferenceFailed {
-                if let flushedMel = melProcessor.flush() {
-                    accumulateChunkMel(flushedMel)
-                }
-                if let remainingMel = chunkMelBuffer {
-                    processChunk(melFrames: remainingMel, isFinal: true)
-                    chunkMelBuffer = nil
-                    chunkMelFrameCount = 0
-                } else if let processor = chunkProcessor {
-                    emitResult(processor.finalizeAccepted(), processor: processor, isFinal: true, startTime: Date())
-                }
+            if let flushedMel = melProcessor.flush() {
+                accumulateChunkMel(flushedMel)
+            }
+            if let remainingMel = chunkMelBuffer {
+                processChunk(melFrames: remainingMel, isFinal: true)
+                chunkMelBuffer = nil
+                chunkMelFrameCount = 0
+            } else if let processor = chunkProcessor {
+                emitResult(processor.finalizeAccepted(), processor: processor, isFinal: true, startTime: Date())
             }
             let (finalText, tokenCount) = shared.withLock { ($0.mergedCommittedText, $0.committedTokenIds.count) }
             Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(tokenCount)")

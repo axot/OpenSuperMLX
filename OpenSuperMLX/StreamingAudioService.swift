@@ -101,6 +101,7 @@ class StreamingAudioService: ObservableObject {
     private var aacArchive: StreamingAACArchive?
     private var currentRecordingID: UUID?
     private var currentRecordingFileName: String?
+    private var hasTranscriptionGaps = false
     var transcriptSessionStore: TranscriptSessionStore = .shared
     private(set) var currentTranscriptSessionID: String?
 
@@ -978,7 +979,9 @@ class StreamingAudioService: ObservableObject {
                     }
 
                     let feedStart = ContinuousClock.now
-                    session.feedAudio(samples: feedSamples)
+                    session.feedAudio(
+                        samples: feedSamples, skippedSamples: split.archive.count - feedSamples.count
+                    )
                     let feedMs = feedStart.duration(to: .now).milliseconds
                     if feedMs > 500 {
                         logger.warning("feedAudio took \(feedMs, privacy: .public)ms for \(feedSamples.count, privacy: .public) samples — may be falling behind real-time")
@@ -1306,8 +1309,12 @@ class StreamingAudioService: ObservableObject {
             provisionalText = provisional
 
         case .stats(let stats):
-            if !stats.isComplete {
-                ErrorToastManager.shared.show("Transcription recovery failed. Audio recording continues; retranscribe the saved recording.")
+            if let gap = stats.recoveryGap {
+                let fileName = currentRecordingFileName ?? "unknown"
+                let details = "recording=\(fileName) start_seconds=\(gap.startSeconds) end_seconds=\(gap.endSeconds) reason=\(gap.reason)"
+                logger.error("Transcription gap: \(details, privacy: .public)")
+                PipelineTrace.shared.log("TRANSCRIPTION_GAP", details)
+                ErrorToastManager.shared.show("Transcription skipped \(gap.timeRange). Continuing; audio is still being saved.")
             }
             if AppPreferences.shared.debugMode {
                 logger.debug(
@@ -1316,7 +1323,7 @@ class StreamingAudioService: ObservableObject {
             }
 
         case .ended(let fullText):
-            let cleaned = RepetitionCleaner.clean(fullText)
+            let cleaned = Self.finalizedText(fullText, hasGaps: hasTranscriptionGaps)
             confirmedText = cleaned
             provisionalText = ""
             logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public) → cleaned: \(cleaned.count, privacy: .public)")
@@ -1327,6 +1334,7 @@ class StreamingAudioService: ObservableObject {
 
     @discardableResult
     func beginTranscriptSession(startedAt: Date = Date()) -> String {
+        hasTranscriptionGaps = false
         let sessionID = transcriptSessionStore.startSession(startedAt: startedAt)
         currentTranscriptSessionID = sessionID
         return sessionID
@@ -1349,6 +1357,9 @@ class StreamingAudioService: ObservableObject {
     }
 
     func recordTranscriptEvent(_ event: TranscriptionEvent, elapsedMs: Int) {
+        if case .stats(let stats) = event {
+            hasTranscriptionGaps = hasTranscriptionGaps || !stats.isComplete
+        }
         guard let sessionID = currentTranscriptSessionID else { return }
 
         do {
@@ -1378,7 +1389,7 @@ class StreamingAudioService: ObservableObject {
                 break
             case .ended(let fullText):
                 endCurrentTranscriptSession(
-                    finalText: RepetitionCleaner.clean(fullText),
+                    finalText: Self.finalizedText(fullText, hasGaps: hasTranscriptionGaps),
                     elapsedMs: elapsedMs
                 )
             }
@@ -1393,6 +1404,10 @@ class StreamingAudioService: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    nonisolated static func finalizedText(_ text: String, hasGaps: Bool) -> String {
+        hasGaps ? text : RepetitionCleaner.clean(text)
+    }
 
     private func playNotificationSound() {
         guard AppPreferences.shared.playSoundOnRecordStart else { return }
@@ -1409,6 +1424,7 @@ class StreamingAudioService: ObservableObject {
     }
 
     private func clearState() {
+        hasTranscriptionGaps = false
         confirmedText = ""
         provisionalText = ""
         isSpeechDetected = false
@@ -1448,6 +1464,7 @@ class StreamingAudioService: ObservableObject {
         let intermediateUpdates: Int
         let audioDurationS: Double
         var isComplete: Bool = true
+        var gaps: [StreamingTranscriptionGap] = []
     }
 
     var ringBufferSampleCount: Int {
@@ -1495,7 +1512,7 @@ class StreamingAudioService: ObservableObject {
         let mappedLanguage = Self.mapLanguageCode(language)
         var config = StreamingConfig(language: mappedLanguage, temperature: temperature)
         config.repetitionRecoveryEnabled = repetitionRecoveryEnabled
-        let session = StreamingInferenceSession(model: model, config: config)
+        let session = StreamingInferenceSession(model: model, config: config, sourceSampleLimit: samples.count)
 
         shouldStopFeeding.withLock { $0 = false }
 
@@ -1503,6 +1520,7 @@ class StreamingAudioService: ObservableObject {
         let collectedFinalText = OSAllocatedUnfairLock(initialState: "")
         let collectedConfirmedText = OSAllocatedUnfairLock(initialState: "")
         let isComplete = OSAllocatedUnfairLock(initialState: true)
+        let gaps = OSAllocatedUnfairLock(initialState: [StreamingTranscriptionGap]())
 
         let eventTask = Task.detached {
             for await event in session.events {
@@ -1515,6 +1533,9 @@ class StreamingAudioService: ObservableObject {
                     collectedFinalText.withLock { $0 = text }
                 case .stats(let stats):
                     isComplete.withLock { $0 = $0 && stats.isComplete }
+                    if let gap = stats.recoveryGap {
+                        gaps.withLock { $0.append(gap) }
+                    }
                 default:
                     break
                 }
@@ -1566,7 +1587,8 @@ class StreamingAudioService: ObservableObject {
             chunksFed: totalChunks,
             intermediateUpdates: intermediateCount.withLock { $0 },
             audioDurationS: audioDurationS,
-            isComplete: isComplete.withLock { $0 }
+            isComplete: isComplete.withLock { $0 },
+            gaps: gaps.withLock { $0 }
         )
     }
 }

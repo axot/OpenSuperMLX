@@ -107,6 +107,20 @@ For Debug builds, set `"forceRecordingSaveFailure": true` in the project-root `d
 
 Regenerate validates the selected recording's source file when the user requests the operation. If neither the original import nor the archived recording exists, OpenSuperMLX marks regeneration as failed, shows **Audio file not found. Original transcript was kept.**, and leaves the existing transcript unchanged. It does not scan every historical audio file when loading the recordings list.
 
+### Skipped Transcription Audio
+
+If repetition recovery fails, transcription skips the affected range and continues.
+The audio archive still contains that range. A toast reports its position, such as
+`16:54.2–17:02.2`. The `StreamingAudioService` error log includes `recording`,
+`start_seconds`, `end_seconds`, and `reason`; Debug Mode also writes the same fields
+under `[TRANSCRIPTION_GAP]` in the pipeline trace. Positions use the saved file's
+sample timeline, including audio omitted from inference by backpressure.
+
+`stream-simulate --json` returns the skipped ranges in `data.gaps` and keeps
+`data.is_complete` false even when later audio is transcribed successfully. Rejection
+details distinguish missing recovery inputs, token-limit exhaustion without EOS,
+and repeated token patterns, including token counts and EOS status for decode failures.
+
 ## Known Issue Patterns
 
 ### Hard Clipping (爆音)
