@@ -154,6 +154,34 @@ $BINARY help <command>            # per-command usage
 
 For full command reference, test commands, and error codes, see [`docs/cli.md`](docs/cli.md).
 
+### Streaming Repetition Recovery
+
+Normal transcription remains continuous. Recovery replaces a checkpointed suffix after a rejected decode round. See [streaming recovery in the CLI guide](docs/cli.md#streaming-repetition-recovery) for detection thresholds, baseline comparison commands, and result semantics.
+
+When changing this path, preserve these invariants:
+
+- Compare generated text with the actual request's text-conditioning prefix **before accepting it into history**. Use the same Unicode matching rule for mixed scripts; preserve spaces, punctuation, and invisible characters.
+- Bind recovery to saved mel-frame/text checkpoints. Preserve that checkpoint's complete accepted text, including its pending tail; never promote the rejected candidate. A checkpoint is not a word timestamp: do not assume the last five tokens belong entirely to the last audio window.
+- Re-decode retained mel with empty text conditioning, a fresh encoder cache, and fresh decoder KV. Replace the affected suffix atomically. Preserve real repetitions and leading spaces at the frozen boundary through later emissions, resets, and stop.
+- Process queued mel once. Inference watchdogs count consumed mel frames, excluding recovery replay; inference resets preserve the frontend, queued mel, and accepted pending text.
+- Failed recovery freezes accepted text and suspends inference while recording continues. Stop must finalize accepted pending tokens exactly once, even without residual mel; cancellation must suppress later completion.
+- Text similarity and `is_complete` are not hallucination-confidence scores. Unit tests establish state behavior; use audio replay to assess transcription quality and boundary words.
+
+Run the relevant hosted tests when editing these components:
+
+```bash
+xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
+  -only-testing:OpenSuperMLXTests/StreamingRepetitionDetectorTests \
+  -only-testing:OpenSuperMLXTests/StreamingWindowRecoveryTests \
+  -only-testing:OpenSuperMLXTests/StreamingInferenceSessionTests \
+  -only-testing:OpenSuperMLXTests/StreamingInferenceSessionRecoveryTests \
+  -only-testing:OpenSuperMLXTests/StreamSimulateCommandTests
+```
+
+`StreamingInferenceSessionRecoveryTests` lives in `OpenSuperMLXTests/StreamingInferenceSessionTests.swift` and injects a fake chunk processor without loading a model. The recorded-token regression fixture is `OpenSuperMLXTests/Fixtures/repetition-recorded-rounds.json`; keep it self-contained rather than depending on local recordings, `build/`, or archived experiments. For changes affecting recovery output, replay the same audio with recovery enabled and with `--disable-repetition-recovery`, following the CLI guide.
+
 ## Patches
 
 `run.sh` applies `patches/*.patch` to SPM checkouts on every build (idempotent via `patch -N`). `mlx-audio-swift` is vendored at `VendoredPackages/mlx-audio-swift/` — modify its source directly instead of using patches.
@@ -238,6 +266,12 @@ Scripts/                         # Utility scripts (keyboard layout mgmt, patch 
 Resources/ITN/                   # ITN binary resources
 VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
+    └── Sources/MLXAudioSTT/Streaming/
+        ├── StreamingTypes.swift              # Configuration, results, completeness
+        ├── ContinuousChunkProcessor.swift    # Mel, encoder/prefix/KV state, decode acceptance
+        ├── StreamingInferenceSession.swift   # Recovery installation, emission, stop/cancel
+        ├── StreamingRepetitionDetector.swift # Incremental mixed-script repetition matching
+        └── StreamingWindowRecovery.swift     # Frame/text checkpoints and frozen-prefix rendering
 docs/                            # See [Reference Docs](#reference-docs) for when to consult each
 ```
 
@@ -380,7 +414,7 @@ GitHub Actions on `master` branch and PRs (`.github/workflows/build.yml`):
 
 1. `./run.sh build` — full build
 2. Unit tests (hostless): `-only-testing:OpenSuperMLXUnitTests`
-3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `StreamingAudioServiceGraphTests`, `KeyboardLayoutProviderTests`
+3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `StreamingE2ETests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `StreamingAudioServiceGraphTests`, `KeyboardLayoutProviderTests`
 
 The default test plan (`OpenSuperMLX.xctestplan`) passes `--skip-model-load` and skips `BenchmarkTests` + `JapaneseGarblingRegressionTests`. Separate `OpenSuperMLXBenchmarks.xctestplan` exists for benchmark runs.
 
