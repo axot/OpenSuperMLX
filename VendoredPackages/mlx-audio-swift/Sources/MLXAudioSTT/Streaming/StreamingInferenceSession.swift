@@ -9,7 +9,6 @@ import Foundation
 import MLX
 import MLXNN
 import MLXLMCommon
-import Tokenizers
 import os
 
 // MARK: - Shared State
@@ -26,25 +25,30 @@ private struct SessionState: Sendable {
 public class StreamingInferenceSession: @unchecked Sendable {
     private static let logger = Logger(subsystem: "MLXAudioSTT", category: "StreamingSession")
 
-    private let model: Qwen3ASRModel
+    private let decodeTokens: ([Int]) -> String
+    private let makeProcessor: (StreamingConfig, Int) -> (any StreamingChunkProcessing)?
     private let config: StreamingConfig
     private let melProcessor: IncrementalMelSpectrogram
-    private let vadSegmenter: VADSegmenter
+    private let vadSegmenter: VADSegmenter?
 
     private let shared = OSAllocatedUnfairLock(initialState: SessionState())
     private let sessionLock = OSAllocatedUnfairLock(initialState: 0)
 
     private var isActive: Bool = false
     private var totalSamplesFed: Int = 0
+    private var processedMelFrameCount: Int = 0
     private var emptyRecoveryResets: Int = 0
-    private var lastDecodeSampleCount: Int = 0
+    private var lastDecodeMelFrame: Int = 0
     private var hasProducedFirstToken: Bool = false
-    private var lastFullResetSampleCount: Int = 0
+    private var lastFullResetMelFrame: Int = 0
     private var postResetSilenceWarned: Bool = false
     private var previousConfirmedText: String = ""
     private var finalizationBaseline: String = ""
+    private var windowRecovery: StreamingWindowRecovery
+    private var inferenceFailed = false
+    private var failedRecoveryMel: MLXArray?
 
-    private var chunkProcessor: ContinuousChunkProcessor?
+    private var chunkProcessor: (any StreamingChunkProcessing)?
     private var chunkMelBuffer: MLXArray?
     private var chunkMelFrameCount: Int = 0
 
@@ -53,16 +57,38 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     public let events: AsyncStream<TranscriptionEvent>
 
-    public init(model: Qwen3ASRModel, config: StreamingConfig = StreamingConfig()) {
-        self.model = model
+    public convenience init(model: Qwen3ASRModel, config: StreamingConfig = StreamingConfig()) {
+        self.init(
+            config: config, sampleRate: model.sampleRate, melBins: model.config.audioConfig.numMelBins,
+            vadSegmenter: VADSegmenter(),
+            decodeTokens: { model.tokenizer?.decode(tokens: $0) ?? "" },
+            makeProcessor: { config, offset in
+                guard let tokenizer = model.tokenizer else { return nil }
+                return ContinuousChunkProcessor(
+                    model: model, tokenizer: tokenizer, config: config, melFrameOffset: offset
+                )
+            }
+        )
+    }
+
+    init(
+        config: StreamingConfig, sampleRate: Int, melBins: Int, vadSegmenter: VADSegmenter? = nil,
+        decodeTokens: @escaping ([Int]) -> String,
+        makeProcessor: @escaping (StreamingConfig, Int) -> (any StreamingChunkProcessing)?
+    ) {
+        self.decodeTokens = decodeTokens
+        self.makeProcessor = makeProcessor
         self.config = config
+        self.windowRecovery = StreamingWindowRecovery(
+            windowFrames: config.encoderWindowSizeMelFrames, maximumWindows: config.maxEncoderWindows
+        )
         self.melProcessor = IncrementalMelSpectrogram(
-            sampleRate: model.sampleRate,
+            sampleRate: sampleRate,
             nFft: 400,
             hopLength: 160,
-            nMels: model.config.audioConfig.numMelBins
+            nMels: melBins
         )
-        self.vadSegmenter = VADSegmenter()
+        self.vadSegmenter = vadSegmenter
 
         Memory.cacheLimit = 64 * 1024 * 1024
 
@@ -72,9 +98,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.isActive = true
     }
 
-    public var isVADAvailable: Bool { vadSegmenter.isAvailable }
+    public var isVADAvailable: Bool { vadSegmenter?.isAvailable ?? false }
 
-    public var isSpeechActive: Bool { vadSegmenter.isSpeechActive }
+    public var isSpeechActive: Bool { vadSegmenter?.isSpeechActive ?? false }
 
     // 16000 Hz / 160 hop = 100 mel frames per second
     private var chunkSizeMelFrames: Int {
@@ -90,8 +116,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 return
             }
             totalSamplesFed += samples.count
+            guard !inferenceFailed else { return }
 
-            _ = vadSegmenter.feedSamples(samples)
+            _ = vadSegmenter?.feedSamples(samples)
             if let newMelFrames = melProcessor.process(samples: samples) {
                 accumulateChunkMel(newMelFrames)
                 let chunksBefore = chunkProcessor?.chunkIndex ?? 0
@@ -135,123 +162,215 @@ public class StreamingInferenceSession: @unchecked Sendable {
     }
 
     private func processChunk(melFrames: MLXArray, isFinal: Bool) {
-        guard let tokenizer = model.tokenizer else { return }
-
+        processedMelFrameCount += melFrames.dim(0)
         if chunkProcessor == nil {
-            chunkProcessor = ContinuousChunkProcessor(
-                model: model, tokenizer: tokenizer, config: config
-            )
+            chunkProcessor = makeProcessor(config, 0)
         }
-        guard let processor = chunkProcessor else { return }
+        guard var processor = chunkProcessor else { return }
 
         let startTime = Date()
         let lang = effectiveLanguage
-        let result = processor.processChunk(melFrames: melFrames, language: lang, isFinal: isFinal)
+        var replacingTranscript = false
+        var result = processor.processChunk(
+            melFrames: melFrames, language: lang, isFinal: isFinal, isRecovery: false
+        )
+        if result.action == .repetitionDetected {
+            guard let checkpoint = windowRecovery.begin(
+                endFrame: processor.endMelFrame, availableStartFrame: processor.melFrameOffset
+            ), let replay = processor.recoveryMel(from: checkpoint.frame) else {
+                emitResult(processor.finalizeAccepted(), processor: processor, isFinal: true, startTime: startTime)
+                suspendInference(frozenText: shared.withLock { $0.mergedCommittedText })
+                return
+            }
+            Self.logger.warning("Window recovery: inference mel [\(checkpoint.frame, privacy: .public), \(processor.endMelFrame, privacy: .public)); checkpointCharacters=\(checkpoint.text.count, privacy: .public), fresh encoder/prefix/KV")
+            var recoveryConfig = config
+            recoveryConfig.coldStartChunks = 0
+            guard let replacement = makeProcessor(recoveryConfig, checkpoint.frame) else {
+                failedRecoveryMel = replay
+                suspendInference(frozenText: checkpoint.text)
+                return
+            }
+            let candidate = replacement.processChunk(
+                melFrames: replay, language: lang, isFinal: isFinal, isRecovery: true
+            )
+            guard candidate.action == .normal else {
+                failedRecoveryMel = replay
+                suspendInference(frozenText: checkpoint.text)
+                return
+            }
+            chunkProcessor = replacement
+            processor = replacement
+            result = candidate
+            replacingTranscript = true
+            previousConfirmedText = ""
+            finalizationBaseline = ""
+            if !replacement.allDecodedTokens.isEmpty {
+                lastDecodeMelFrame = processedMelFrameCount
+                hasProducedFirstToken = true
+            }
+            Self.logger.info("Window recovery accepted: tokens=\(replacement.allDecodedTokens.count, privacy: .public)")
+        }
+        emitResult(
+            result, processor: processor, isFinal: isFinal, startTime: startTime,
+            replacingTranscript: replacingTranscript
+        )
+    }
 
+    private func emitResult(
+        _ result: ChunkProcessingResult, processor: any StreamingChunkProcessing, isFinal: Bool,
+        startTime: Date, replacingTranscript: Bool = false
+    ) {
         switch result.action {
-        case .coldStart:
+        case .coldStart, .repetitionDetected, .recoveryFailed:
             return
 
         case .normal, .recoveryReset, .periodicReset:
-            if !result.newlyEmittedTokens.isEmpty {
-                lastDecodeSampleCount = totalSamplesFed
-                emptyRecoveryResets = 0
-                hasProducedFirstToken = true
-                postResetSilenceWarned = false
-            }
+            break
+        }
 
-            let postResetSilenceThreshold = 16000 * 30 // 30 seconds at 16kHz
-            if !hasProducedFirstToken
-                && !postResetSilenceWarned
-                && lastFullResetSampleCount > 0
-                && totalSamplesFed - lastFullResetSampleCount > postResetSilenceThreshold {
-                Self.logger.error("Post-reset silence: no tokens produced \(String(format: "%.0f", Double(self.totalSamplesFed - self.lastFullResetSampleCount) / 16000.0), privacy: .public)s after full stream reset")
-                postResetSilenceWarned = true
-            }
+        if !result.newlyEmittedTokens.isEmpty {
+            lastDecodeMelFrame = processedMelFrameCount
+            emptyRecoveryResets = 0
+            hasProducedFirstToken = true
+            postResetSilenceWarned = false
+        }
 
-            if result.action == .recoveryReset && result.newlyEmittedTokens.isEmpty {
-                emptyRecoveryResets += 1
-                if emptyRecoveryResets >= 2 {
-                    Self.logger.warning("Escalation: \(self.emptyRecoveryResets, privacy: .public) consecutive empty recovery resets — full stream reset")
-                    performFullStreamReset()
-                    return
-                }
-            }
+        let postResetSilenceThreshold = 100 * 30
+        if !hasProducedFirstToken
+            && !postResetSilenceWarned
+            && lastFullResetMelFrame > 0
+            && processedMelFrameCount - lastFullResetMelFrame > postResetSilenceThreshold {
+            Self.logger.error("Post-reset silence: no tokens produced \(String(format: "%.0f", Double(self.processedMelFrameCount - self.lastFullResetMelFrame) / 100.0), privacy: .public)s after inference reset")
+            postResetSilenceWarned = true
+        }
 
-            let noDecodeThreshold = 16000 * 20 // 20 seconds at 16kHz
-            if hasProducedFirstToken
-                && totalSamplesFed - lastDecodeSampleCount > noDecodeThreshold {
-                Self.logger.warning("No-decode watchdog: \(String(format: "%.1f", Double(self.totalSamplesFed - self.lastDecodeSampleCount) / 16000.0), privacy: .public)s without decode output — full stream reset")
-                performFullStreamReset()
+        if result.action == .recoveryReset && result.newlyEmittedTokens.isEmpty {
+            emptyRecoveryResets += 1
+            if emptyRecoveryResets >= 2 {
+                Self.logger.warning("Escalation: \(self.emptyRecoveryResets, privacy: .public) consecutive empty recovery resets — resetting inference context")
+                resetInferenceContext()
                 return
             }
-            let confirmedRaw = tokenizer.decode(tokens: result.confirmedTokens)
-            let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
-            let safeConfirmedText = TextMergeUtilities.stripTrailingReplacementCharacters(parsedConfirmed.text)
-            let currentChunkIndex = processor.chunkIndex
+        }
 
-            let provisionalText: String
-            if result.action == .normal && !result.provisionalTokens.isEmpty {
-                let allTokens = result.confirmedTokens + result.provisionalTokens
-                let fullRaw = tokenizer.decode(tokens: allTokens)
-                let fullText = TextMergeUtilities.parseASROutput(fullRaw).text
-                if fullText.hasPrefix(safeConfirmedText) {
-                    provisionalText = String(fullText.dropFirst(safeConfirmedText.count))
-                } else {
-                    let provisionalRaw = tokenizer.decode(tokens: result.provisionalTokens)
-                    provisionalText = TextMergeUtilities.parseASROutput(provisionalRaw).text
-                }
+        let confirmedRaw = decodeTokens(result.confirmedTokens)
+        let parsedConfirmed = TextMergeUtilities.parseASROutput(confirmedRaw)
+        let preservingRecoveryBoundary = windowRecovery.activeCheckpoint != nil
+        let safeConfirmedText = TextMergeUtilities.stripTrailingReplacementCharacters(
+            preservingRecoveryBoundary ? confirmedRaw : parsedConfirmed.text
+        )
+        let currentChunkIndex = processor.chunkIndex
+        let allTokens = result.confirmedTokens + result.provisionalTokens
+        let fullRaw = result.provisionalTokens.isEmpty ? confirmedRaw : decodeTokens(allTokens)
+        let fullText = TextMergeUtilities.stripTrailingReplacementCharacters(
+            preservingRecoveryBoundary ? fullRaw : TextMergeUtilities.parseASROutput(fullRaw).text
+        )
+
+        var provisionalText: String
+        if result.action == .normal && !result.provisionalTokens.isEmpty {
+            if fullText.hasPrefix(safeConfirmedText) {
+                provisionalText = String(fullText.dropFirst(safeConfirmedText.count))
             } else {
+                let provisionalRaw = decodeTokens(result.provisionalTokens)
+                provisionalText = TextMergeUtilities.parseASROutput(provisionalRaw).text
+            }
+        } else {
+            provisionalText = ""
+        }
+
+        let newlyEmittedText = Self.consumeConfirmedText(
+            safeConfirmedText,
+            previousText: &previousConfirmedText,
+            finalizationBaseline: &finalizationBaseline,
+            isFinal: isFinal,
+            action: result.action,
+            preserveConfirmedPrefix: preservingRecoveryBoundary
+        )
+        if result.action == .normal && !provisionalText.isEmpty {
+            if fullText.hasPrefix(finalizationBaseline) {
+                provisionalText = String(fullText.dropFirst(finalizationBaseline.count))
+            } else if finalizationBaseline.hasPrefix(fullText) {
                 provisionalText = ""
             }
+        }
 
-            let newlyEmittedText = Self.consumeConfirmedText(
-                safeConfirmedText,
-                previousText: &previousConfirmedText,
-                finalizationBaseline: &finalizationBaseline,
-                isFinal: isFinal,
-                action: result.action
-            )
-
-            let displayConfirmed: String = shared.withLock { state in
-                state.committedTokenIds = result.confirmedTokens
-                state.chunkCount = currentChunkIndex
-                if result.action == .normal
-                    && state.detectedLanguage.isEmpty
-                    && parsedConfirmed.language != "unknown"
-                {
-                    state.detectedLanguage = parsedConfirmed.language
-                }
-
-                switch result.action {
-                case .periodicReset, .recoveryReset, .normal, .coldStart:
-                    if !newlyEmittedText.isEmpty {
-                        state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
-                            prefix: state.mergedCommittedText, newText: newlyEmittedText)
-                    } else if state.mergedCommittedText.isEmpty {
-                        state.mergedCommittedText = safeConfirmedText
-                    }
-                }
-                return state.mergedCommittedText
+        let displayConfirmed: String = shared.withLock { state in
+            state.committedTokenIds = result.confirmedTokens
+            state.chunkCount = currentChunkIndex
+            if result.action == .normal
+                && state.detectedLanguage.isEmpty
+                && parsedConfirmed.language != "unknown"
+            {
+                state.detectedLanguage = parsedConfirmed.language
             }
 
-            continuation?.yield(.displayUpdate(
-                confirmedText: displayConfirmed,
-                provisionalText: provisionalText
-            ))
+            if replacingTranscript, let replacementText = windowRecovery.render(
+                safeConfirmedText
+            ) {
+                state.mergedCommittedText = TextMergeUtilities.stripTrailingReplacementCharacters(replacementText)
+            } else if preservingRecoveryBoundary {
+                state.mergedCommittedText += newlyEmittedText
+            } else if !newlyEmittedText.isEmpty {
+                state.mergedCommittedText = TextMergeUtilities.mergeWithOverlapRemoval(
+                    prefix: state.mergedCommittedText, newText: newlyEmittedText)
+            } else if state.mergedCommittedText.isEmpty {
+                state.mergedCommittedText = safeConfirmedText
+            }
+            return state.mergedCommittedText
         }
+        windowRecovery.record(
+            endFrame: processor.endMelFrame, confirmed: displayConfirmed,
+            pending: provisionalText
+        )
+        if result.action == .periodicReset && preservingRecoveryBoundary {
+            previousConfirmedText = TextMergeUtilities.stripTrailingReplacementCharacters(
+                decodeTokens(processor.allDecodedTokens)
+            )
+            finalizationBaseline = previousConfirmedText
+        }
+
+        continuation?.yield(.displayUpdate(
+            confirmedText: displayConfirmed,
+            provisionalText: provisionalText
+        ))
 
         let decodeTime = Date().timeIntervalSince(startTime)
         let chunkTimeMs = Int(decodeTime * 1000)
         Self.logger.info("chunk action=\(String(describing: result.action), privacy: .public) newTokens=\(result.newlyEmittedTokens.count, privacy: .public) emptyResets=\(self.emptyRecoveryResets, privacy: .public) chunkTime=\(chunkTimeMs, privacy: .public)ms")
-        continuation?.yield(.stats(StreamingStats(
+        var stats = StreamingStats(
             encodedWindowCount: processor.encodedWindowCount,
             totalAudioSeconds: Double(totalSamplesFed) / 16000.0,
             tokensPerSecond: decodeTime > 0 ? Double(result.newlyEmittedTokens.count) / decodeTime : 0,
             realTimeFactor: 0,
             peakMemoryGB: Double(Memory.peakMemory) / 1e9,
             chunkElapsedSeconds: decodeTime
-        )))
+        )
+        stats.isComplete = !inferenceFailed
+        continuation?.yield(.stats(stats))
+        if hasProducedFirstToken && processedMelFrameCount - lastDecodeMelFrame > 100 * 20 {
+            Self.logger.warning("No-decode watchdog: \(String(format: "%.1f", Double(self.processedMelFrameCount - self.lastDecodeMelFrame) / 100.0), privacy: .public)s without decode output — resetting inference context")
+            resetInferenceContext()
+        }
+    }
+
+    private func suspendInference(frozenText: String) {
+        inferenceFailed = true
+        chunkProcessor = nil
+        chunkMelBuffer = nil
+        chunkMelFrameCount = 0
+        melProcessor.reset()
+        vadSegmenter?.reset()
+        previousConfirmedText = ""
+        finalizationBaseline = ""
+        shared.withLock {
+            $0.mergedCommittedText = frozenText
+            $0.committedTokenIds = []
+        }
+        continuation?.yield(.displayUpdate(confirmedText: frozenText, provisionalText: ""))
+        var stats = StreamingStats(totalAudioSeconds: Double(totalSamplesFed) / 16000)
+        stats.isComplete = false
+        continuation?.yield(.stats(stats))
+        Self.logger.error("Window recovery failed; inference suspended with incomplete transcript. Recording input must be retained for retranscription.")
     }
 
     // MARK: - Decoder Helpers
@@ -261,9 +380,10 @@ public class StreamingInferenceSession: @unchecked Sendable {
         previousText: inout String,
         finalizationBaseline: inout String,
         isFinal: Bool,
-        action: ChunkAction
+        action: ChunkAction,
+        preserveConfirmedPrefix: Bool = false
     ) -> String {
-        let baseline = isFinal ? finalizationBaseline : previousText
+        let baseline = isFinal || preserveConfirmedPrefix ? finalizationBaseline : previousText
         let newlyEmittedText: String
         if confirmedText.hasPrefix(baseline) {
             newlyEmittedText = String(confirmedText.dropFirst(baseline.count))
@@ -304,11 +424,14 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     // MARK: - Internal Reset
 
-    private func performFullStreamReset() {
-        resetProcessingState()
+    private func resetInferenceContext() {
+        let acceptedText = windowRecovery.acceptedText
+        windowRecovery.reset(confirmedPrefix: acceptedText)
+        chunkProcessor = nil
+        failedRecoveryMel = nil
         emptyRecoveryResets = 0
-        lastDecodeSampleCount = totalSamplesFed
-        lastFullResetSampleCount = totalSamplesFed
+        lastDecodeMelFrame = processedMelFrameCount
+        lastFullResetMelFrame = processedMelFrameCount
         hasProducedFirstToken = false
         postResetSilenceWarned = false
         previousConfirmedText = ""
@@ -316,16 +439,19 @@ public class StreamingInferenceSession: @unchecked Sendable {
         shared.withLock {
             $0.committedTokenIds = []
             $0.chunkCount = 0
+            $0.mergedCommittedText = acceptedText
         }
+        continuation?.yield(.displayUpdate(confirmedText: acceptedText, provisionalText: ""))
         Memory.clearCache()
     }
 
     private func resetProcessingState() {
         melProcessor.reset()
-        vadSegmenter.reset()
+        vadSegmenter?.reset()
         chunkProcessor = nil
         chunkMelBuffer = nil
         chunkMelFrameCount = 0
+        failedRecoveryMel = nil
     }
 
     private func resetSharedState() {
@@ -355,25 +481,25 @@ public class StreamingInferenceSession: @unchecked Sendable {
         if Task.isCancelled { return }
 
         sessionLock.withLock { _ in
-            if let flushedMel = melProcessor.flush() {
-                accumulateChunkMel(flushedMel)
+            guard continuation != nil && !Task.isCancelled else { return }
+            if !inferenceFailed {
+                if let flushedMel = melProcessor.flush() {
+                    accumulateChunkMel(flushedMel)
+                }
+                if let remainingMel = chunkMelBuffer {
+                    processChunk(melFrames: remainingMel, isFinal: true)
+                    chunkMelBuffer = nil
+                    chunkMelFrameCount = 0
+                } else if let processor = chunkProcessor {
+                    emitResult(processor.finalizeAccepted(), processor: processor, isFinal: true, startTime: Date())
+                }
             }
-            if let remainingMel = chunkMelBuffer {
-                processChunk(melFrames: remainingMel, isFinal: true)
-                chunkMelBuffer = nil
-                chunkMelFrameCount = 0
-            }
-        }
+            let (finalText, tokenCount) = shared.withLock { ($0.mergedCommittedText, $0.committedTokenIds.count) }
+            Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(tokenCount)")
 
-        if Task.isCancelled { return }
+            continuation?.yield(.ended(fullText: finalText))
+            continuation?.finish()
 
-        let (finalText, tokenCount) = shared.withLock { ($0.mergedCommittedText, $0.committedTokenIds.count) }
-        Self.logger.info("finishStop: text=\(finalText.count)ch tokens=\(tokenCount)")
-
-        continuation?.yield(.ended(fullText: finalText))
-        continuation?.finish()
-
-        sessionLock.withLock { _ in
             self.continuation = nil
             stopTask = nil
             resetProcessingState()

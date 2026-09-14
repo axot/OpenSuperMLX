@@ -3,6 +3,7 @@
 
 import XCTest
 
+import MLX
 @testable import MLXAudioSTT
 
 final class StreamingInferenceSessionTests: XCTestCase {
@@ -160,6 +161,293 @@ final class StreamingInferenceSessionTests: XCTestCase {
                 prefix: mergedText, newText: delta
             )
             return delta
+        }
+    }
+}
+
+final class StreamingInferenceSessionRecoveryTests: XCTestCase {
+    func testRecoveryDoesNotEmitAnAlreadyConfirmedTailAgainAfterRollback() async {
+        let probe = RecoveryProbe(fails: false, shrinksRecoveryPrefix: true)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 208_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(endedText(events), ["before tail replacement tail!"])
+    }
+
+    func testPeriodicResetAfterRecoveryDoesNotReemitItsCarriedText() async {
+        let probe = RecoveryProbe(fails: false, resetsRecovery: true)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 208_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(endedText(events), ["before tail replacement carried continued!"])
+    }
+
+    func testRecoveryPendingTailSurvivesStopEvenWhenItRepeatsTheCheckpoint() async {
+        await assertPendingRecovery("tail", expected: "before tailtail")
+        await assertPendingRecovery("tail", expected: "before tailtail", batches: [128_000, 352_000])
+        await assertPostWatchdogContinuation("tail", expected: "before tailtailtail")
+        let probe = RecoveryProbe(fails: false, pendingRecoveryText: "tail")
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 128_000))
+        session.feedAudio(samples: Array(repeating: 0.01, count: 832_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertGreaterThan(probe.factoryOffsets.filter { $0 == 0 }.count, 1)
+        let processedFrames = probe.calls.filter { !$0.isRecovery }.reduce(0) { $0 + $1.end - $1.start }
+        XCTAssertGreaterThanOrEqual(processedFrames, 6000)
+        XCTAssertLessThanOrEqual(processedFrames, 6001)
+        XCTAssertTrue(endedText(events).first?.hasPrefix("before tailtail") == true)
+    }
+
+    func testRecoveryPendingTailKeepsItsLeadingSpaceAtStop() async {
+        await assertPendingRecovery(" word", expected: "before tail word")
+        await assertPostWatchdogContinuation(" word", expected: "before tailtail word")
+    }
+
+    func testCheckpointDoesNotAppendPendingTextThatWasAlreadyConfirmed() async {
+        let probe = RecoveryProbe(fails: true, shrinksConfirmedPrefix: true)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 192_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(endedText(events), ["before tail"])
+    }
+
+    func testRecoveryReplacesSuffixAndProcessesQueuedMelOnce() async {
+        let probe = RecoveryProbe(fails: false)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 192_000))
+        session.stop()
+        let events = await eventsTask.value
+
+        XCTAssertEqual(probe.factoryOffsets, [0, 800])
+        let retries = probe.calls.filter(\.isRecovery)
+        XCTAssertEqual(retries.count, 1)
+        XCTAssertEqual(retries.first?.start, 800)
+        XCTAssertEqual(retries.first?.end, 1000)
+        let continued = probe.calls.filter { !$0.isRecovery && $0.start >= 1000 }
+        XCTAssertEqual(continued.count, 1)
+        XCTAssertEqual(continued.first?.start, 1000)
+        XCTAssertGreaterThanOrEqual(continued.first?.end ?? 0, 1200)
+        XCTAssertEqual(endedText(events), ["before tail replacement continued!"])
+        XCTAssertFalse(events.contains {
+            if case .displayUpdate(let confirmed, _) = $0 { return confirmed.contains("CORRUPT") }
+            return false
+        })
+    }
+
+    func testFailedRecoverySuspendsAndStopKeepsOnlyFrozenAcceptedTail() async {
+        let probe = RecoveryProbe(fails: true)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 192_000))
+        let callsAfterFailure = probe.calls.count
+        session.feedAudio(samples: Array(repeating: 0.01, count: 32_000))
+        session.stop()
+        let events = await eventsTask.value
+
+        XCTAssertEqual(probe.calls.count, callsAfterFailure)
+        XCTAssertEqual(probe.finalizations, 0)
+        XCTAssertEqual(endedText(events), ["before tail"])
+        let complete = events.compactMap { event -> Bool? in
+            if case .stats(let stats) = event { return stats.isComplete }
+            return nil
+        }
+        XCTAssertEqual(complete.last, false)
+    }
+
+    func testCancelledSessionRejectsMoreAudioAndStopCannotFinishAgain() async {
+        let probe = RecoveryProbe(fails: false)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 160_000))
+        session.cancel()
+        let callsAtCancel = probe.calls.count
+        session.feedAudio(samples: Array(repeating: 0.01, count: 192_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(probe.calls.count, callsAtCancel)
+        XCTAssertEqual(probe.finalizations, 0)
+        XCTAssertTrue(endedText(events).isEmpty)
+    }
+
+    // MARK: - Model-free Session
+
+    private func assertPostWatchdogContinuation(_ text: String, expected: String) async {
+        let probe = RecoveryProbe(fails: false, pendingRecoveryText: "tail", resumeAfterWatchdog: text)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 128_000))
+        session.feedAudio(samples: Array(repeating: 0.01, count: 512_000))
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(probe.factoryOffsets.filter { $0 == 0 }.count, 2)
+        XCTAssertEqual(endedText(events), [expected])
+    }
+
+    private func assertPendingRecovery(
+        _ text: String, expected: String, batches: [Int] = [176_000]
+    ) async {
+        let probe = RecoveryProbe(fails: false, pendingRecoveryText: text)
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        for count in batches {
+            session.feedAudio(samples: Array(repeating: 0.01, count: count))
+        }
+        session.stop()
+        let events = await eventsTask.value
+        XCTAssertEqual(endedText(events), [expected])
+        let processedFrames = probe.calls.filter { !$0.isRecovery }.reduce(0) { $0 + $1.end - $1.start }
+        let inputFrames = batches.reduce(0, +) / 160
+        XCTAssertGreaterThanOrEqual(processedFrames, inputFrames)
+        XCTAssertLessThanOrEqual(processedFrames, inputFrames + 1)
+    }
+
+    private func makeSession(_ probe: RecoveryProbe) -> StreamingInferenceSession {
+        StreamingInferenceSession(
+            config: StreamingConfig(), sampleRate: 16000, melBins: 128,
+            decodeTokens: { String(String.UnicodeScalarView($0.map { Unicode.Scalar($0)! })) },
+            makeProcessor: { _, offset in
+                probe.factoryOffsets.append(offset)
+                return RecoveryProcessor(probe: probe, offset: offset)
+            }
+        )
+    }
+
+    private func collect(_ stream: AsyncStream<TranscriptionEvent>) async -> [TranscriptionEvent] {
+        var events: [TranscriptionEvent] = []
+        for await event in stream { events.append(event) }
+        return events
+    }
+
+    private func endedText(_ events: [TranscriptionEvent]) -> [String] {
+        events.compactMap {
+            if case .ended(let text) = $0 { return text }
+            return nil
+        }
+    }
+
+    private final class RecoveryProbe: @unchecked Sendable {
+        struct Call {
+            let start: Int
+            let end: Int
+            let isRecovery: Bool
+        }
+
+        let fails: Bool
+        let shrinksConfirmedPrefix: Bool
+        let pendingRecoveryText: String?
+        let shrinksRecoveryPrefix: Bool
+        let resetsRecovery: Bool
+        let resumeAfterWatchdog: String?
+        var factoryOffsets: [Int] = []
+        var calls: [Call] = []
+        var finalizations = 0
+
+        init(
+            fails: Bool, shrinksConfirmedPrefix: Bool = false, pendingRecoveryText: String? = nil,
+            shrinksRecoveryPrefix: Bool = false, resetsRecovery: Bool = false,
+            resumeAfterWatchdog: String? = nil
+        ) {
+            self.fails = fails
+            self.shrinksConfirmedPrefix = shrinksConfirmedPrefix
+            self.pendingRecoveryText = pendingRecoveryText
+            self.shrinksRecoveryPrefix = shrinksRecoveryPrefix
+            self.resetsRecovery = resetsRecovery
+            self.resumeAfterWatchdog = resumeAfterWatchdog
+        }
+    }
+
+    private final class RecoveryProcessor: StreamingChunkProcessing {
+        let probe: RecoveryProbe
+        let melFrameOffset: Int
+        var endMelFrame: Int
+        var chunkIndex = 0
+        var encodedWindowCount = 0
+        var allDecodedTokens: [Int] = []
+        private var lastConfirmed: [Int] = []
+
+        init(probe: RecoveryProbe, offset: Int) {
+            self.probe = probe
+            self.melFrameOffset = offset
+            self.endMelFrame = offset
+        }
+
+        func processChunk(
+            melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool
+        ) -> ChunkProcessingResult {
+            let start = endMelFrame
+            endMelFrame += melFrames.dim(0)
+            chunkIndex += 1
+            probe.calls.append(.init(start: start, end: endMelFrame, isRecovery: isRecovery))
+            if melFrameOffset == 0 && probe.factoryOffsets.filter({ $0 == 0 }).count > 1,
+               let text = probe.resumeAfterWatchdog {
+                return result(text, pending: "", action: .normal)
+            }
+            if melFrameOffset == 0 && endMelFrame >= 1000 {
+                return result("CORRUPT", pending: "UNACCEPTED", action: .repetitionDetected)
+            }
+            if isRecovery && probe.fails {
+                return result("UNACCEPTED", pending: "", action: .recoveryFailed)
+            }
+            if melFrameOffset > 0 {
+                if probe.shrinksRecoveryPrefix {
+                    if isFinal { return result(" replacement tail!", pending: "", action: .normal) }
+                    return result(
+                        isRecovery ? " replacement tail" : " replacement",
+                        pending: isRecovery ? " EXTRA" : " tail", action: .normal
+                    )
+                }
+                if probe.resetsRecovery && !isRecovery {
+                    if isFinal { return result(" carried continued!", pending: "", action: .normal) }
+                    let reset = result(" replacement carried", pending: "", action: .periodicReset)
+                    allDecodedTokens = " carried".unicodeScalars.map { Int($0.value) }
+                    return reset
+                }
+                if let pending = probe.pendingRecoveryText {
+                    return result(
+                        isFinal ? pending : "", pending: isFinal ? "" : pending, action: .normal
+                    )
+                }
+                let text = isRecovery ? " replacement" : " replacement continued"
+                return result(text + (isFinal ? "!" : ""), pending: isFinal ? "" : "!", action: .normal)
+            }
+            if probe.shrinksConfirmedPrefix && endMelFrame < 600 {
+                return result("before tail", pending: " EXTRA", action: .normal)
+            }
+            return result("before", pending: " tail", action: .normal)
+        }
+
+        func recoveryMel(from startFrame: Int) -> MLXArray? {
+            MLXArray.zeros([endMelFrame - startFrame, 128])
+        }
+
+        func finalizeAccepted() -> ChunkProcessingResult {
+            probe.finalizations += 1
+            return ChunkProcessingResult(
+                confirmedTokens: allDecodedTokens, provisionalTokens: [],
+                newlyEmittedTokens: [], action: .normal
+            )
+        }
+
+        private func result(_ text: String, pending: String, action: ChunkAction) -> ChunkProcessingResult {
+            let confirmed = text.unicodeScalars.map { Int($0.value) }
+            let provisional = pending.unicodeScalars.map { Int($0.value) }
+            let commonPrefix = zip(lastConfirmed, confirmed).prefix(while: { $0 == $1 }).count
+            let newlyEmitted = Array(confirmed.dropFirst(commonPrefix))
+            lastConfirmed = confirmed
+            allDecodedTokens = confirmed + provisional
+            return ChunkProcessingResult(
+                confirmedTokens: confirmed, provisionalTokens: provisional,
+                newlyEmittedTokens: newlyEmitted, action: action
+            )
         }
     }
 }

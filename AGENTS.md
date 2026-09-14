@@ -180,7 +180,7 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
   -only-testing:OpenSuperMLXTests/StreamSimulateCommandTests
 ```
 
-`StreamingInferenceSessionRecoveryTests` lives in `OpenSuperMLXTests/StreamingInferenceSessionTests.swift` and injects a fake chunk processor without loading a model. The recorded-token regression fixture is `OpenSuperMLXTests/Fixtures/repetition-recorded-rounds.json`; keep it self-contained rather than depending on local recordings, `build/`, or archived experiments. For changes affecting recovery output, replay the same audio with recovery enabled and with `--disable-repetition-recovery`, following the CLI guide.
+`StreamingInferenceSessionRecoveryTests` lives in `OpenSuperMLXTests/StreamingInferenceSessionTests.swift` and injects a fake chunk processor without loading a model. Use synthetic text in committed tests; keep real recordings, transcript snapshots, and private debug output out of Git. Tests must not depend on local recordings, `build/`, or archived experiments. For changes affecting recovery output, replay the same audio with recovery enabled and with `--disable-repetition-recovery`, following the CLI guide.
 
 ## Patches
 

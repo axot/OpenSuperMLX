@@ -25,6 +25,9 @@ struct StreamSimulateCommand: ParsableCommand {
     @Option(name: .long, help: "Chunk duration in seconds")
     var chunkDuration: Double = 0.5
 
+    @Flag(name: .long, help: "Disable window repetition recovery for baseline comparisons")
+    var disableRepetitionRecovery = false
+
     // MARK: - Execution
 
     func run() throws {
@@ -81,7 +84,13 @@ struct StreamSimulateCommand: ParsableCommand {
                 language: language,
                 temperature: Float(settings.temperature),
                 chunkDuration: chunkDuration,
-                onEvent: { _ in }
+                repetitionRecoveryEnabled: !disableRepetitionRecovery,
+                onEvent: {
+                    CLIOutput.printProgress(
+                        "[stream-event] \(String(describing: $0))",
+                        quiet: globalOptions.quiet || !globalOptions.verbose
+                    )
+                }
             )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
@@ -93,7 +102,8 @@ struct StreamSimulateCommand: ParsableCommand {
                 processingTimeS: elapsed,
                 chunksFed: injectionResult.chunksFed,
                 chunkDurationS: chunkDuration,
-                intermediateUpdates: injectionResult.intermediateUpdates
+                intermediateUpdates: injectionResult.intermediateUpdates,
+                isComplete: injectionResult.isComplete
             )
             return .success(data)
         } catch let error as StreamingAudioError {
@@ -122,6 +132,7 @@ struct StreamSimulateResult: Encodable {
     let chunksFed: Int
     let chunkDurationS: Double
     let intermediateUpdates: Int
+    var isComplete: Bool = true
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
@@ -130,5 +141,6 @@ struct StreamSimulateResult: Encodable {
         case chunksFed = "chunks_fed"
         case chunkDurationS = "chunk_duration_s"
         case intermediateUpdates = "intermediate_updates"
+        case isComplete = "is_complete"
     }
 }

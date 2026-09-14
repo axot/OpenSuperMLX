@@ -26,14 +26,14 @@ $BINARY stream-simulate audio.wav --json
 $BINARY benchmark audio.wav --reference-text "reference text" --json
 ```
 
-All commands accept `--json` (structured output to stdout), `--quiet` (suppress stderr progress), and `--verbose`. The verbose flag is currently reserved; commands parse it but do not emit additional output yet.
+All commands accept `--json` (structured output to stdout), `--quiet` (suppress stderr progress), and `--verbose`. `stream-simulate --verbose` also writes transcription events to stderr.
 
 ## Command Reference
 
 | Command | Purpose | Main arguments and subcommands |
 |---|---|---|
 | `transcribe <file>` | Transcribe one audio file | `--language`, `--model`, `--no-correction`, `--temperature` |
-| `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--model`, `--chunk-duration` |
+| `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--model`, `--chunk-duration`, `--disable-repetition-recovery` |
 | `correct <text>` | Apply configured LLM correction | `--file`, `--provider`, `--prompt` |
 | `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
 | `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
@@ -44,6 +44,40 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 | `diagnose` | Print an environment snapshot | No command-specific arguments |
 
 Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for generated usage and defaults.
+
+### Streaming repetition recovery
+
+Streaming compares generated text with the actual text-conditioning prefix (up to
+150 tokens). The detector uses normalized Unicode scalars, with one rule for mixed
+scripts: a new span must contain at least 48 UTF-8 bytes and its edit distance must
+not exceed 15% of the longer compared span. Spaces and punctuation remain present.
+This detects textual repetition; it is not an acoustic hallucination score.
+
+On detection, the session uses the saved text checkpoint at or before the last
+8-second window's start. It preserves that checkpoint's pending tail and replaces
+the later text with a fresh decode of retained mel frames, using a new encoder
+cache, empty text conditioning, and new decoder KV. The retry has a 256-token
+budget and must end normally. Fresh text is preserved in full: adjacent matching
+words are not deleted merely because they repeat the frozen prefix. Audio queued
+after the recovery endpoint is processed once. Watchdogs measure consumed audio,
+so a large feed does not count queued audio as time already spent decoding.
+Inference resets preserve the frontend, queued mel, and accepted pending tail.
+
+If recovery cannot finish, inference is suspended and `is_complete` is false in
+the CLI result. Recording continues in the app so the saved audio can be
+transcribed later. Successful recovery does not guarantee correct words at the
+boundary or remove misrecognitions already present in the checkpoint.
+
+```bash
+$BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --json --verbose
+$BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --disable-repetition-recovery --json --verbose
+```
+
+`--chunk-duration` controls file feeding, not the 2-second decode cadence.
+Recovery log ranges are inference mel-frame coordinates (100 frames/second),
+not archive timestamps across capture drops or full stream resets. The existing
+capture backpressure policy is unchanged. This path does not alter the separate
+`transcribe` command.
 
 ## Transcript MCP Bridge
 

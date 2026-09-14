@@ -23,6 +23,8 @@ struct ChunkProcessingResult {
 
 enum ChunkAction {
     case normal
+    case repetitionDetected
+    case recoveryFailed
     case recoveryReset
     case periodicReset
     case coldStart
@@ -30,7 +32,20 @@ enum ChunkAction {
 
 // MARK: - ContinuousChunkProcessor
 
-class ContinuousChunkProcessor {
+protocol StreamingChunkProcessing: AnyObject {
+    var melFrameOffset: Int { get }
+    var endMelFrame: Int { get }
+    var chunkIndex: Int { get }
+    var encodedWindowCount: Int { get }
+    var allDecodedTokens: [Int] { get }
+    func processChunk(
+        melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool
+    ) -> ChunkProcessingResult
+    func recoveryMel(from startFrame: Int) -> MLXArray?
+    func finalizeAccepted() -> ChunkProcessingResult
+}
+
+class ContinuousChunkProcessor: StreamingChunkProcessing {
     private static let eosTokenIds = [151645, 151643]
     private static let asrTextTokenId = 151704
 
@@ -40,6 +55,7 @@ class ContinuousChunkProcessor {
 
     private var encoderCache: EncoderWindowCache
     private var accumulatedMel: MLXArray?
+    private(set) var melFrameOffset: Int
     private(set) var accumulatedMelFrameCount: Int = 0
     private(set) var encodedWindowCount: Int = 0
 
@@ -51,10 +67,16 @@ class ContinuousChunkProcessor {
     private var prevPrefillEmbeds: MLXArray?
     private(set) var allDecodedTokens: [Int] = []
 
-    init(model: Qwen3ASRModel, tokenizer: any Tokenizers.Tokenizer, config: StreamingConfig) {
+    var endMelFrame: Int { melFrameOffset + accumulatedMelFrameCount }
+
+    init(
+        model: Qwen3ASRModel, tokenizer: any Tokenizers.Tokenizer, config: StreamingConfig,
+        melFrameOffset: Int = 0
+    ) {
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
+        self.melFrameOffset = melFrameOffset
         self.encoderCache = EncoderWindowCache(
             maxWindows: config.maxEncoderWindows,
             windowSizeMelFrames: config.encoderWindowSizeMelFrames
@@ -73,7 +95,9 @@ class ContinuousChunkProcessor {
 
     // MARK: - Process Chunk
 
-    func processChunk(melFrames: MLXArray, language: String, isFinal: Bool) -> ChunkProcessingResult {
+    func processChunk(
+        melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool = false
+    ) -> ChunkProcessingResult {
         defer { chunkIndex += 1 }
         let chunkStart = ContinuousClock.now
 
@@ -115,13 +139,25 @@ class ContinuousChunkProcessor {
         let logits = prefillWithEmbeddingDiff(inputsEmbeds, inputIds: inputIds)
         let prefillMs = prefillStart.duration(to: .now).milliseconds
         let decodeStart = ContinuousClock.now
-        let (rawNewTokenIds, hitMaxTokens) = decodeTokens(initialLogits: logits)
+        let historyText = tokenizer.decode(tokens: Self.filterTextTokens(prefixTokenIds))
+        let decoded = decodeTokens(
+            initialLogits: logits, historyText: historyText,
+            maxTokens: isRecovery ? 256 : config.maxNewTokensPerChunk, verifyEndAtLimit: isRecovery
+        )
+        let rawNewTokenIds = decoded.tokens
+        let hitMaxTokens = decoded.hitMaxTokens
         let decodeMs = decodeStart.duration(to: .now).milliseconds
         let peakMemGB = String(format: "%.2f", Double(Memory.peakMemory) / 1e9)
 
         cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] accMel=\(self.accumulatedMelFrameCount, privacy: .public) encWin=\(self.encodedWindowCount, privacy: .public) audioFeat=\(audioFeatureDim, privacy: .public) seqLen=\(inputsEmbeds.dim(1), privacy: .public) prefix=\(prefixTokenIds.count, privacy: .public) rawTok=\(rawNewTokenIds.count, privacy: .public) hitMax=\(hitMaxTokens, privacy: .public) prefill=\(prefillMs, privacy: .public)ms decode=\(decodeMs, privacy: .public)ms allDecoded=\(self.allDecodedTokens.count, privacy: .public) peakMem=\(peakMemGB, privacy: .public)GB")
 
         let newTokenIds = Self.filterTextTokens(rawNewTokenIds)
+        if decoded.repeated || (isRecovery && hitMaxTokens) {
+            return ChunkProcessingResult(
+                confirmedTokens: textCommitter.stableTokens, provisionalTokens: [],
+                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected
+            )
+        }
 
         let prefixTokensFull = allDecodedTokens
         let guardAction = degenerationGuard.evaluateChunk(
@@ -131,6 +167,12 @@ class ContinuousChunkProcessor {
             hitMaxTokens: hitMaxTokens,
             isFinal: isFinal
         )
+        if guardAction == .recoveryReset && (config.repetitionRecoveryEnabled || isRecovery) {
+            return ChunkProcessingResult(
+                confirmedTokens: textCommitter.stableTokens, provisionalTokens: [],
+                newlyEmittedTokens: [], action: isRecovery ? .recoveryFailed : .repetitionDetected
+            )
+        }
 
         if isFinal {
             return Self.finalizeDecodedTokens(
@@ -160,7 +202,7 @@ class ContinuousChunkProcessor {
 
             let commitResult = textCommitter.processChunkTokens(allDecodedTokens, isFinal: false)
 
-            if config.pastTextConditioning
+            if !isRecovery && config.pastTextConditioning
                 && chunkIndex >= config.coldStartChunks
                 && (chunkIndex + 1) % config.resetIntervalChunks == 0
             {
@@ -198,6 +240,7 @@ class ContinuousChunkProcessor {
 
             let windowSize = config.encoderWindowSizeMelFrames
             let fullEnd = encodedWindowCount * windowSize
+            melFrameOffset += min(fullEnd, accumulatedMelFrameCount)
             if fullEnd > 0 && fullEnd < accumulatedMelFrameCount {
                 let tail = accumulatedMel![fullEnd..<accumulatedMelFrameCount]
                 eval(tail)
@@ -215,6 +258,7 @@ class ContinuousChunkProcessor {
             allDecodedTokens = []
             accumulatedMel = nil
             accumulatedMelFrameCount = 0
+            melFrameOffset = 0
             chunkIndex = 0
         }
 
@@ -224,6 +268,21 @@ class ContinuousChunkProcessor {
         prevPrefillEmbeds = nil
         degenerationGuard.resetStagnation()
         Memory.clearCache()
+    }
+
+    func recoveryMel(from startFrame: Int) -> MLXArray? {
+        let start = startFrame - melFrameOffset
+        guard let mel = accumulatedMel, start >= 0, start < accumulatedMelFrameCount else { return nil }
+        let count = accumulatedMelFrameCount - start
+        return MLXArray(mel[start..<accumulatedMelFrameCount].asArray(Float.self))
+            .reshaped(count, mel.dim(1))
+    }
+
+    func finalizeAccepted() -> ChunkProcessingResult {
+        Self.finalizeDecodedTokens(
+            history: &allDecodedTokens, guardAction: .ok(filteredNewTokens: []),
+            committer: &textCommitter, config: config
+        )
     }
 
     // MARK: - Mel Accumulation
@@ -360,11 +419,13 @@ class ContinuousChunkProcessor {
 
     // MARK: - Token Decoding
 
-    private func decodeTokens(initialLogits: MLXArray) -> (tokens: [Int], hitMaxTokens: Bool) {
+    private func decodeTokens(
+        initialLogits: MLXArray, historyText: String, maxTokens: Int, verifyEndAtLimit: Bool
+    ) -> (tokens: [Int], hitMaxTokens: Bool, repeated: Bool) {
         var logits = initialLogits
         var newTokenIds: [Int] = []
-        let maxTokens = config.maxNewTokensPerChunk
         var eosToken: Int?
+        var detector = StreamingRepetitionDetector()
 
         for _ in 0..<maxTokens {
             let lastLogits = logits[0..., -1, 0...]
@@ -376,13 +437,24 @@ class ContinuousChunkProcessor {
             }
 
             newTokenIds.append(nextToken)
+            if config.repetitionRecoveryEnabled && !historyText.isEmpty {
+                let text = tokenizer.decode(tokens: Self.filterTextTokens(newTokenIds))
+                if let match = detector.update(history: historyText, query: text) {
+                    cpLogger.warning("repetition: endMelFrame=\(self.endMelFrame, privacy: .public) token=\(newTokenIds.count, privacy: .public) bytes=\(match.utf8Bytes, privacy: .public) edits=\(match.edits, privacy: .public) history=\(match.historyRange.lowerBound, privacy: .public)..<\(match.historyRange.upperBound, privacy: .public) new=\(match.queryRange.lowerBound, privacy: .public)..<\(match.queryRange.upperBound, privacy: .public)")
+                    return (newTokenIds, false, true)
+                }
+            }
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = model.callAsFunction(inputIds: nextTokenArray, cache: decoderCache)
             eval(logits)
         }
 
-        let hitMax = newTokenIds.count >= maxTokens
+        if eosToken == nil && verifyEndAtLimit {
+            let nextToken = logits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
+            if Self.eosTokenIds.contains(nextToken) { eosToken = nextToken }
+        }
+        let hitMax = eosToken == nil && newTokenIds.count >= maxTokens
         if hitMax {
             cpLogger.info("chunk[\(self.chunkIndex)] decode: hitMaxTokens (\(maxTokens)), no EOS found")
         } else if let eos = eosToken {
@@ -390,7 +462,7 @@ class ContinuousChunkProcessor {
         }
 
         Memory.clearCache()
-        return (newTokenIds, hitMax)
+        return (newTokenIds, hitMax, false)
     }
 
     // MARK: - Static Helpers (Testable)

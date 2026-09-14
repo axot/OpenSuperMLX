@@ -26,6 +26,12 @@ final class StreamSimulateCommandTests: XCTestCase {
         XCTAssertEqual(command.chunkDuration, 0.5)
     }
 
+    func testBaselineRepetitionRecoveryFlagParses() throws {
+        XCTAssertNoThrow(try OpenSuperMLXCLI.parseAsRoot([
+            "stream-simulate", "file.wav", "--disable-repetition-recovery"
+        ]))
+    }
+
     // MARK: - Error Handling
 
     func testStreamSimulateNonExistentFile() async throws {
@@ -72,5 +78,6 @@ final class StreamSimulateCommandTests: XCTestCase {
         XCTAssertEqual(data?["chunks_fed"] as? Int, 10)
         XCTAssertEqual(data?["chunk_duration_s"] as? Double, 0.5)
         XCTAssertEqual(data?["intermediate_updates"] as? Int, 8)
+        XCTAssertEqual(data?["is_complete"] as? Bool, true)
     }
 }

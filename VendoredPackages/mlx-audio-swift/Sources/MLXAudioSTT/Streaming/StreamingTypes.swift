@@ -35,6 +35,7 @@ public struct StreamingConfig: Sendable {
     public var stagnationChunkThreshold: Int = 4
     public var prefixDiversityThreshold: Double = 0.3
     public var pastTextConditioning: Bool = true
+    public var repetitionRecoveryEnabled: Bool = true
 
     public init(
         language: String = "English",
@@ -62,6 +63,7 @@ public enum TranscriptionEvent: Sendable {
 // MARK: - Streaming Stats
 
 public struct StreamingStats: Sendable {
+    public var isComplete: Bool = true
     public var encodedWindowCount: Int
     public var totalAudioSeconds: Double
     public var tokensPerSecond: Double

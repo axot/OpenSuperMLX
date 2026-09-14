@@ -1306,6 +1306,9 @@ class StreamingAudioService: ObservableObject {
             provisionalText = provisional
 
         case .stats(let stats):
+            if !stats.isComplete {
+                ErrorToastManager.shared.show("Transcription recovery failed. Audio recording continues; retranscribe the saved recording.")
+            }
             if AppPreferences.shared.debugMode {
                 logger.debug(
                     "Stats: \(stats.tokensPerSecond, format: .fixed(precision: 1), privacy: .public) tok/s, \(stats.totalAudioSeconds, format: .fixed(precision: 1), privacy: .public)s audio, \(stats.peakMemoryGB, format: .fixed(precision: 2), privacy: .public) GB"
@@ -1444,6 +1447,7 @@ class StreamingAudioService: ObservableObject {
         let chunksFed: Int
         let intermediateUpdates: Int
         let audioDurationS: Double
+        var isComplete: Bool = true
     }
 
     var ringBufferSampleCount: Int {
@@ -1477,6 +1481,7 @@ class StreamingAudioService: ObservableObject {
         language: String = "auto",
         temperature: Float = 0.0,
         chunkDuration: Double = 0.5,
+        repetitionRecoveryEnabled: Bool = true,
         onEvent: @escaping @Sendable (TranscriptionEvent) -> Void
     ) async throws -> FileInjectionResult {
         guard let model = TranscriptionService.shared.streamingModel else {
@@ -1488,7 +1493,8 @@ class StreamingAudioService: ObservableObject {
         let audioDurationS = Double(samples.count) / AudioSampleRates.transcription
 
         let mappedLanguage = Self.mapLanguageCode(language)
-        let config = StreamingConfig(language: mappedLanguage, temperature: temperature)
+        var config = StreamingConfig(language: mappedLanguage, temperature: temperature)
+        config.repetitionRecoveryEnabled = repetitionRecoveryEnabled
         let session = StreamingInferenceSession(model: model, config: config)
 
         shouldStopFeeding.withLock { $0 = false }
@@ -1496,6 +1502,7 @@ class StreamingAudioService: ObservableObject {
         let intermediateCount = OSAllocatedUnfairLock(initialState: 0)
         let collectedFinalText = OSAllocatedUnfairLock(initialState: "")
         let collectedConfirmedText = OSAllocatedUnfairLock(initialState: "")
+        let isComplete = OSAllocatedUnfairLock(initialState: true)
 
         let eventTask = Task.detached {
             for await event in session.events {
@@ -1506,6 +1513,8 @@ class StreamingAudioService: ObservableObject {
                     collectedConfirmedText.withLock { $0 = confirmed }
                 case .ended(let text):
                     collectedFinalText.withLock { $0 = text }
+                case .stats(let stats):
+                    isComplete.withLock { $0 = $0 && stats.isComplete }
                 default:
                     break
                 }
@@ -1556,7 +1565,8 @@ class StreamingAudioService: ObservableObject {
             text: resultText,
             chunksFed: totalChunks,
             intermediateUpdates: intermediateCount.withLock { $0 },
-            audioDurationS: audioDurationS
+            audioDurationS: audioDurationS,
+            isComplete: isComplete.withLock { $0 }
         )
     }
 }
