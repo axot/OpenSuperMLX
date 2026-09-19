@@ -54,21 +54,10 @@ final class BedrockLLMProvider: LLMProvider, @unchecked Sendable {
 
         let client = BedrockRuntimeClient(config: config)
 
-        let message = BedrockRuntimeClientTypes.Message(
-            content: [.text(text)],
-            role: .user
-        )
-
-        let inferenceConfig = BedrockRuntimeClientTypes.InferenceConfiguration(
-            maxTokens: 4096,
-            temperature: 0.1
-        )
-
-        let input = ConverseInput(
-            inferenceConfig: inferenceConfig,
-            messages: [message],
+        let input = makeConverseInput(
             modelId: prefs.bedrockModelId,
-            system: [.text(systemPrompt)]
+            systemPrompt: systemPrompt,
+            text: text
         )
 
         let response: ConverseOutput
@@ -96,5 +85,23 @@ final class BedrockLLMProvider: LLMProvider, @unchecked Sendable {
         }
 
         return trimmedResult
+    }
+
+    func makeConverseInput(modelId: String, systemPrompt: String, text: String) -> ConverseInput {
+        let message = BedrockRuntimeClientTypes.Message(
+            content: [.text(text)],
+            role: .user
+        )
+
+        let inferenceConfig = BedrockRuntimeClientTypes.InferenceConfiguration(
+            maxTokens: 4096
+        )
+
+        return ConverseInput(
+            inferenceConfig: inferenceConfig,
+            messages: [message],
+            modelId: modelId,
+            system: [.text(systemPrompt)]
+        )
     }
 }
