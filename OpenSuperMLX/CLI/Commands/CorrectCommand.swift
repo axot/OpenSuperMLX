@@ -73,6 +73,9 @@ struct CorrectCommand: ParsableCommand {
         }
 
         let corrected = await service.correctTranscription(inputText, forceEnabled: true)
+        guard service.lastErrorMessage == nil else {
+            return .failure(.llmCorrectionFailed)
+        }
 
         return .success(CorrectResult(
             originalText: inputText,

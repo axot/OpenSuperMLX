@@ -139,14 +139,14 @@ final class LLMCorrectionService {
 
         let provider = providerFactory()
 
-        guard provider.isConfigured else {
-            return text
-        }
-
-        let wrappedText = Self.wrapInTranscriptionTags(trimmed)
-        let systemPrompt = Self.buildSystemPrompt(userPrompt: prefs.effectiveCorrectionPrompt)
-
         do {
+            guard provider.isConfigured else {
+                throw LLMProviderError.notConfigured(provider: provider.displayName)
+            }
+
+            let wrappedText = Self.wrapInTranscriptionTags(trimmed)
+            let systemPrompt = Self.buildSystemPrompt(userPrompt: prefs.effectiveCorrectionPrompt)
+
             let response = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {
                     try await provider.correctTranscription(wrappedText, systemPrompt: systemPrompt)

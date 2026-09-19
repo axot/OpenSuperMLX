@@ -54,21 +54,23 @@ final class CorrectCommandTests: XCTestCase {
 
     func testCorrectWithMockProvider() async throws {
         let mockProvider = MockLLMProvider()
-        mockProvider.correctResult = "cleaned up text"
         let service = LLMCorrectionService(providerFactory: { mockProvider })
 
         let command = try OpenSuperMLXCLI.parseAsRoot(
             ["correct", "um hello world"]
         ) as! CorrectCommand
 
-        let result = await command.executeCorrection(service: service)
+        for output in ["cleaned up text", "um hello world"] {
+            mockProvider.correctResult = output
+            let result = await command.executeCorrection(service: service)
 
-        guard case .success(let data) = result else {
-            XCTFail("Expected success"); return
+            guard case .success(let data) = result else {
+                XCTFail("Expected success"); return
+            }
+            XCTAssertEqual(data.correctedText, output)
+            XCTAssertEqual(data.originalText, "um hello world")
         }
-        XCTAssertEqual(data.correctedText, "cleaned up text")
-        XCTAssertEqual(data.originalText, "um hello world")
-        XCTAssertEqual(mockProvider.correctCallCount, 1)
+        XCTAssertEqual(mockProvider.correctCallCount, 2)
     }
 
     func testCorrectFileNotFound() async throws {
@@ -98,11 +100,37 @@ final class CorrectCommandTests: XCTestCase {
 
         let result = await command.executeCorrection(service: service)
 
-        guard case .success(let data) = result else {
-            XCTFail("Expected success (passthrough)"); return
+        guard case .failure(let error) = result else {
+            XCTFail("Expected correction failure"); return
         }
-        XCTAssertEqual(data.correctedText, "hello world")
-        XCTAssertEqual(data.originalText, "hello world")
+        XCTAssertEqual(error, .llmCorrectionFailed)
+        XCTAssertEqual(mockProvider.correctCallCount, 0)
+    }
+
+    func testCorrectProviderFailuresReturnError() async throws {
+        let command = try OpenSuperMLXCLI.parseAsRoot(
+            ["correct", "hello world"]
+        ) as! CorrectCommand
+
+        let cases: [(response: String, error: Error?)] = [
+            ("", nil),
+            ("<transcription> </transcription>", nil),
+            ("hello world", LLMProviderError.networkError(underlying: URLError(.notConnectedToInternet))),
+        ]
+        for testCase in cases {
+            let mockProvider = MockLLMProvider()
+            mockProvider.correctResult = testCase.response
+            mockProvider.shouldThrowError = testCase.error
+            let service = LLMCorrectionService(providerFactory: { mockProvider })
+
+            let result = await command.executeCorrection(service: service)
+
+            guard case .failure(let error) = result else {
+                XCTFail("Expected correction failure for \(testCase)"); continue
+            }
+            XCTAssertEqual(error, .llmCorrectionFailed)
+            XCTAssertEqual(mockProvider.correctCallCount, 1)
+        }
     }
 
     func testCorrectWithCustomPrompt() async throws {
