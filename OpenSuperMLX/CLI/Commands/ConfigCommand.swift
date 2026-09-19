@@ -70,6 +70,7 @@ enum ConfigRegistry {
         ConfigKeyInfo("openAIBaseURL", .string, "https://api.openai.com/v1"),
         ConfigKeyInfo("openAIAPIKey", .string, "", sensitive: true),
         ConfigKeyInfo("openAIModel", .string, "gpt-4o-mini"),
+        ConfigKeyInfo("openAIAPIProtocol", .string, "chat_completions"),
         ConfigKeyInfo("openAICustomHeaders", .string, ""),
     ]
 

@@ -35,6 +35,24 @@ final class LLMProviderTests: XCTestCase {
         XCTAssertNil(LLMProviderType(rawValue: "unknown"))
     }
 
+    // MARK: - OpenAIAPIProtocol
+
+    func testOpenAIAPIProtocol_DisplayNames() {
+        XCTAssertEqual(OpenAIAPIProtocol.chatCompletions.displayName, "Chat Completions")
+        XCTAssertEqual(OpenAIAPIProtocol.responses.displayName, "Responses")
+    }
+
+    func testOpenAIAPIProtocol_EndpointPaths() {
+        XCTAssertEqual(OpenAIAPIProtocol.chatCompletions.endpointPath, "chat/completions")
+        XCTAssertEqual(OpenAIAPIProtocol.responses.endpointPath, "responses")
+    }
+
+    func testOpenAIAPIProtocol_RawValueRoundTrips() {
+        XCTAssertEqual(OpenAIAPIProtocol(rawValue: "chat_completions"), .chatCompletions)
+        XCTAssertEqual(OpenAIAPIProtocol(rawValue: "responses"), .responses)
+        XCTAssertNil(OpenAIAPIProtocol(rawValue: "unknown"))
+    }
+
     // MARK: - LLMProviderError
 
     func testProviderError_ErrorDescriptions() {

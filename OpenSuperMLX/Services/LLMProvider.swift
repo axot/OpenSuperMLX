@@ -25,6 +25,27 @@ enum LLMProviderType: String, CaseIterable {
     }
 }
 
+// MARK: - OpenAI API Protocol
+
+enum OpenAIAPIProtocol: String, CaseIterable {
+    case chatCompletions = "chat_completions"
+    case responses
+
+    var displayName: String {
+        switch self {
+        case .chatCompletions: return "Chat Completions"
+        case .responses: return "Responses"
+        }
+    }
+
+    var endpointPath: String {
+        switch self {
+        case .chatCompletions: return "chat/completions"
+        case .responses: return "responses"
+        }
+    }
+}
+
 // MARK: - Provider Error
 
 enum LLMProviderError: LocalizedError {
