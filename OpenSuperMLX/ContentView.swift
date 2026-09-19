@@ -46,6 +46,7 @@ class ContentViewModel: ObservableObject {
     private var recordingStartTime: Date?
     private var durationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var startStreamingTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -245,10 +246,14 @@ class ContentViewModel: ObservableObject {
             recordingDuration = 0
             startDurationTimerIfNeeded()
 
-            Task { [weak self] in
+            startStreamingTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
+                } catch is CancellationError {
+                    return
+                } catch StreamingAudioError.startAborted {
+                    return
                 } catch {
                     self.logger.error("Failed to start streaming: \(error, privacy: .public)")
                     ErrorToastManager.shared.show(error.localizedDescription)
@@ -297,6 +302,7 @@ class ContentViewModel: ObservableObject {
         if isStreamingMode {
             Task { [weak self] in
                 guard let self = self else { return }
+                await self.awaitStartStreamingIfNeeded()
 
                 guard let result = await self.streamingService.finalizeRecording(duration: self.recordingDuration) else {
                     self.state = .idle
@@ -392,6 +398,9 @@ class ContentViewModel: ObservableObject {
     }
 
     func cancelRecording() {
+        startStreamingTask?.cancel()
+        startStreamingTask = nil
+        streamingService.abortPendingStart()
         if isStreamingMode {
             Task { await streamingService.cancelStreaming() }
         }
@@ -401,6 +410,13 @@ class ContentViewModel: ObservableObject {
         stopDurationTimer()
         recordingDuration = 0
         streamingConfirmedText = ""
+    }
+
+    private func awaitStartStreamingIfNeeded() async {
+        if let startStreamingTask {
+            await startStreamingTask.value
+            self.startStreamingTask = nil
+        }
     }
 
     // MARK: - Private Helpers

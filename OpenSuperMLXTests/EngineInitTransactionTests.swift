@@ -193,4 +193,32 @@ final class EngineInitTransactionTests: XCTestCase {
         let fresh = gate.beginRequest(targetUID: "usb-mic")
         XCTAssertTrue(gate.shouldCommit(generation: fresh, targetUID: "usb-mic"))
     }
+
+    // MARK: - Join / teardown
+
+    func testJoinOnlyWhenSameTargetTaskIsStillRunning() {
+        XCTAssertEqual(
+            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: true, isCancelled: false),
+            .join
+        )
+        XCTAssertEqual(
+            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: true, isCancelled: true),
+            .startFresh,
+            "coolDown-cancelled init must not be rejoined"
+        )
+        XCTAssertEqual(
+            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: false, isCancelled: false),
+            .startFresh
+        )
+        XCTAssertEqual(
+            EngineInitTransaction.joinDecision(hasInFlightTask: false, sameTarget: true, isCancelled: false),
+            .startFresh
+        )
+    }
+
+    func testUnadoptedRunningEngineMustBeTornDown() {
+        XCTAssertTrue(EngineInitTransaction.shouldTeardownUnadoptedEngine(engineRunning: true, tapInstalled: false))
+        XCTAssertTrue(EngineInitTransaction.shouldTeardownUnadoptedEngine(engineRunning: false, tapInstalled: true))
+        XCTAssertFalse(EngineInitTransaction.shouldTeardownUnadoptedEngine(engineRunning: false, tapInstalled: false))
+    }
 }

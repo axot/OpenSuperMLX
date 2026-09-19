@@ -42,6 +42,7 @@ class IndicatorViewModel: ObservableObject {
     private let textInserter: (String) -> Void
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
+    private var startStreamingTask: Task<Void, Never>?
     private var micDisconnectObserver: NSObjectProtocol?
 
     init(
@@ -129,10 +130,14 @@ class IndicatorViewModel: ObservableObject {
             state = .recording
             startBlinking()
 
-            Task { [weak self] in
+            startStreamingTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
+                } catch is CancellationError {
+                    return
+                } catch StreamingAudioError.startAborted {
+                    return
                 } catch {
                     self.logger.error("Failed to start streaming: \(error, privacy: .public)")
                     ErrorToastManager.shared.show(error.localizedDescription)
@@ -183,6 +188,7 @@ class IndicatorViewModel: ObservableObject {
                         self.streamingService.coolDown()
                     }
                 }
+                await self.awaitStartStreamingIfNeeded()
 
                 guard let result = await self.streamingService.finalizeRecording(
                     applyCorrection: true,
@@ -318,10 +324,19 @@ class IndicatorViewModel: ObservableObject {
     // MARK: - Task Cleanup
     
     private func cancelActiveTasks() {
+        startStreamingTask?.cancel()
+        startStreamingTask = nil
         decodingTask?.cancel()
         decodingTask = nil
         correctionTask?.cancel()
         correctionTask = nil
+    }
+
+    private func awaitStartStreamingIfNeeded() async {
+        if let startStreamingTask {
+            await startStreamingTask.value
+            self.startStreamingTask = nil
+        }
     }
     
     private func startBlinking() {
@@ -345,6 +360,7 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
+        streamingService.abortPendingStart()
         if isStreamingMode {
             Task { await streamingService.cancelStreaming() }
             isStreamingMode = false
@@ -360,6 +376,7 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
+        streamingService.abortPendingStart()
         if isStreamingMode {
             Task { await streamingService.cancelStreaming() }
             isStreamingMode = false

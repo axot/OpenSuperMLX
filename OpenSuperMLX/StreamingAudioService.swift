@@ -162,6 +162,9 @@ class StreamingAudioService: ObservableObject {
     /// Identity token for the currently tracked init transaction; lets the launching
     /// caller know it — and not a superseding request — still owns the cleanup.
     private var engineInitEpoch = UUID()
+    /// Bumped by `abortPendingStart` so a start that was cancelled during engine
+    /// init cannot later flip `isStreaming` on.
+    private var startGeneration = 0
 
     /// Output device classifier — testable seam (write at test setUp).
     var classifier: OutputDeviceClassifierProtocol = OutputDeviceClassifier.shared
@@ -414,7 +417,11 @@ class StreamingAudioService: ObservableObject {
             return .failExplicit(.deviceUnresolvable)
         }
 
-        if let task = engineInitTask, engineInitTargetUID == target.id {
+        if EngineInitTransaction.joinDecision(
+            hasInFlightTask: engineInitTask != nil,
+            sameTarget: engineInitTargetUID == target.id,
+            isCancelled: engineInitTask?.isCancelled ?? true
+        ) == .join, let task = engineInitTask {
             return await task.value
         }
         engineInitTask?.cancel()
@@ -442,6 +449,7 @@ class StreamingAudioService: ObservableObject {
         let observation: EngineInitObservation
         let engine: AVAudioEngine
         let deviceSideFormat: AVAudioFormat?
+        let tapInstalled: Bool
     }
 
     @MainActor
@@ -480,6 +488,12 @@ class StreamingAudioService: ObservableObject {
             teardownUnadoptedEngine(result.engine)
             return .abandon
         case .abandon, .failExplicit:
+            if EngineInitTransaction.shouldTeardownUnadoptedEngine(
+                engineRunning: result.engine.isRunning,
+                tapInstalled: result.tapInstalled
+            ) {
+                teardownUnadoptedEngine(result.engine)
+            }
             return verdict
         }
     }
@@ -509,7 +523,8 @@ class StreamingAudioService: ObservableObject {
                     deviceSideFormat: nil
                 ),
                 engine: engine,
-                deviceSideFormat: nil
+                deviceSideFormat: nil,
+                tapInstalled: false
             )
         }
 
@@ -540,7 +555,8 @@ class StreamingAudioService: ObservableObject {
                     bindFailedStatus: bindStatus
                 ),
                 engine: engine,
-                deviceSideFormat: nil
+                deviceSideFormat: nil,
+                tapInstalled: false
             )
         }
 
@@ -557,7 +573,8 @@ class StreamingAudioService: ObservableObject {
                     deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
                 ),
                 engine: engine,
-                deviceSideFormat: nil
+                deviceSideFormat: nil,
+                tapInstalled: false
             )
         }
 
@@ -576,13 +593,23 @@ class StreamingAudioService: ObservableObject {
         guard case .commit(let rate) = verdict else {
             logger.error("Engine init transaction failed for \(target.displayName, privacy: .public): \(String(describing: verdict), privacy: .public)")
             engine.stop()
-            return NativeEngineInitResult(observation: observation, engine: engine, deviceSideFormat: nil)
+            return NativeEngineInitResult(
+                observation: observation,
+                engine: engine,
+                deviceSideFormat: nil,
+                tapInstalled: false
+            )
         }
 
         let tapFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
         installRingBufferTap(on: inputNode, format: tapFormat)
         logger.info("Engine init committed: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz tap=\(Int(tapFormat.sampleRate), privacy: .public)Hz")
-        return NativeEngineInitResult(observation: observation, engine: engine, deviceSideFormat: tapFormat)
+        return NativeEngineInitResult(
+            observation: observation,
+            engine: engine,
+            deviceSideFormat: tapFormat,
+            tapInstalled: true
+        )
     }
 
     nonisolated private static func initFormat(_ format: AVAudioFormat) -> EngineInitFormat {
@@ -829,8 +856,7 @@ class StreamingAudioService: ObservableObject {
     }
 
     private func resetEngineForTapRecovery() {
-        initGate.cancelInFlight()
-        engineInitTask?.cancel()
+        invalidatePendingEngineInit()
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             configChangeObserver = nil
@@ -853,8 +879,7 @@ class StreamingAudioService: ObservableObject {
         stopRMSTimer()
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
-        initGate.cancelInFlight()
-        engineInitTask?.cancel()
+        invalidatePendingEngineInit()
         guard isEngineWarmed else { return }
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -870,6 +895,21 @@ class StreamingAudioService: ObservableObject {
         sessionClassification = nil
         ringBuffer.withLock { $0.removeAll() }
         logger.info("Audio engine cooled down")
+    }
+
+    private func invalidatePendingEngineInit() {
+        initGate.cancelInFlight()
+        engineInitTask?.cancel()
+        engineInitTask = nil
+        engineInitTargetUID = nil
+        engineInitEpoch = UUID()
+    }
+
+    /// Invalidate an in-flight `startStreaming` so it cannot later flip `isStreaming`
+    /// on after the caller already stopped or cancelled.
+    func abortPendingStart() {
+        startGeneration += 1
+        invalidatePendingEngineInit()
     }
 
     private func retireEngine(_ engine: AVAudioEngine?) {
@@ -989,6 +1029,8 @@ class StreamingAudioService: ObservableObject {
             return
         }
 
+        let generation = startGeneration
+
         guard let model = TranscriptionService.shared.streamingModel else {
             PipelineTrace.shared.log("STREAM", "no model available")
             logger.error("No model available for streaming")
@@ -998,12 +1040,21 @@ class StreamingAudioService: ObservableObject {
         if !isEngineWarmed || audioEngine?.isRunning != true {
             coolDown()
             let verdict = await beginEngineInit()
+            guard startGeneration == generation else {
+                PipelineTrace.shared.log("STREAM", "start cancelled during engine init")
+                throw StreamingAudioError.startAborted
+            }
             guard case .commit = verdict else {
                 PipelineTrace.shared.log("STREAM", "engine init failed: \(verdict)")
                 throw StreamingAudioError.engineInitFailed(
                     failure: verdict.failureDescription ?? "Engine initialization failed."
                 )
             }
+        }
+
+        guard startGeneration == generation else {
+            PipelineTrace.shared.log("STREAM", "start cancelled after engine init")
+            throw StreamingAudioError.startAborted
         }
 
         guard audioEngine != nil else {
@@ -1062,6 +1113,17 @@ class StreamingAudioService: ObservableObject {
         streamingSession = session
         if AppPreferences.shared.debugMode {
             logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public)")
+        }
+
+        guard startGeneration == generation else {
+            PipelineTrace.shared.log("STREAM", "start cancelled before going live")
+            session.cancel()
+            archive.cancel()
+            aacArchive = nil
+            currentRecordingID = nil
+            currentRecordingFileName = nil
+            streamingSession = nil
+            throw StreamingAudioError.startAborted
         }
 
         isStreaming = true
@@ -1239,7 +1301,8 @@ class StreamingAudioService: ObservableObject {
 
     func stopStreaming() async -> StreamingStopResult? {
         PipelineTrace.shared.log("STREAM", "stopStreaming() called")
-        guard isStreaming else {
+        if !isStreaming {
+            abortPendingStart()
             logger.warning("Not streaming, ignoring stopStreaming()")
             return nil
         }
@@ -1386,7 +1449,10 @@ class StreamingAudioService: ObservableObject {
     // MARK: - Cancel Streaming
 
     func cancelStreaming() async {
-        guard isStreaming else { return }
+        if !isStreaming {
+            abortPendingStart()
+            return
+        }
         defer {
             isStreaming = false
             resumeIdleMeteringIfNeeded()
@@ -1801,6 +1867,7 @@ enum StreamingAudioError: LocalizedError {
     case audioFormatCreationFailed
     case streamTimeout
     case engineInitFailed(failure: String)
+    case startAborted
 
     var errorDescription: String? {
         switch self {
@@ -1812,6 +1879,8 @@ enum StreamingAudioError: LocalizedError {
             return "Stream simulation timed out waiting for completion."
         case .engineInitFailed(let failure):
             return failure
+        case .startAborted:
+            return nil
         }
     }
 }

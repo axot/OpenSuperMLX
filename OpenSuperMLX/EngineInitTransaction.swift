@@ -58,7 +58,25 @@ enum EngineInitVerdict: Equatable {
     }
 }
 
+enum EngineInitJoinDecision: Equatable {
+    case join
+    case startFresh
+}
+
 enum EngineInitTransaction {
+    /// A cancelled in-flight task is stale: joining it would replay `.abandon` as a
+    /// false init failure. Only a still-running same-target task may be joined.
+    static func joinDecision(hasInFlightTask: Bool, sameTarget: Bool, isCancelled: Bool) -> EngineInitJoinDecision {
+        if hasInFlightTask && sameTarget && !isCancelled { return .join }
+        return .startFresh
+    }
+
+    /// An engine that started (or installed a tap) and then failed to commit must be
+    /// torn down. A bind/start failure that never produced a running graph does not.
+    static func shouldTeardownUnadoptedEngine(engineRunning: Bool, tapInstalled: Bool) -> Bool {
+        engineRunning || tapInstalled
+    }
+
     /// Decide the outcome of one engine-init attempt from its post-start observation.
     /// `.abandon` (not a failure) is for superseded/cancelled attempts: their state may
     /// be broken through no fault of the current request, so they must stay silent.
