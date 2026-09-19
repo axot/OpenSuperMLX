@@ -115,6 +115,24 @@ final class OpenAICompatibleLLMProviderTests: XCTestCase {
         XCTAssertEqual(input[1]["content"] as? String, " Corect text ")
     }
 
+    func testMakeRequestBody_OmitsTemperatureKey() throws {
+        let provider = OpenAICompatibleLLMProvider()
+
+        for apiProtocol: OpenAIAPIProtocol in [.chatCompletions, .responses] {
+            let data = try provider.makeRequestBody(
+                model: "gpt-4o-mini",
+                text: "Helo wrold",
+                systemPrompt: "Fix typos",
+                apiProtocol: apiProtocol
+            )
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertNil(
+                body["temperature"],
+                "Reasoning models reject requests that set temperature (\(apiProtocol))"
+            )
+        }
+    }
+
     // MARK: - Response Parsing
 
     func testParseResponseBody_ChatCompletions_ReturnsFirstChoiceContent() throws {

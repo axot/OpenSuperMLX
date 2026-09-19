@@ -105,7 +105,6 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
                         .init(role: "system", content: systemPrompt),
                         .init(role: "user", content: text),
                     ],
-                    temperature: 0.1,
                     maxTokens: 4096
                 )
             )
@@ -117,7 +116,6 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
                         .init(role: "system", content: systemPrompt),
                         .init(role: "user", content: text),
                     ],
-                    temperature: 0.1,
                     maxOutputTokens: 4096
                 )
             )
@@ -199,7 +197,6 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 private struct ChatCompletionRequest: Encodable {
     let model: String
     let messages: [Message]
-    let temperature: Double?
     let maxTokens: Int?
     let stream: Bool = false
 
@@ -224,7 +221,6 @@ private struct ChatCompletionResponse: Decodable {
 private struct ResponsesAPIRequest: Encodable {
     let model: String
     let input: [Message]
-    let temperature: Double?
     let maxOutputTokens: Int?
     let stream: Bool = false
 
