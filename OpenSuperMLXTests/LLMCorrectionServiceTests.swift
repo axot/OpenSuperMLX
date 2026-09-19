@@ -40,6 +40,7 @@ final class LLMCorrectionServiceTests: XCTestCase {
         let result = await sut.correctTranscription("hello world")
         XCTAssertEqual(result, "hello world")
         XCTAssertEqual(mockProvider.correctCallCount, 0)
+        XCTAssertNil(sut.lastErrorMessage)
     }
 
     func testCorrectTranscription_WhenForceEnabled_BypassesDisabledCheck() async {
@@ -56,27 +57,44 @@ final class LLMCorrectionServiceTests: XCTestCase {
         let result = await sut.correctTranscription("   ")
         XCTAssertEqual(result, "   ")
         XCTAssertEqual(mockProvider.correctCallCount, 0)
+        XCTAssertNil(sut.lastErrorMessage)
     }
 
     func testCorrectTranscription_NoSpeechDetected_ReturnsOriginal() async {
         let result = await sut.correctTranscription("No speech detected in the audio")
         XCTAssertEqual(result, "No speech detected in the audio")
         XCTAssertEqual(mockProvider.correctCallCount, 0)
+        XCTAssertNil(sut.lastErrorMessage)
     }
 
     // MARK: - Provider Interaction
 
-    func testCorrectTranscription_ProviderNotConfigured_ReturnsOriginal() async {
-        mockProvider.isConfigured = false
-        let result = await sut.correctTranscription("hello")
-        XCTAssertEqual(result, "hello")
-        XCTAssertEqual(mockProvider.correctCallCount, 0)
+    func testCorrectTranscription_ProviderNotConfigured_PreservesTextAndSetsError() async {
+        for forceEnabled in [false, true] {
+            defaults.set(!forceEnabled, forKey: "llmCorrectionEnabled")
+            mockProvider.isConfigured = false
+
+            let result = await sut.correctTranscription("hello", forceEnabled: forceEnabled)
+
+            XCTAssertEqual(result, "hello")
+            XCTAssertEqual(mockProvider.correctCallCount, 0)
+            XCTAssertEqual(
+                sut.lastErrorMessage,
+                LLMProviderError.notConfigured(provider: mockProvider.displayName).userFacingMessage
+            )
+        }
     }
 
     func testCorrectTranscription_ProviderReturnsResult_ReturnsTrimmed() async {
+        mockProvider.isConfigured = false
+        _ = await sut.correctTranscription("hello")
+        XCTAssertNotNil(sut.lastErrorMessage)
+
+        mockProvider.isConfigured = true
         mockProvider.correctResult = "  corrected text  "
         let result = await sut.correctTranscription("hello")
         XCTAssertEqual(result, "corrected text")
+        XCTAssertNil(sut.lastErrorMessage)
     }
 
     func testCorrectTranscription_ProviderReturnsEmpty_ReturnsOriginal() async {
