@@ -172,6 +172,9 @@ final class AppPreferences {
     @UserDefault(key: "openAIModel", defaultValue: "gpt-4o-mini")
     var openAIModel: String
 
+    @UserDefault(key: "openAIAPIProtocol", defaultValue: OpenAIAPIProtocol.chatCompletions.rawValue)
+    var openAIAPIProtocol: String
+
     @UserDefault(key: "openAICustomHeaders", defaultValue: "")
     var openAICustomHeaders: String
 

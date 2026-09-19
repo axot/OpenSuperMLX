@@ -94,6 +94,10 @@ class SettingsViewModel: ObservableObject {
     @Published var openAIModel: String {
         didSet { AppPreferences.shared.openAIModel = openAIModel }
     }
+
+    @Published var openAIAPIProtocol: String {
+        didSet { AppPreferences.shared.openAIAPIProtocol = openAIAPIProtocol }
+    }
     
     @Published var openAICustomHeaders: String {
         didSet { AppPreferences.shared.openAICustomHeaders = openAICustomHeaders }
@@ -144,6 +148,7 @@ class SettingsViewModel: ObservableObject {
         self.openAIBaseURL = prefs.openAIBaseURL
         self.openAIAPIKey = prefs.openAIAPIKey
         self.openAIModel = prefs.openAIModel
+        self.openAIAPIProtocol = prefs.openAIAPIProtocol
         self.openAICustomHeaders = prefs.openAICustomHeaders
         self.useCustomPrompt = prefs.useCustomCorrectionPrompt
         self.customPromptText = prefs.customCorrectionPrompt ?? LLMCorrectionService.defaultCorrectionPrompt
@@ -586,6 +591,15 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+
+                    if LLMProviderType(rawValue: viewModel.llmProvider) == .openai {
+                        Picker("API Protocol", selection: $viewModel.openAIAPIProtocol) {
+                            ForEach(OpenAIAPIProtocol.allCases, id: \.rawValue) { apiProtocol in
+                                Text(apiProtocol.displayName).tag(apiProtocol.rawValue)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -692,7 +706,7 @@ struct SettingsView: View {
                                 TextField("gpt-4o-mini", text: $viewModel.openAIModel)
                                     .textFieldStyle(.roundedBorder)
                             }
-                            
+
                             LabeledContent("Custom Headers") {
                                 TextField("{\"key\": \"value\"}", text: $viewModel.openAICustomHeaders)
                                     .textFieldStyle(.roundedBorder)
@@ -766,6 +780,7 @@ struct SettingsView: View {
         Button(name) {
             viewModel.openAIBaseURL = baseURL
             viewModel.openAIModel = model
+            viewModel.openAIAPIProtocol = OpenAIAPIProtocol.chatCompletions.rawValue
             if clearAPIKey {
                 viewModel.openAIAPIKey = ""
             }

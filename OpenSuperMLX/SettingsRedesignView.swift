@@ -279,6 +279,19 @@ struct SettingsRedesignView: View {
                     .pickerStyle(.segmented)
                     .fixedSize()
                 }
+                if LLMProviderType(rawValue: viewModel.llmProvider) == .openai {
+                    SettingsFieldDivider()
+                    SettingsField(label: "API Protocol") {
+                        Picker("", selection: $viewModel.openAIAPIProtocol) {
+                            ForEach(OpenAIAPIProtocol.allCases, id: \.rawValue) { apiProtocol in
+                                Text(apiProtocol.displayName).tag(apiProtocol.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                    }
+                }
             }
 
             if LLMProviderType(rawValue: viewModel.llmProvider) == .bedrock {
@@ -361,6 +374,7 @@ struct SettingsRedesignView: View {
         Button(name) {
             viewModel.openAIBaseURL = baseURL
             viewModel.openAIModel = model
+            viewModel.openAIAPIProtocol = OpenAIAPIProtocol.chatCompletions.rawValue
             if clearAPIKey { viewModel.openAIAPIKey = "" }
         }
         .controlSize(.small)

@@ -25,6 +25,7 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 
     func correctTranscription(_ text: String, systemPrompt: String) async throws -> String {
         let prefs = AppPreferences.shared
+        let apiProtocol = OpenAIAPIProtocol(rawValue: prefs.openAIAPIProtocol) ?? .chatCompletions
 
         var baseURLString = prefs.openAIBaseURL
         while baseURLString.hasSuffix("/") {
@@ -35,7 +36,7 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
             throw LLMProviderError.notConfigured(provider: displayName)
         }
 
-        let url = baseURL.appendingPathComponent("chat/completions")
+        let url = baseURL.appendingPathComponent(apiProtocol.endpointPath)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -49,17 +50,12 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let body = ChatCompletionRequest(
+        request.httpBody = try makeRequestBody(
             model: prefs.openAIModel,
-            messages: [
-                .init(role: "system", content: systemPrompt),
-                .init(role: "user", content: text),
-            ],
-            temperature: 0.1,
-            maxTokens: 4096
+            text: text,
+            systemPrompt: systemPrompt,
+            apiProtocol: apiProtocol
         )
-
-        request.httpBody = try JSONEncoder.snakeCase.encode(body)
 
         let (data, response) = try await sendWithRetry(request)
 
@@ -69,7 +65,7 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             if let errorResponse = try? JSONDecoder.snakeCase.decode(
-                ChatCompletionErrorResponse.self, from: data
+                APIErrorResponse.self, from: data
             ) {
                 let apiError = errorResponse.error
                 switch httpResponse.statusCode {
@@ -91,13 +87,58 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
             )
         }
 
-        let completion = try JSONDecoder.snakeCase.decode(ChatCompletionResponse.self, from: data)
+        return try parseResponseBody(data, apiProtocol: apiProtocol)
+    }
 
-        guard let content = completion.choices.first?.message.content, !content.isEmpty else {
-            throw LLMProviderError.emptyResponse
+    func makeRequestBody(
+        model: String,
+        text: String,
+        systemPrompt: String,
+        apiProtocol: OpenAIAPIProtocol
+    ) throws -> Data {
+        switch apiProtocol {
+        case .chatCompletions:
+            return try JSONEncoder.snakeCase.encode(
+                ChatCompletionRequest(
+                    model: model,
+                    messages: [
+                        .init(role: "system", content: systemPrompt),
+                        .init(role: "user", content: text),
+                    ],
+                    temperature: 0.1,
+                    maxTokens: 4096
+                )
+            )
+        case .responses:
+            return try JSONEncoder.snakeCase.encode(
+                ResponsesAPIRequest(
+                    model: model,
+                    input: [
+                        .init(role: "system", content: systemPrompt),
+                        .init(role: "user", content: text),
+                    ],
+                    temperature: 0.1,
+                    maxOutputTokens: 4096
+                )
+            )
         }
+    }
 
-        return content
+    func parseResponseBody(_ data: Data, apiProtocol: OpenAIAPIProtocol) throws -> String {
+        switch apiProtocol {
+        case .chatCompletions:
+            let completion = try JSONDecoder.snakeCase.decode(ChatCompletionResponse.self, from: data)
+            guard let content = completion.choices.first?.message.content, !content.isEmpty else {
+                throw LLMProviderError.emptyResponse
+            }
+            return content
+        case .responses:
+            let apiResponse = try JSONDecoder.snakeCase.decode(ResponsesAPIResponse.self, from: data)
+            guard let text = apiResponse.outputText else {
+                throw LLMProviderError.emptyResponse
+            }
+            return text
+        }
     }
 
     // MARK: - Private
@@ -180,7 +221,47 @@ private struct ChatCompletionResponse: Decodable {
     }
 }
 
-private struct ChatCompletionErrorResponse: Decodable {
+private struct ResponsesAPIRequest: Encodable {
+    let model: String
+    let input: [Message]
+    let temperature: Double?
+    let maxOutputTokens: Int?
+    let stream: Bool = false
+
+    struct Message: Encodable {
+        let role: String
+        let content: String
+    }
+}
+
+private struct ResponsesAPIResponse: Decodable {
+    let output: [OutputItem]
+
+    struct OutputItem: Decodable {
+        let type: String?
+        let content: [ContentItem]?
+
+        struct ContentItem: Decodable {
+            let type: String?
+            let text: String?
+        }
+    }
+
+    var outputText: String? {
+        var texts: [String] = []
+        for item in output where item.type == "message" {
+            for contentItem in item.content ?? [] where contentItem.type == "output_text" {
+                if let text = contentItem.text {
+                    texts.append(text)
+                }
+            }
+        }
+        let joined = texts.joined()
+        return joined.isEmpty ? nil : joined
+    }
+}
+
+private struct APIErrorResponse: Decodable {
     let error: APIError
 
     struct APIError: Decodable {
