@@ -50,7 +50,7 @@ final class MicrophoneService: ObservableObject {
         return status == noErr
     }
     
-    struct AudioDevice: Identifiable, Equatable, Codable {
+    struct AudioDevice: Identifiable, Equatable, Codable, Sendable {
         let id: String
         let name: String
         let manufacturer: String?

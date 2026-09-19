@@ -6,4 +6,5 @@ extension Notification.Name {
     static let microphoneDisconnected = Notification.Name("microphoneDisconnected")
     static let outputDeviceDidChange = Notification.Name("outputDeviceDidChange")
     static let outputDeviceClassificationDidChange = Notification.Name("outputDeviceClassificationDidChange")
+    static let saveReservationReleased = Notification.Name("saveReservationReleased")
 }

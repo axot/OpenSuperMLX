@@ -90,4 +90,5 @@ jobs:
             -skip-testing:OpenSuperMLXTests/JapaneseGarblingRegressionTests \
             -skip-testing:OpenSuperMLXTests/MicrophoneInventoryTests \
             -skip-testing:OpenSuperMLXTests/StreamingAudioServiceGraphTests \
+            -skip-testing:OpenSuperMLXTests/MicDeviceBindingProbeTests \
             -skip-testing:OpenSuperMLXTests/KeyboardLayoutProviderTests 2>&1 | xcpretty

@@ -12,8 +12,8 @@ final class MicCommandTests: XCTestCase {
     func testMicListJsonSchema() throws {
         try XCTSkipIf(true, "Requires audio hardware — tested via integration")
         let entries: [MicDeviceEntry] = [
-            MicDeviceEntry(id: "dev1", name: "Built-in Mic", isDefault: true, isBuiltIn: true),
-            MicDeviceEntry(id: "dev2", name: "USB Mic", isDefault: false, isBuiltIn: false),
+            MicDeviceEntry(id: "dev1", name: "Built-in Mic", isDefault: true, isDefaultInput: true, isBuiltIn: true),
+            MicDeviceEntry(id: "dev2", name: "USB Mic", isDefault: false, isDefaultInput: false, isBuiltIn: false),
         ]
         let json = CLIOutput.formatSuccess(command: "mic list", data: entries)
         let parsed = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
@@ -24,6 +24,7 @@ final class MicCommandTests: XCTestCase {
         XCTAssertNotNil(first?["id"])
         XCTAssertNotNil(first?["name"])
         XCTAssertNotNil(first?["is_default"])
+        XCTAssertNotNil(first?["is_default_input"])
         XCTAssertNotNil(first?["is_built_in"])
     }
 

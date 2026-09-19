@@ -18,6 +18,7 @@ class TranscriptionQueue: ObservableObject {
     private var currentTranscriptionTask: Task<Void, Never>?
     private var cancelledRecordingIds: Set<UUID> = []
     private var progressCancellable: AnyCancellable?
+    private var saveReservationObserver: NSObjectProtocol?
 
     private init() {
         self.transcriptionService = TranscriptionService.shared
@@ -26,19 +27,36 @@ class TranscriptionQueue: ObservableObject {
             ErrorToastManager.shared.show(message)
         }
         setupProgressObserver()
+        setupSaveReservationObserver()
     }
 
     init(
         transcriptionService: TranscriptionService,
         recordingStore: RecordingStore,
         onMissingAudio: @escaping (String) -> Void = { _ in },
-        observesProgress: Bool = true
+        observesProgress: Bool = true,
+        observesSaveReservation: Bool = true
     ) {
         self.transcriptionService = transcriptionService
         self.recordingStore = recordingStore
         self.onMissingAudio = onMissingAudio
         if observesProgress {
             setupProgressObserver()
+        }
+        if observesSaveReservation {
+            setupSaveReservationObserver()
+        }
+    }
+
+    private func setupSaveReservationObserver() {
+        saveReservationObserver = NotificationCenter.default.addObserver(
+            forName: .saveReservationReleased,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.startProcessingQueue()
+            }
         }
     }
     

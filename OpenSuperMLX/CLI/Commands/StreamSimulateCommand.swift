@@ -114,7 +114,7 @@ struct StreamSimulateCommand: ParsableCommand {
                 return .failure(.modelLoadFailed)
             case .streamTimeout:
                 return .failure(.streamTimeout)
-            case .audioFormatCreationFailed:
+            case .audioFormatCreationFailed, .engineInitFailed:
                 return .failure(.transcriptionFailed)
             }
         } catch {

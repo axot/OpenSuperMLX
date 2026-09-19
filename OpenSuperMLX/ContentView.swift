@@ -244,16 +244,20 @@ class ContentViewModel: ObservableObject {
             recordingStartTime = Date()
             recordingDuration = 0
             startDurationTimerIfNeeded()
-            
-            do {
-                try streamingService.startStreaming()
-            } catch {
-                logger.error("Failed to start streaming: \(error, privacy: .public)")
-                state = .idle
-                isStreamingMode = false
-                stopBlinking()
-                stopDurationTimer()
-                recordingDuration = 0
+
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.streamingService.startStreaming()
+                } catch {
+                    self.logger.error("Failed to start streaming: \(error, privacy: .public)")
+                    ErrorToastManager.shared.show(error.localizedDescription)
+                    self.state = .idle
+                    self.isStreamingMode = false
+                    self.stopBlinking()
+                    self.stopDurationTimer()
+                    self.recordingDuration = 0
+                }
             }
         } else {
             isStreamingMode = false

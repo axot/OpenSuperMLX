@@ -24,11 +24,13 @@ struct MicDeviceEntry: Encodable {
     let id: String
     let name: String
     let isDefault: Bool
+    let isDefaultInput: Bool
     let isBuiltIn: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case isDefault = "is_default"
+        case isDefaultInput = "is_default_input"
         case isBuiltIn = "is_built_in"
     }
 }
@@ -67,12 +69,15 @@ struct MicListCommand: ParsableCommand {
     static func executeList() -> Result<[MicDeviceEntry], CLIError> {
         let service = MicrophoneService.shared
         let defaultDevice = service.getDefaultMicrophone()
+        let systemDefaultInputUID = service.getCurrentSystemDefaultInputDevice()
+            .flatMap { service.getDeviceUID($0) }
 
         let entries = service.availableMicrophones.map { device in
             MicDeviceEntry(
                 id: device.id,
                 name: device.name,
                 isDefault: device.id == defaultDevice?.id,
+                isDefaultInput: device.id == systemDefaultInputUID,
                 isBuiltIn: device.isBuiltIn
             )
         }

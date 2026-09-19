@@ -132,7 +132,15 @@ struct RecordingSaveDependencies {
 final class RecordingSaveCoordinator: ObservableObject {
     static let shared = RecordingSaveCoordinator(dependencies: .live())
 
-    @Published private(set) var state: RecordingSaveState = .idle
+    @Published private(set) var state: RecordingSaveState = .idle {
+        didSet {
+            guard case .idle = state else { return }
+            if case .idle = oldValue { return }
+            // Files queued while a recording was in flight stay blocked until the save
+            // reservation is gone; this is their wake signal.
+            NotificationCenter.default.post(name: .saveReservationReleased, object: nil)
+        }
+    }
 
     private let dependencies: RecordingSaveDependencies
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "RecordingSaveCoordinator")

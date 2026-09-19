@@ -170,6 +170,37 @@ final class RecordingSaveCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isIdle)
     }
 
+    func testSuccessfulSavePostsSaveReservationReleased() async throws {
+        let environment = try SaveEnvironment()
+        defer { environment.cleanup() }
+        let coordinator = RecordingSaveCoordinator(dependencies: environment.dependencies())
+
+        let released = expectation(forNotification: .saveReservationReleased, object: nil)
+        _ = await coordinator.save(makeOutcome(audioURL: nil))
+        await fulfillment(of: [released], timeout: 1)
+        XCTAssertTrue(coordinator.isIdle)
+    }
+
+    func testSaveFailureKeepsReservationUntilRecovered() async throws {
+        let environment = try SaveEnvironment()
+        defer { environment.cleanup() }
+        environment.encodeFailuresRemaining = 1
+        let coordinator = RecordingSaveCoordinator(dependencies: environment.dependencies())
+
+        let released = expectation(forNotification: .saveReservationReleased, object: nil)
+        released.isInverted = true
+        _ = await coordinator.save(makeOutcome(audioURL: nil))
+        await fulfillment(of: [released], timeout: 0.2)
+        guard case .awaitingUser = coordinator.state else {
+            return XCTFail("expected awaitingUser, got \(coordinator.state)")
+        }
+
+        let releasedAfterRetry = expectation(forNotification: .saveReservationReleased, object: nil)
+        _ = await coordinator.retry()
+        await fulfillment(of: [releasedAfterRetry], timeout: 1)
+        XCTAssertTrue(coordinator.isIdle)
+    }
+
     private func makeOutcome(
         audioURL: URL?,
         storageError: Error? = nil,

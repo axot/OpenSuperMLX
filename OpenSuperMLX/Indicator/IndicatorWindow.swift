@@ -87,8 +87,7 @@ class IndicatorViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, self.isStreamingMode, self.state == .recording else { return }
                 self.logger.info("Microphone disconnected during streaming — finalizing recording")
-                self.startDecoding()
-                self.streamingService.coolDown()
+                self.startDecoding(coolDownOnFinish: true)
                 ErrorToastManager.shared.show("Microphone disconnected — recording saved")
             }
         }
@@ -130,13 +129,17 @@ class IndicatorViewModel: ObservableObject {
             state = .recording
             startBlinking()
 
-            do {
-                try streamingService.startStreaming()
-            } catch {
-                logger.error("Failed to start streaming: \(error, privacy: .public)")
-                state = .idle
-                isStreamingMode = false
-                stopBlinking()
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.streamingService.startStreaming()
+                } catch {
+                    self.logger.error("Failed to start streaming: \(error, privacy: .public)")
+                    ErrorToastManager.shared.show(error.localizedDescription)
+                    self.state = .idle
+                    self.isStreamingMode = false
+                    self.stopBlinking()
+                }
             }
         } else {
             isStreamingMode = false
@@ -160,18 +163,26 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    func startDecoding() {
+    /// `coolDownOnFinish` is for the mic-disconnect path: the engine holds a dead
+    /// device and must be released, but only after the finalize Task drained the ring
+    /// buffer — tearing it down before that would drop the recording's tail audio.
+    func startDecoding(coolDownOnFinish: Bool = false) {
         guard state == .recording else {
             logger.warning("startDecoding() called but state is \(String(describing: self.state), privacy: .public), ignoring")
             return
         }
         stopBlinking()
-        
+
         if isStreamingMode {
             state = .decoding
 
             decodingTask = Task { [weak self] in
                 guard let self = self else { return }
+                defer {
+                    if coolDownOnFinish {
+                        self.streamingService.coolDown()
+                    }
+                }
 
                 guard let result = await self.streamingService.finalizeRecording(
                     applyCorrection: true,

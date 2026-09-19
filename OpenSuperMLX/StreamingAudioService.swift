@@ -152,6 +152,17 @@ class StreamingAudioService: ObservableObject {
     private var lastWarmUpTime: Date = .distantPast
     private var tapRecoveryAttempts = 0
 
+    /// Serializes one engine-init transaction at a time. Native calls run here so a
+    /// slow device handoff never blocks the main thread; the commit decision stays on
+    /// the main actor, gated by the generation counter.
+    private static let engineInitQueue = DispatchQueue(label: "OpenSuperMLX.engineInit", qos: .userInitiated)
+    private let initGate = EngineInitGate()
+    private var engineInitTask: Task<EngineInitVerdict, Never>?
+    private var engineInitTargetUID: String?
+    /// Identity token for the currently tracked init transaction; lets the launching
+    /// caller know it — and not a superseding request — still owns the cleanup.
+    private var engineInitEpoch = UUID()
+
     /// Output device classifier — testable seam (write at test setUp).
     var classifier: OutputDeviceClassifierProtocol = OutputDeviceClassifier.shared
 
@@ -279,7 +290,7 @@ class StreamingAudioService: ObservableObject {
         popoverWantsMetering = true
         guard !isStreaming else { return }
         if !isEngineWarmed || audioEngine?.isRunning != true {
-            warmUp()
+            Task { await self.warmUp() }
         }
         if rmsTimer == nil {
             startRMSTimer()
@@ -330,12 +341,19 @@ class StreamingAudioService: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isStreaming {
-                    self.hotSwapMicrophone()
+                    // Only re-init when the active target actually differs — with a
+                    // saved (pinned) mic, system-default churn must not disturb a
+                    // healthy engine.
+                    if self.activeTargetDiffersFromBoundEngine() {
+                        await self.hotSwapMicrophone()
+                    }
                 } else if self.isEngineWarmed {
-                    self.coolDown()
-                    self.warmUp(fromBackground: true)
+                    if self.activeTargetDiffersFromBoundEngine() {
+                        self.coolDown()
+                        await self.warmUp(fromBackground: true)
+                    }
                 } else if self.hasBeenWarmedOnce {
-                    self.warmUp(fromBackground: true)
+                    await self.warmUp(fromBackground: true)
                 }
             }
         }
@@ -375,61 +393,220 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Engine Pre-Warm
 
-    func warmUp(fromBackground: Bool = false) {
+    func warmUp(fromBackground: Bool = false) async {
         guard !isEngineWarmed, audioEngine == nil else { return }
         if fromBackground && Date().timeIntervalSince(lastWarmUpTime) < 1.0 {
             logger.info("Skipping warmUp — last warmUp was < 1s ago")
             return
         }
 
-        resetTapHealth()
-        let engine = AVAudioEngine()
+        await beginEngineInit()
+    }
 
+    /// Resolve the active mic and run (or join) one pinned-device init transaction for
+    /// it. Concurrent requests for the same device share the in-flight transaction; a
+    /// different target supersedes it.
+    private func beginEngineInit() async -> EngineInitVerdict {
         let activeMic = MicrophoneService.shared.activateForRecording()
-
-        let inputNode = engine.inputNode
-
-        // VPIO disabled — mic input goes through plain AVAudioEngine.inputNode with no
-        // voice-processing pipeline, so other apps reading the same device (QuickTime, Zoom,
-        // etc.) see unmodified levels. AEC for speaker-capture echo is now handled at the
-        // routing layer via OutputDeviceClassifier (see startStreaming).
-        if let activeMic,
-           let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: activeMic) {
-            var deviceID = coreAudioID
-            let status = AudioUnitSetProperty(
-                inputNode.audioUnit!,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global, 0,
-                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
-            if status != noErr {
-                logger.error("Failed to set current input device status=\(status, privacy: .public) mic=\(activeMic.displayName, privacy: .public) coreAudioID=\(coreAudioID, privacy: .public)")
-            }
-        } else {
-            logger.warning("No CoreAudio ID for active microphone: \(activeMic?.displayName ?? "nil", privacy: .public)")
+        guard let target = activeMic,
+              MicrophoneService.shared.getCoreAudioDeviceID(for: target) != nil else {
+            logger.error("No CoreAudio device for active microphone: \(activeMic?.displayName ?? "nil", privacy: .public)")
+            return .failExplicit(.deviceUnresolvable)
         }
-        logger.info("Warm-up: plain input for \(activeMic?.displayName ?? "default", privacy: .public)")
 
-        do {
-            warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "warm-up before engine.start")
-            try engine.start()
-            let runningFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
-            self.nativeSampleRate = runningFormat.sampleRate
-            installRingBufferTap(on: inputNode, format: runningFormat)
-            audioEngine = engine
+        if let task = engineInitTask, engineInitTargetUID == target.id {
+            return await task.value
+        }
+        engineInitTask?.cancel()
+
+        let generation = initGate.beginRequest(targetUID: target.id)
+        let epoch = UUID()
+        let task = Task(priority: .userInitiated) { [weak self] in
+            guard let self else { return EngineInitVerdict.abandon }
+            return await self.runInitTransaction(target: target, generation: generation)
+        }
+        engineInitTask = task
+        engineInitTargetUID = target.id
+        engineInitEpoch = epoch
+
+        let verdict = await task.value
+        if engineInitEpoch == epoch {
+            engineInitTask = nil
+            engineInitTargetUID = nil
+            initGate.endRequest(generation: generation)
+        }
+        return verdict
+    }
+
+    private struct NativeEngineInitResult {
+        let observation: EngineInitObservation
+        let engine: AVAudioEngine
+        let deviceSideFormat: AVAudioFormat?
+    }
+
+    @MainActor
+    private func runInitTransaction(target: MicrophoneService.AudioDevice, generation: Int) async -> EngineInitVerdict {
+        resetTapHealth()
+
+        let result: NativeEngineInitResult = await withCheckedContinuation { continuation in
+            Self.engineInitQueue.async { [weak self] in
+                guard let self else { return }
+                continuation.resume(returning: self.performNativeInit(target: target))
+            }
+        }
+
+        var observation = result.observation
+        if Task.isCancelled { observation.cancelled = true }
+
+        let verdict = EngineInitTransaction.evaluate(observation)
+        switch verdict {
+        case .commit(let rate) where initGate.shouldCommit(generation: generation, targetUID: target.id):
+            audioEngine = result.engine
+            nativeSampleRate = rate
             isEngineWarmed = true
             hasBeenWarmedOnce = true
             lastWarmUpTime = Date()
             // Snapshot post-start state so the configChange handler can branch on what
-            // actually changed instead of unconditionally hot-swapping (which would
-            // self-trigger another configChange via the AUHAL property write below).
-            lastKnownInputFormat = runningFormat
-            lastKnownInputDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
-            observeEngineConfigChange(engine)
-            logger.info("Audio engine warmed up")
-        } catch {
-            logger.error("Warm-up failed: \(error, privacy: .public)")
+            // actually changed. The device snapshot is the *bound* device, not the
+            // system default — with a pinned non-default mic the two differ, and the
+            // compare must be engine-scoped.
+            lastKnownInputFormat = result.deviceSideFormat
+            lastKnownInputDeviceID = observation.boundDeviceID
+            observeEngineConfigChange(result.engine)
+            logger.info("Audio engine warmed up: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz")
+            return verdict
+        case .commit:
+            // Superseded mid-flight — this engine belongs to a stale request.
+            teardownUnadoptedEngine(result.engine)
+            return .abandon
+        case .abandon, .failExplicit:
+            return verdict
         }
+    }
+
+    private func teardownUnadoptedEngine(_ engine: AVAudioEngine) {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        retireEngine(engine)
+    }
+
+    /// Prepare, start, and verify an engine bound to `target`. Runs entirely on the
+    /// engine-init queue; the tap is installed only after the transaction's verify step
+    /// passes, so a reverted or mismatched binding can never reach `installTap`.
+    nonisolated
+    private func performNativeInit(target: MicrophoneService.AudioDevice) -> NativeEngineInitResult {
+        let engine = AVAudioEngine()
+        let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: target)
+
+        guard let coreAudioID else {
+            logger.error("Engine init: cannot resolve CoreAudio ID for \(target.displayName, privacy: .public)")
+            return NativeEngineInitResult(
+                observation: EngineInitObservation(
+                    engineRunning: false,
+                    startErrorDescription: nil,
+                    boundDeviceID: nil,
+                    targetDeviceID: nil,
+                    deviceSideFormat: nil
+                ),
+                engine: engine,
+                deviceSideFormat: nil
+            )
+        }
+
+        let inputNode = engine.inputNode
+        warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "warm-up before engine.start")
+
+        var deviceID = coreAudioID
+        let bindStatus: OSStatus
+        if let audioUnit = inputNode.audioUnit {
+            bindStatus = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global, 0,
+                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+        } else {
+            bindStatus = OSStatus(kAudioUnitErr_InvalidParameter)
+        }
+        guard bindStatus == noErr else {
+            logger.error("Engine init: failed to bind \(target.displayName, privacy: .public) status=\(bindStatus, privacy: .public)")
+            return NativeEngineInitResult(
+                observation: EngineInitObservation(
+                    engineRunning: false,
+                    startErrorDescription: nil,
+                    boundDeviceID: nil,
+                    targetDeviceID: coreAudioID,
+                    deviceSideFormat: nil,
+                    bindFailedStatus: bindStatus
+                ),
+                engine: engine,
+                deviceSideFormat: nil
+            )
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            logger.error("Engine init: start failed for \(target.displayName, privacy: .public): \(String(describing: error), privacy: .public)")
+            return NativeEngineInitResult(
+                observation: EngineInitObservation(
+                    engineRunning: engine.isRunning,
+                    startErrorDescription: String(describing: error),
+                    boundDeviceID: Self.boundInputDeviceID(of: engine),
+                    targetDeviceID: coreAudioID,
+                    deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
+                ),
+                engine: engine,
+                deviceSideFormat: nil
+            )
+        }
+
+        // Verify BEFORE installing the tap: the bound device must still be the target
+        // and the device-side format must be sane. AVAudioEngine re-routes to the
+        // system default on start in the failed case, which is exactly the state a tap
+        // must never be installed into.
+        let observation = EngineInitObservation(
+            engineRunning: engine.isRunning,
+            startErrorDescription: nil,
+            boundDeviceID: Self.boundInputDeviceID(of: engine),
+            targetDeviceID: coreAudioID,
+            deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
+        )
+        let verdict = EngineInitTransaction.evaluate(observation)
+        guard case .commit(let rate) = verdict else {
+            logger.error("Engine init transaction failed for \(target.displayName, privacy: .public): \(String(describing: verdict), privacy: .public)")
+            engine.stop()
+            return NativeEngineInitResult(observation: observation, engine: engine, deviceSideFormat: nil)
+        }
+
+        let tapFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
+        installRingBufferTap(on: inputNode, format: tapFormat)
+        logger.info("Engine init committed: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz tap=\(Int(tapFormat.sampleRate), privacy: .public)Hz")
+        return NativeEngineInitResult(observation: observation, engine: engine, deviceSideFormat: tapFormat)
+    }
+
+    nonisolated private static func initFormat(_ format: AVAudioFormat) -> EngineInitFormat {
+        EngineInitFormat(
+            sampleRate: format.sampleRate,
+            channelCount: Int(format.channelCount),
+            isInterleaved: format.isInterleaved
+        )
+    }
+
+    /// Read back the device the engine's input AU is actually bound to — the verify
+    /// primitive for the pinned-device transaction and the engine-scoped comparison
+    /// used by the configChange handler.
+    nonisolated static func boundInputDeviceID(of engine: AVAudioEngine) -> AudioDeviceID? {
+        guard let audioUnit = engine.inputNode.audioUnit else { return nil }
+        var deviceID = AudioDeviceID()
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0,
+            &deviceID, &size
+        )
+        return status == noErr ? deviceID : nil
     }
 
     private func observeEngineConfigChange(_ engine: AVAudioEngine) {
@@ -447,7 +624,7 @@ class StreamingAudioService: ObservableObject {
                 self.configDebounceTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(200))
                     guard !Task.isCancelled, let self, self.isStreaming else { return }
-                    self.handleConfigChange()
+                    await self.handleConfigChange()
                 }
             }
         }
@@ -456,7 +633,7 @@ class StreamingAudioService: ObservableObject {
     /// Branches on what actually changed, so the recovery path does not re-trigger the
     /// trigger condition for `.AVAudioEngineConfigurationChange`. This eliminates the
     /// hot-swap feedback loop that bounded `feedAudio` to 500–1300ms.
-    private func handleConfigChange() {
+    private func handleConfigChange() async {
         guard !isHandlingConfigChange else {
             logger.info("Skipping nested configChange handler re-entry")
             return
@@ -466,7 +643,9 @@ class StreamingAudioService: ObservableObject {
 
         guard let engine = audioEngine else { return }
         let liveFormat = currentPlainMicTapFormat(for: engine.inputNode, in: engine)
-        let liveDeviceID = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
+        // Compare against the device the engine is *bound* to, not the system default —
+        // with a pinned non-default mic, default-input churn is irrelevant to this engine.
+        let liveDeviceID = Self.boundInputDeviceID(of: engine)
 
         let formatChanged: Bool = {
             guard let cached = lastKnownInputFormat else { return true }
@@ -483,12 +662,12 @@ class StreamingAudioService: ObservableObject {
             reinstallTap(format: liveFormat)
         case (true, _):
             logger.warning("configChange: input device changed — full hot-swap")
-            hotSwapMicrophone()
+            await hotSwapMicrophone()
             // Force the cache to reflect what we observed at handler entry, regardless of
             // whether warmUp succeeded inside hotSwap. If warm-up threw, the engine is
-            // gone but the *system*'s default input is still `liveDeviceID`; without this
-            // update we'd loop on the next configChange comparing stale cache vs the
-            // already-swapped live state.
+            // gone but the bound-device/format reads still return the observed values;
+            // without this update we'd loop on the next configChange comparing stale
+            // cache vs the already-swapped live state.
             lastKnownInputFormat = liveFormat
             lastKnownInputDeviceID = liveDeviceID
         }
@@ -510,8 +689,9 @@ class StreamingAudioService: ObservableObject {
     }
 
     /// Install the standard tap that drains audio into `ringBuffer`. Used by both
-    /// `warmUp` (initial install) and `reinstallTap` (format-change recovery).
-    private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
+    /// engine init (background queue) and `reinstallTap` (main actor). Only touches
+    /// lock-backed state and weak actor reads, so it is safe from any thread.
+    nonisolated private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
         let ringBufferLock = self.ringBuffer
         let tapState = self.tapState
         let rmsLock = self.rmsLock
@@ -545,7 +725,7 @@ class StreamingAudioService: ObservableObject {
         }
     }
 
-    static func plainMicGraphStatus(engine: AVAudioEngine, inputNode: AVAudioInputNode) -> PlainMicGraphStatus {
+    nonisolated static func plainMicGraphStatus(engine: AVAudioEngine, inputNode: AVAudioInputNode) -> PlainMicGraphStatus {
         let unexpectedNodeTypes = engine.attachedNodes
             .filter { $0 !== inputNode }
             .map { String(describing: type(of: $0)) }
@@ -557,7 +737,7 @@ class StreamingAudioService: ObservableObject {
         )
     }
 
-    private func currentPlainMicTapFormat(for inputNode: AVAudioInputNode, in engine: AVAudioEngine) -> AVAudioFormat {
+    nonisolated private func currentPlainMicTapFormat(for inputNode: AVAudioInputNode, in engine: AVAudioEngine) -> AVAudioFormat {
         warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "plain mic tap format")
 
         let inputFormat = inputNode.inputFormat(forBus: 0)
@@ -581,7 +761,7 @@ class StreamingAudioService: ObservableObject {
         return outputFormat
     }
 
-    private func warnIfNonPlainMicGraph(engine: AVAudioEngine, inputNode: AVAudioInputNode, context: String) {
+    nonisolated private func warnIfNonPlainMicGraph(engine: AVAudioEngine, inputNode: AVAudioInputNode, context: String) {
         let graphStatus = Self.plainMicGraphStatus(engine: engine, inputNode: inputNode)
         guard !graphStatus.isPlainMicGraph else { return }
 
@@ -589,7 +769,7 @@ class StreamingAudioService: ObservableObject {
         logger.error("Plain mic graph invariant violated: context=\(context, privacy: .public) unexpectedNodes=\(graphStatus.unexpectedNodeTypes.joined(separator: ","), privacy: .public) outputConnections=\(graphStatus.outputConnectionCount, privacy: .public)")
     }
 
-    private func describe(format: AVAudioFormat) -> String {
+    nonisolated private func describe(format: AVAudioFormat) -> String {
         "\(format.sampleRate)Hz x\(format.channelCount) \(format.commonFormat) interleaved=\(format.isInterleaved)"
     }
 
@@ -639,7 +819,7 @@ class StreamingAudioService: ObservableObject {
         guard isStreaming else { return }
 
         lastWarmUpTime = .distantPast
-        warmUp()
+        await warmUp()
         if isEngineWarmed {
             scheduleTapHealthCheck()
         } else {
@@ -649,6 +829,8 @@ class StreamingAudioService: ObservableObject {
     }
 
     private func resetEngineForTapRecovery() {
+        initGate.cancelInFlight()
+        engineInitTask?.cancel()
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             configChangeObserver = nil
@@ -671,6 +853,8 @@ class StreamingAudioService: ObservableObject {
         stopRMSTimer()
         cancelTapHealthCheck()
         tapRecoveryAttempts = 0
+        initGate.cancelInFlight()
+        engineInitTask?.cancel()
         guard isEngineWarmed else { return }
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -698,7 +882,7 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Mic Hot-Swap
 
-    private func hotSwapMicrophone() {
+    private func hotSwapMicrophone() async {
         guard let engine = audioEngine else { return }
         configDebounceTask?.cancel()
         configDebounceTask = nil
@@ -717,7 +901,7 @@ class StreamingAudioService: ObservableObject {
 
         // Bypass the 1s warmUp debounce — this is a same-tick recreate.
         lastWarmUpTime = .distantPast
-        warmUp(fromBackground: true)
+        await warmUp(fromBackground: true)
 
         if !isEngineWarmed {
             logger.error("Hot-swap failed: audio engine did not start with new device")
@@ -728,6 +912,17 @@ class StreamingAudioService: ObservableObject {
         }
 
         logger.info("Hot-swapped microphone, preserved \(preserved.count) samples")
+    }
+
+    /// True when the mic that should be recording now differs from the device the warm
+    /// engine is actually bound to. Default-input churn with a saved (pinned) mic
+    /// resolves to the same target and must not tear down a healthy engine.
+    private func activeTargetDiffersFromBoundEngine() -> Bool {
+        guard let engine = audioEngine else { return true }
+        let bound = Self.boundInputDeviceID(of: engine)
+        guard let active = MicrophoneService.shared.activateForRecording(),
+              let activeID = MicrophoneService.shared.getCoreAudioDeviceID(for: active) else { return true }
+        return bound != activeID
     }
 
     /// Re-evaluate routing for the current output device. A chip flip on the *current*
@@ -785,7 +980,7 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Start Streaming
 
-    func startStreaming() throws {
+    func startStreaming() async throws {
         PipelineTrace.shared.log("STREAM", "startStreaming() called")
 
         guard !isStreaming else {
@@ -802,7 +997,13 @@ class StreamingAudioService: ObservableObject {
 
         if !isEngineWarmed || audioEngine?.isRunning != true {
             coolDown()
-            warmUp()
+            let verdict = await beginEngineInit()
+            guard case .commit = verdict else {
+                PipelineTrace.shared.log("STREAM", "engine init failed: \(verdict)")
+                throw StreamingAudioError.engineInitFailed(
+                    failure: verdict.failureDescription ?? "Engine initialization failed."
+                )
+            }
         }
 
         guard audioEngine != nil else {
@@ -1599,6 +1800,7 @@ enum StreamingAudioError: LocalizedError {
     case modelNotLoaded
     case audioFormatCreationFailed
     case streamTimeout
+    case engineInitFailed(failure: String)
 
     var errorDescription: String? {
         switch self {
@@ -1608,6 +1810,8 @@ enum StreamingAudioError: LocalizedError {
             return "Failed to create the target audio format for streaming."
         case .streamTimeout:
             return "Stream simulation timed out waiting for completion."
+        case .engineInitFailed(let failure):
+            return failure
         }
     }
 }
