@@ -25,18 +25,14 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
 
     func correctTranscription(_ text: String, systemPrompt: String) async throws -> String {
         let prefs = AppPreferences.shared
-        let apiProtocol = OpenAIAPIProtocol(rawValue: prefs.openAIAPIProtocol) ?? .chatCompletions
+        let apiProtocol = Self.resolvedAPIProtocol(rawValue: prefs.openAIAPIProtocol)
 
-        var baseURLString = prefs.openAIBaseURL
-        while baseURLString.hasSuffix("/") {
-            baseURLString.removeLast()
-        }
-
-        guard let baseURL = URL(string: baseURLString) else {
+        guard let url = makeRequestURL(
+            baseURLString: prefs.openAIBaseURL,
+            apiProtocol: apiProtocol
+        ) else {
             throw LLMProviderError.notConfigured(provider: displayName)
         }
-
-        let url = baseURL.appendingPathComponent(apiProtocol.endpointPath)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -88,6 +84,19 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
         }
 
         return try parseResponseBody(data, apiProtocol: apiProtocol)
+    }
+
+    static func resolvedAPIProtocol(rawValue: String) -> OpenAIAPIProtocol {
+        OpenAIAPIProtocol(rawValue: rawValue) ?? .chatCompletions
+    }
+
+    func makeRequestURL(baseURLString: String, apiProtocol: OpenAIAPIProtocol) -> URL? {
+        var trimmed = baseURLString
+        while trimmed.hasSuffix("/") {
+            trimmed.removeLast()
+        }
+        guard let baseURL = URL(string: trimmed) else { return nil }
+        return baseURL.appendingPathComponent(apiProtocol.endpointPath)
     }
 
     func makeRequestBody(

@@ -66,6 +66,45 @@ final class OpenAICompatibleLLMProviderTests: XCTestCase {
         XCTAssertTrue(provider.isConfigured)
     }
 
+    // MARK: - Request URL
+
+    func testMakeRequestURL_ChatCompletionsProtocol_AppendsChatCompletionsPath() throws {
+        let provider = OpenAICompatibleLLMProvider()
+        let url = try XCTUnwrap(
+            provider.makeRequestURL(
+                baseURLString: "https://api.openai.com/v1",
+                apiProtocol: .chatCompletions
+            )
+        )
+        XCTAssertEqual(url.absoluteString, "https://api.openai.com/v1/chat/completions")
+    }
+
+    func testMakeRequestURL_ResponsesProtocol_TrimsTrailingSlashAndAppendsResponsesPath() throws {
+        let provider = OpenAICompatibleLLMProvider()
+        let url = try XCTUnwrap(
+            provider.makeRequestURL(
+                baseURLString: "http://localhost:1234/v1/",
+                apiProtocol: .responses
+            )
+        )
+        XCTAssertEqual(url.absoluteString, "http://localhost:1234/v1/responses")
+    }
+
+    func testMakeRequestURL_EmptyBaseURL_ReturnsNil() {
+        let provider = OpenAICompatibleLLMProvider()
+        XCTAssertNil(
+            provider.makeRequestURL(
+                baseURLString: "",
+                apiProtocol: .responses
+            )
+        )
+    }
+
+    func testResolvedAPIProtocol_UnknownStoredValue_FallsBackToChatCompletions() {
+        XCTAssertEqual(OpenAICompatibleLLMProvider.resolvedAPIProtocol(rawValue: "bogus"), .chatCompletions)
+        XCTAssertEqual(OpenAICompatibleLLMProvider.resolvedAPIProtocol(rawValue: ""), .chatCompletions)
+    }
+
     // MARK: - Request Body
 
     func testMakeRequestBody_ChatCompletions_EncodesMessagesArray() throws {
