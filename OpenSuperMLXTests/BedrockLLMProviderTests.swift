@@ -3,6 +3,8 @@
 
 import XCTest
 
+import AWSBedrockRuntime
+
 @testable import OpenSuperMLX
 
 final class BedrockLLMProviderTests: XCTestCase {
@@ -77,5 +79,20 @@ final class BedrockLLMProviderTests: XCTestCase {
         defaults.set("", forKey: "bedrockSecretKey")
         let provider = BedrockLLMProvider()
         XCTAssertTrue(provider.isConfigured)
+    }
+
+    // MARK: - Converse Input
+
+    func testMakeConverseInput_OmitsTemperature() throws {
+        let provider = BedrockLLMProvider()
+        let input = provider.makeConverseInput(
+            modelId: "anthropic.claude-3-haiku-20240307-v1:0",
+            systemPrompt: "Fix typos",
+            text: " Corect text "
+        )
+
+        XCTAssertEqual(input.modelId, "anthropic.claude-3-haiku-20240307-v1:0")
+        XCTAssertEqual(input.inferenceConfig?.maxTokens, 4096)
+        XCTAssertNil(input.inferenceConfig?.temperature, "Reasoning models reject requests that set temperature")
     }
 }

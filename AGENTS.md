@@ -66,6 +66,19 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## Worktree Workflow
+
+All code changes happen in a dedicated git worktree, never directly in the main checkout on `master`. Multiple agents may edit the same files concurrently, so the main checkout must stay clean.
+
+Before coding, confirm the session is in a worktree:
+
+1. Check `git worktree list` and the current branch. If the session is in the main checkout or on `master`/`main`, create a worktree first:
+   ```bash
+   git worktree add ../OpenSuperMLX-<topic> -b <type>/<short-name>   # e.g. fix/llm-temperature-removal
+   ```
+2. If uncommitted changes already sit in the main checkout, move them into the worktree before starting: write a path-limited `git diff` patch, apply it in the worktree, then `git checkout --` those files in the main checkout. Only move changes you authored — other agents' uncommitted work stays put.
+3. A fresh worktree has no submodule checkouts; run `git submodule update --init --recursive` there before building.
+
 ## Build Commands
 
 ```bash
