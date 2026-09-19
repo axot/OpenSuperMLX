@@ -62,4 +62,10 @@ final class StreamingAudioServiceRoutingTests: XCTestCase {
     func testHotRestartOnMidStreamClassificationFlip() throws {
         throw XCTSkip("Requires injectable AVAudioEngine; covered by manual GUI smoke (plan step 15).")
     }
+
+    func testStartAbortIsNotReportedAsFailure() {
+        XCTAssertFalse(StreamingAudioError.shouldReportStartFailure(StreamingAudioError.startAborted))
+        XCTAssertFalse(StreamingAudioError.shouldReportStartFailure(CancellationError()))
+        XCTAssertTrue(StreamingAudioError.shouldReportStartFailure(StreamingAudioError.modelNotLoaded))
+    }
 }

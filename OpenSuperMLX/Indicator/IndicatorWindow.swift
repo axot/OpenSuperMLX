@@ -134,11 +134,8 @@ class IndicatorViewModel: ObservableObject {
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
-                } catch is CancellationError {
-                    return
-                } catch StreamingAudioError.startAborted {
-                    return
                 } catch {
+                    guard StreamingAudioError.shouldReportStartFailure(error) else { return }
                     self.logger.error("Failed to start streaming: \(error, privacy: .public)")
                     ErrorToastManager.shared.show(error.localizedDescription)
                     self.state = .idle
@@ -338,7 +335,7 @@ class IndicatorViewModel: ObservableObject {
             self.startStreamingTask = nil
         }
     }
-    
+
     private func startBlinking() {
         blinkTimer?.invalidate()
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in

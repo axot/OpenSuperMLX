@@ -344,9 +344,6 @@ class StreamingAudioService: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isStreaming {
-                    // Only re-init when the active target actually differs — with a
-                    // saved (pinned) mic, system-default churn must not disturb a
-                    // healthy engine.
                     if self.activeTargetDiffersFromBoundEngine() {
                         await self.hotSwapMicrophone()
                     }
@@ -417,11 +414,11 @@ class StreamingAudioService: ObservableObject {
             return .failExplicit(.deviceUnresolvable)
         }
 
-        if EngineInitTransaction.joinDecision(
+        if EngineInitTransaction.shouldJoinInFlight(
             hasInFlightTask: engineInitTask != nil,
             sameTarget: engineInitTargetUID == target.id,
             isCancelled: engineInitTask?.isCancelled ?? true
-        ) == .join, let task = engineInitTask {
+        ), let task = engineInitTask {
             return await task.value
         }
         engineInitTask?.cancel()
@@ -484,7 +481,6 @@ class StreamingAudioService: ObservableObject {
             logger.info("Audio engine warmed up: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz")
             return verdict
         case .commit:
-            // Superseded mid-flight — this engine belongs to a stale request.
             teardownUnadoptedEngine(result.engine)
             return .abandon
         case .abandon, .failExplicit:
@@ -514,17 +510,15 @@ class StreamingAudioService: ObservableObject {
 
         guard let coreAudioID else {
             logger.error("Engine init: cannot resolve CoreAudio ID for \(target.displayName, privacy: .public)")
-            return NativeEngineInitResult(
+            return Self.failedNativeInit(
+                engine: engine,
                 observation: EngineInitObservation(
                     engineRunning: false,
                     startErrorDescription: nil,
                     boundDeviceID: nil,
                     targetDeviceID: nil,
                     deviceSideFormat: nil
-                ),
-                engine: engine,
-                deviceSideFormat: nil,
-                tapInstalled: false
+                )
             )
         }
 
@@ -545,7 +539,8 @@ class StreamingAudioService: ObservableObject {
         }
         guard bindStatus == noErr else {
             logger.error("Engine init: failed to bind \(target.displayName, privacy: .public) status=\(bindStatus, privacy: .public)")
-            return NativeEngineInitResult(
+            return Self.failedNativeInit(
+                engine: engine,
                 observation: EngineInitObservation(
                     engineRunning: false,
                     startErrorDescription: nil,
@@ -553,10 +548,7 @@ class StreamingAudioService: ObservableObject {
                     targetDeviceID: coreAudioID,
                     deviceSideFormat: nil,
                     bindFailedStatus: bindStatus
-                ),
-                engine: engine,
-                deviceSideFormat: nil,
-                tapInstalled: false
+                )
             )
         }
 
@@ -564,17 +556,15 @@ class StreamingAudioService: ObservableObject {
             try engine.start()
         } catch {
             logger.error("Engine init: start failed for \(target.displayName, privacy: .public): \(String(describing: error), privacy: .public)")
-            return NativeEngineInitResult(
+            return Self.failedNativeInit(
+                engine: engine,
                 observation: EngineInitObservation(
                     engineRunning: engine.isRunning,
                     startErrorDescription: String(describing: error),
                     boundDeviceID: Self.boundInputDeviceID(of: engine),
                     targetDeviceID: coreAudioID,
                     deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
-                ),
-                engine: engine,
-                deviceSideFormat: nil,
-                tapInstalled: false
+                )
             )
         }
 
@@ -593,12 +583,7 @@ class StreamingAudioService: ObservableObject {
         guard case .commit(let rate) = verdict else {
             logger.error("Engine init transaction failed for \(target.displayName, privacy: .public): \(String(describing: verdict), privacy: .public)")
             engine.stop()
-            return NativeEngineInitResult(
-                observation: observation,
-                engine: engine,
-                deviceSideFormat: nil,
-                tapInstalled: false
-            )
+            return Self.failedNativeInit(engine: engine, observation: observation)
         }
 
         let tapFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
@@ -609,6 +594,18 @@ class StreamingAudioService: ObservableObject {
             engine: engine,
             deviceSideFormat: tapFormat,
             tapInstalled: true
+        )
+    }
+
+    nonisolated private static func failedNativeInit(
+        engine: AVAudioEngine,
+        observation: EngineInitObservation
+    ) -> NativeEngineInitResult {
+        NativeEngineInitResult(
+            observation: observation,
+            engine: engine,
+            deviceSideFormat: nil,
+            tapInstalled: false
         )
     }
 
@@ -912,6 +909,13 @@ class StreamingAudioService: ObservableObject {
         invalidatePendingEngineInit()
     }
 
+    private func throwIfStartAborted(_ generation: Int, reason: String) throws {
+        guard startGeneration == generation else {
+            PipelineTrace.shared.log("STREAM", reason)
+            throw StreamingAudioError.startAborted
+        }
+    }
+
     private func retireEngine(_ engine: AVAudioEngine?) {
         guard let engine else { return }
         retiredEngines.append(engine)
@@ -1040,10 +1044,7 @@ class StreamingAudioService: ObservableObject {
         if !isEngineWarmed || audioEngine?.isRunning != true {
             coolDown()
             let verdict = await beginEngineInit()
-            guard startGeneration == generation else {
-                PipelineTrace.shared.log("STREAM", "start cancelled during engine init")
-                throw StreamingAudioError.startAborted
-            }
+            try throwIfStartAborted(generation, reason: "start cancelled during engine init")
             guard case .commit = verdict else {
                 PipelineTrace.shared.log("STREAM", "engine init failed: \(verdict)")
                 throw StreamingAudioError.engineInitFailed(
@@ -1052,10 +1053,7 @@ class StreamingAudioService: ObservableObject {
             }
         }
 
-        guard startGeneration == generation else {
-            PipelineTrace.shared.log("STREAM", "start cancelled after engine init")
-            throw StreamingAudioError.startAborted
-        }
+        try throwIfStartAborted(generation, reason: "start cancelled after engine init")
 
         guard audioEngine != nil else {
             throw StreamingAudioError.audioFormatCreationFailed
@@ -1115,7 +1113,7 @@ class StreamingAudioService: ObservableObject {
             logger.debug("[DEBUG] Streaming config: language=\(language, privacy: .public), temperature=\(settings.temperature, privacy: .public)")
         }
 
-        guard startGeneration == generation else {
+        if startGeneration != generation {
             PipelineTrace.shared.log("STREAM", "start cancelled before going live")
             session.cancel()
             archive.cancel()
@@ -1882,5 +1880,11 @@ enum StreamingAudioError: LocalizedError {
         case .startAborted:
             return nil
         }
+    }
+
+    static func shouldReportStartFailure(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if case .startAborted = error as? StreamingAudioError { return false }
+        return true
     }
 }

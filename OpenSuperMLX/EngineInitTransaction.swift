@@ -1,7 +1,6 @@
 // EngineInitTransaction.swift
 // OpenSuperMLX
 
-import AVFoundation
 import CoreAudio
 import Foundation
 import os
@@ -39,7 +38,6 @@ enum EngineInitVerdict: Equatable {
     case failExplicit(EngineInitFailure)
     case abandon
 
-    /// User-facing explanation for explicit failures; nil for commit/abandon.
     var failureDescription: String? {
         switch self {
         case .commit, .abandon:
@@ -58,17 +56,11 @@ enum EngineInitVerdict: Equatable {
     }
 }
 
-enum EngineInitJoinDecision: Equatable {
-    case join
-    case startFresh
-}
-
 enum EngineInitTransaction {
     /// A cancelled in-flight task is stale: joining it would replay `.abandon` as a
     /// false init failure. Only a still-running same-target task may be joined.
-    static func joinDecision(hasInFlightTask: Bool, sameTarget: Bool, isCancelled: Bool) -> EngineInitJoinDecision {
-        if hasInFlightTask && sameTarget && !isCancelled { return .join }
-        return .startFresh
+    static func shouldJoinInFlight(hasInFlightTask: Bool, sameTarget: Bool, isCancelled: Bool) -> Bool {
+        hasInFlightTask && sameTarget && !isCancelled
     }
 
     /// An engine that started (or installed a tap) and then failed to commit must be

@@ -4,7 +4,6 @@
 import AVFoundation
 import CoreAudio
 import XCTest
-import os
 
 @testable import OpenSuperMLX
 
@@ -39,19 +38,6 @@ final class MicDeviceBindingProbeTests: XCTestCase {
             return AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &streamSize) == noErr
                 && streamSize > 0
         }
-    }
-
-    private func deviceUID(_ id: AudioDeviceID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var uid: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &uid)
-        guard status == noErr, let cf = uid?.takeRetainedValue() else { return nil }
-        return cf as String
     }
 
     private func defaultInputDeviceID() -> AudioDeviceID? {
@@ -121,8 +107,9 @@ final class MicDeviceBindingProbeTests: XCTestCase {
                 isInterleaved: inputFormat.isInterleaved
             )
         )
-        guard case .commit = EngineInitTransaction.evaluate(observation) else {
-            return XCTFail("verified post-start state must commit, got \(EngineInitTransaction.evaluate(observation))")
+        let verdict = EngineInitTransaction.evaluate(observation)
+        guard case .commit = verdict else {
+            return XCTFail("verified post-start state must commit, got \(verdict)")
         }
 
         // The crash-critical ordering: the tap is installed only AFTER verification

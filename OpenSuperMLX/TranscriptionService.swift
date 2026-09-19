@@ -86,9 +86,7 @@ class TranscriptionService: ObservableObject {
                 await MainActor.run {
                     self.currentEngine = engine
                     logger.info("MLX engine loaded successfully")
-                    Task { @MainActor in
-                        await StreamingAudioService.shared.warmUp()
-                    }
+                    Task { await StreamingAudioService.shared.warmUp() }
                 }
             } catch {
                 await MainActor.run {

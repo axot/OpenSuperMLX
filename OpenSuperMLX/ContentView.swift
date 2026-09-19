@@ -250,11 +250,8 @@ class ContentViewModel: ObservableObject {
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
-                } catch is CancellationError {
-                    return
-                } catch StreamingAudioError.startAborted {
-                    return
                 } catch {
+                    guard StreamingAudioError.shouldReportStartFailure(error) else { return }
                     self.logger.error("Failed to start streaming: \(error, privacy: .public)")
                     ErrorToastManager.shared.show(error.localizedDescription)
                     self.state = .idle

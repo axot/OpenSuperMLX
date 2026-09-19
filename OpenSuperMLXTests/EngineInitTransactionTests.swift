@@ -1,7 +1,6 @@
 // EngineInitTransactionTests.swift
 // OpenSuperMLXTests
 
-import AVFoundation
 import CoreAudio
 import XCTest
 
@@ -197,22 +196,18 @@ final class EngineInitTransactionTests: XCTestCase {
     // MARK: - Join / teardown
 
     func testJoinOnlyWhenSameTargetTaskIsStillRunning() {
-        XCTAssertEqual(
-            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: true, isCancelled: false),
-            .join
+        XCTAssertTrue(
+            EngineInitTransaction.shouldJoinInFlight(hasInFlightTask: true, sameTarget: true, isCancelled: false)
         )
-        XCTAssertEqual(
-            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: true, isCancelled: true),
-            .startFresh,
+        XCTAssertFalse(
+            EngineInitTransaction.shouldJoinInFlight(hasInFlightTask: true, sameTarget: true, isCancelled: true),
             "coolDown-cancelled init must not be rejoined"
         )
-        XCTAssertEqual(
-            EngineInitTransaction.joinDecision(hasInFlightTask: true, sameTarget: false, isCancelled: false),
-            .startFresh
+        XCTAssertFalse(
+            EngineInitTransaction.shouldJoinInFlight(hasInFlightTask: true, sameTarget: false, isCancelled: false)
         )
-        XCTAssertEqual(
-            EngineInitTransaction.joinDecision(hasInFlightTask: false, sameTarget: true, isCancelled: false),
-            .startFresh
+        XCTAssertFalse(
+            EngineInitTransaction.shouldJoinInFlight(hasInFlightTask: false, sameTarget: true, isCancelled: false)
         )
     }
 
