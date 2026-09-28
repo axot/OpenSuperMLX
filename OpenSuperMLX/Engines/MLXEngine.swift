@@ -30,7 +30,7 @@ class MLXEngine: TranscriptionEngine {
     }
 
     func initialize() async throws {
-        let modelId = AppPreferences.shared.selectedMLXModel
+        let modelId = MLXModelManager.model.repoID
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
         let model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache, progressHandler: downloadProgressHandler)

@@ -20,9 +20,6 @@ struct StreamSimulateCommand: ParsableCommand {
     @Option(name: .long, help: "Language code (default: auto)")
     var language: String = "auto"
 
-    @Option(name: .long, help: "Model repository ID")
-    var model: String?
-
     @Option(name: .long, help: "Chunk duration in seconds")
     var chunkDuration: Double = 0.5
 
@@ -54,10 +51,6 @@ struct StreamSimulateCommand: ParsableCommand {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(.audioFileNotFound)
-        }
-
-        if let model = model {
-            AppPreferences.shared.selectedMLXModel = model
         }
 
         CLIOutput.printProgress("Loading model...", quiet: globalOptions.quiet)
@@ -98,7 +91,7 @@ struct StreamSimulateCommand: ParsableCommand {
             let data = StreamSimulateResult(
                 text: injectionResult.text,
                 language: language,
-                model: AppPreferences.shared.selectedMLXModel,
+                model: MLXModelManager.model.repoID,
                 audioDurationS: injectionResult.audioDurationS,
                 processingTimeS: elapsed,
                 chunksFed: injectionResult.chunksFed,

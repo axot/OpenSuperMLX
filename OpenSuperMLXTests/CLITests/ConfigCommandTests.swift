@@ -131,6 +131,13 @@ final class ConfigCommandTests: XCTestCase {
         XCTAssertEqual(error, .invalidConfigValue)
     }
 
+    func testConfigNoLongerExposesModelSelection() throws {
+        guard case .failure(let error) = ConfigSetCommand.executeSet(key: "selectedMLXModel", value: "x") else {
+            XCTFail("Expected failure"); return
+        }
+        XCTAssertEqual(error, .invalidConfigKey)
+    }
+
     func testConfigSetInvalidDoubleValue() throws {
         let result = ConfigSetCommand.executeSet(key: "temperature", value: "notanumber")
         guard case .failure(let error) = result else {

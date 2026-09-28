@@ -84,9 +84,6 @@ final class AppPreferences {
         }
     }
     
-    @UserDefault(key: "selectedMLXModel", defaultValue: "mlx-community/Qwen3-ASR-1.7B-8bit")
-    var selectedMLXModel: String
-    
     @UserDefault(key: "mlxLanguage", defaultValue: "auto")
     var mlxLanguage: String
     

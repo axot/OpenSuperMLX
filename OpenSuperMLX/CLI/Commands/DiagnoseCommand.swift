@@ -79,7 +79,7 @@ struct DiagnoseCommand: ParsableCommand {
                 accessibility: accessibilityStatus()
             ),
             settings: DiagnoseResult.SettingsSummary(
-                model: AppPreferences.store.string(forKey: "selectedMLXModel") ?? "mlx-community/Qwen3-ASR-1.7B-8bit",
+                model: MLXModelManager.model.repoID,
                 language: AppPreferences.store.string(forKey: "mlxLanguage") ?? "auto",
                 streaming: AppPreferences.store.object(forKey: "useStreamingTranscription") != nil
                     ? AppPreferences.store.bool(forKey: "useStreamingTranscription")

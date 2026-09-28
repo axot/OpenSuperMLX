@@ -218,7 +218,7 @@ OpenSuperMLX/                    # Main app target
 ├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
 ├── TranscriptionService.swift   # Transcription orchestration (singleton)
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
-├── MLXModelManager.swift        # Model catalog + custom model management
+├── MLXModelManager.swift        # The single built-in model (Qwen3-ASR-1.7B-5bit) + models directory
 ├── MicrophoneService.swift      # Audio device enumeration, selection, CoreAudio
 ├── ShortcutManager.swift        # Global hotkey handling + hold-to-record
 ├── FileDropHandler.swift        # Drag-and-drop audio file import

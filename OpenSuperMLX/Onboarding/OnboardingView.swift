@@ -56,7 +56,7 @@ class OnboardingViewModel: ObservableObject {
     }
 
     func initializeModels() {
-        models = MLXModelManager.builtInModels.map { OnboardingMLXModel(from: $0) }
+        models = [OnboardingMLXModel(from: MLXModelManager.model)]
     }
     
     var canContinue: Bool {
@@ -66,7 +66,6 @@ class OnboardingViewModel: ObservableObject {
     
     func selectModel(_ model: OnboardingMLXModel) {
         selectedModelId = model.id
-        AppPreferences.shared.selectedMLXModel = model.repoID
     }
 
     /// Highest fraction shown so far this download — keeps the bar monotonic.

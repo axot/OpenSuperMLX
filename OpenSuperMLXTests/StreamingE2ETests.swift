@@ -54,16 +54,15 @@ final class StreamingE2ETests: XCTestCase {
     private func requireModel() throws {
         let mlxAudioDir = MLXModelManager.modelsDirectory
             .appendingPathComponent("mlx-audio")
-            .appendingPathComponent("mlx-community_Qwen3-ASR-1.7B-8bit")
+            .appendingPathComponent(MLXModelManager.model.repoID.replacingOccurrences(of: "/", with: "_"))
         guard FileManager.default.fileExists(atPath: mlxAudioDir.path) else {
-            throw XCTSkip("Qwen3-ASR-1.7B-8bit not downloaded — skipping E2E")
+            throw XCTSkip("\(MLXModelManager.model.name) not downloaded — skipping E2E")
         }
     }
 
     private func waitForModelLoad() async throws {
         let transcriptionService = TranscriptionService.shared
         if transcriptionService.streamingModel == nil && !transcriptionService.isLoading {
-            AppPreferences.shared.selectedMLXModel = "mlx-community/Qwen3-ASR-1.7B-8bit"
             transcriptionService.reloadEngine()
         }
         var waitCount = 0

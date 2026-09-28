@@ -56,7 +56,7 @@ final class StreamSimulateCommandTests: XCTestCase {
         let result = StreamSimulateResult(
             text: "hello world",
             language: "en",
-            model: "mlx-community/Qwen3-ASR-1.7B-8bit",
+            model: "mlx-community/Qwen3-ASR-1.7B-5bit",
             audioDurationS: 5.0,
             processingTimeS: 2.1,
             chunksFed: 10,
@@ -73,7 +73,7 @@ final class StreamSimulateCommandTests: XCTestCase {
         XCTAssertNotNil(data)
         XCTAssertEqual(data?["text"] as? String, "hello world")
         XCTAssertEqual(data?["language"] as? String, "en")
-        XCTAssertEqual(data?["model"] as? String, "mlx-community/Qwen3-ASR-1.7B-8bit")
+        XCTAssertEqual(data?["model"] as? String, "mlx-community/Qwen3-ASR-1.7B-5bit")
         XCTAssertEqual(data?["audio_duration_s"] as? Double, 5.0)
         XCTAssertEqual(data?["processing_time_s"] as? Double, 2.1)
         XCTAssertEqual(data?["chunks_fed"] as? Int, 10)

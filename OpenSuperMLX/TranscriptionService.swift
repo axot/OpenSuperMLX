@@ -60,7 +60,7 @@ class TranscriptionService: ObservableObject {
     private func loadEngine() {
         logger.info("Loading MLX engine")
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Engine load requested: model=\(AppPreferences.shared.selectedMLXModel, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
+            logger.debug("[DEBUG] Engine load requested: model=\(MLXModelManager.model.repoID, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
         }
         
         isLoading = true

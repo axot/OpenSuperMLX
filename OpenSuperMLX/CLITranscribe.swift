@@ -22,7 +22,7 @@ enum CLITranscribe {
         }
 
         fputs("Loading model...\n", stderr)
-        let modelId = AppPreferences.shared.selectedMLXModel
+        let modelId = MLXModelManager.model.repoID
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
 
         let model: Qwen3ASRModel

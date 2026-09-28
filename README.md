@@ -83,15 +83,7 @@ System-audio capture also requires Screen Recording permission when you enable t
 
 ## Models
 
-Models are downloaded automatically from Hugging Face when selected in the app.
-
-| Model | Best For |
-|---|---|
-| **Qwen3-ASR-0.6B-4bit** | Fastest, smallest local model |
-| **Qwen3-ASR-1.7B-8bit** | Recommended balance of quality and speed |
-| **Qwen3-ASR-1.7B-bf16** | Highest quality |
-
-Custom models can be added with a Hugging Face repository ID.
+The app uses one model, **Qwen3-ASR-1.7B-5bit** (about 1.8 GB), downloaded automatically from Hugging Face.
 
 ## CLI
 

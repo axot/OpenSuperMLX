@@ -15,11 +15,11 @@ Memory.cacheMemory    // MLX's internal buffer cache
 
 Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory — Metal buffers are mmap'd into the process address space, so unified memory appears in both the GPU allocation and the process RSS. Use MLX's `Memory.activeMemory` for the true GPU figure.
 
-## Memory Budget (Qwen3-ASR-1.7B-8bit)
+## Memory Budget (Qwen3-ASR-1.7B-5bit)
 
 | Component | Size | Where |
 |---|---|---|
-| Model weights | ~2,470 MB | GPU (MLX), fixed after load |
+| Model weights | ~1,820 MB (5-bit decoder ~1,190 MB + BF16 audio encoder ~635 MB) | GPU (MLX), fixed after load |
 | Encoder cache (4 windows) | ~60 MB | GPU, bounded by `maxEncoderWindows` |
 | KV cache (decoder) | ~100-200 MB | GPU, bounded by sliding window + prefix cap |
 | Encoder transient (per window) | ~95 MB | GPU, freed after each encoder forward pass |
@@ -28,7 +28,7 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | Metal driver overhead | ~300 MB | Kernel, unavoidable framework cost |
 | Swift runtime + dylibs | ~200 MB | CPU |
 
-Expected steady-state: **~2,500 MB active**, **~2,700 MB peak**.
+Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug build, M1 Max): **~2,230 MB median / 2,720 MB max**. The previous Qwen3-ASR-1.7B-8bit build measured ~2,840 MB median / 3,240 MB max.
 
 ### Encoder dtype
 
