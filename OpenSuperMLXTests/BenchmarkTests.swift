@@ -13,9 +13,6 @@ final class BenchmarkTests: XCTestCase {
 
     // MARK: - Constants
 
-    private static let modelRepoID = "mlx-community/Qwen3-ASR-1.7B-8bit"
-    private static let modelDirName = "models--mlx-community--Qwen3-ASR-1.7B-8bit"
-
     private static let jfkGroundTruth =
         "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country."
 
@@ -24,16 +21,17 @@ final class BenchmarkTests: XCTestCase {
     @MainActor
     private func requireModel() throws -> URL {
         let modelDir = MLXModelManager.modelsDirectory
-            .appendingPathComponent(Self.modelDirName)
+            .appendingPathComponent("mlx-audio")
+            .appendingPathComponent(MLXModelManager.model.repoID.replacingOccurrences(of: "/", with: "_"))
         guard FileManager.default.fileExists(atPath: modelDir.path) else {
-            throw XCTSkip("Qwen3-ASR-1.7B-8bit not downloaded — skipping benchmark")
+            throw XCTSkip("\(MLXModelManager.model.name) not downloaded — skipping benchmark")
         }
         return modelDir
     }
 
     private func loadModel() async throws -> Qwen3ASRModel {
         let cache = await HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
-        return try await Qwen3ASRModel.fromPretrained(Self.modelRepoID, cache: cache)
+        return try await Qwen3ASRModel.fromPretrained(MLXModelManager.model.repoID, cache: cache)
     }
 
     private func loadJFKAudio() throws -> MLXArray {
