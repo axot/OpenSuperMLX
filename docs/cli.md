@@ -95,7 +95,7 @@ $BINARY config set useNeuralEngineAudioTower false
 $BINARY stream-simulate audio.wav --json    # data.audio_encoder is "gpu"
 ```
 
-The app looks for the compiled encoder at `mlx-models/coreml/qwen3_asr_audio_tower_int8.mlmodelc` and otherwise downloads it from `axot/Qwen3-ASR-1.7B-CoreML-INT8`. If it cannot be loaded, the app falls back to the GPU encoder, shows a toast, and `audio_encoder` reports `"gpu"`. `Scripts/qwen3_audio_tower_coreml.py` builds the encoder; `Scripts/qwen3_ane_audio_tower_eval.py` compares GPU utilization, memory, and speed against a pre-change build.
+The app looks for the compiled encoder at `mlx-models/coreml/qwen3_asr_audio_tower_int8.mlmodelc` and otherwise downloads it from [`ax0t/Qwen3-ASR-1.7B-CoreML-INT8`](https://huggingface.co/ax0t/Qwen3-ASR-1.7B-CoreML-INT8). If it cannot be loaded, the app falls back to the GPU encoder, shows a toast, and `audio_encoder` reports `"gpu"`. `Scripts/qwen3_audio_tower_coreml.py` builds the encoder; `Scripts/qwen3_ane_audio_tower_eval.py` compares GPU utilization, memory, and speed against a pre-change build.
 
 ## Transcript MCP Bridge
 

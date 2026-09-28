@@ -25,7 +25,7 @@ final class CoreMLAudioTowerAssetsTests: XCTestCase {
     func testDownloadURLPointsAtThePinnedRepository() {
         XCTAssertEqual(
             CoreMLAudioTowerAssets.downloadURL(for: "model.mil").absoluteString,
-            "https://huggingface.co/axot/Qwen3-ASR-1.7B-CoreML-INT8/resolve/main/qwen3_asr_audio_tower_int8.mlmodelc/model.mil"
+            "https://huggingface.co/ax0t/Qwen3-ASR-1.7B-CoreML-INT8/resolve/main/qwen3_asr_audio_tower_int8.mlmodelc/model.mil"
         )
     }
 

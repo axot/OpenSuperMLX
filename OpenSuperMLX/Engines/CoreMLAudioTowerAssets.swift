@@ -5,7 +5,7 @@ import Foundation
 import os
 
 enum CoreMLAudioTowerAssets {
-    static let repositoryID = "axot/Qwen3-ASR-1.7B-CoreML-INT8"
+    static let repositoryID = "ax0t/Qwen3-ASR-1.7B-CoreML-INT8"
     static let modelName = "qwen3_asr_audio_tower_int8.mlmodelc"
     static let modelFiles = [
         "analytics/coremldata.bin",
