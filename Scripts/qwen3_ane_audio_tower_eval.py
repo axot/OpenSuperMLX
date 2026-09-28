@@ -46,10 +46,6 @@ def gpu_ns_by_pid():
     return totals
 
 
-def process_gpu_ns(pid):
-    return gpu_ns_by_pid().get(pid, 0)
-
-
 def gpu_ns_used_since(before, excluding=()):
     after = gpu_ns_by_pid()
     return sum(ns - before.get(pid, 0) for pid, ns in after.items() if pid not in excluding)
@@ -74,7 +70,7 @@ def track_gpu(timer_pid, result, stop):
             child = int(found[0]) if found else None
             result["child"] = child
         if child is not None:
-            result["gpu_ns"] = max(result["gpu_ns"], process_gpu_ns(child))
+            result["gpu_ns"] = max(result["gpu_ns"], gpu_ns_by_pid().get(child, 0))
         stop.wait(0.5)
 
 

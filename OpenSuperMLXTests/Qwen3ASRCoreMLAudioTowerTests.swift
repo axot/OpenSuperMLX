@@ -88,11 +88,13 @@ final class Qwen3ASRCoreMLAudioTowerTests: XCTestCase {
             let lhs = reference.asArray(Float.self)
             let rhs = candidate.asArray(Float.self)
             let cosines = (0..<reference.dim(0)).map { token in
-                Self.cosine(lhs[(token * width)..<((token + 1) * width)], rhs[(token * width)..<((token + 1) * width)])
+                let row = (token * width)..<((token + 1) * width)
+                return Self.cosine(lhs[row], rhs[row])
             }
             let mean = cosines.reduce(0, +) / Float(cosines.count)
+            let worst = cosines.min() ?? 0
             XCTAssertGreaterThan(mean, 0.99, "frames=\(frames) mean token cosine=\(mean)")
-            XCTAssertGreaterThan(cosines.min() ?? 0, 0.9, "frames=\(frames) worst token cosine=\(cosines.min() ?? 0)")
+            XCTAssertGreaterThan(worst, 0.9, "frames=\(frames) worst token cosine=\(worst)")
         }
     }
 

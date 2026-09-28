@@ -983,6 +983,16 @@ public class Qwen3ASRModel: Module {
         return callAsFunction(inputIds: inputIds, inputEmbeddings: inputsEmbeds, cache: cache)
     }
 
+    private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {
+        if let lmHead = lmHead {
+            return lmHead(hiddenStates)
+        } else {
+            return model.embedTokens.asLinear(hiddenStates)
+        }
+    }
+
+    // MARK: - Prefill
+
     // Quantized matmuls run in 32-row tiles; passes under 8 tiles lose GPU efficiency per tile.
     public static let prefillRowsPerPass = 256
 
@@ -1020,6 +1030,8 @@ public class Qwen3ASRModel: Module {
         let finalRows = hiddenStates.dim(1)
         return vocabularyLogits(hiddenStates[0..., (finalRows - logitsRows)..., 0...])
     }
+
+    // MARK: - Greedy Decoding
 
     public struct GreedyDecodeResult {
         public var tokens: [Int] = []
@@ -1105,14 +1117,6 @@ public class Qwen3ASRModel: Module {
             input = step.next
         }
         return result
-    }
-
-    private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {
-        if let lmHead = lmHead {
-            return lmHead(hiddenStates)
-        } else {
-            return model.embedTokens.asLinear(hiddenStates)
-        }
     }
 
     // MARK: - Audio-Text Merging
@@ -1231,7 +1235,6 @@ public class Qwen3ASRModel: Module {
     private func generateSingleChunk(
         audio: MLXArray,
         maxTokens: Int,
-        temperature: Float,
         language: String
     ) throws -> (text: String, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
@@ -1368,7 +1371,6 @@ public class Qwen3ASRModel: Module {
             let result = try generateSingleChunk(
                 audio: chunkAudio,
                 maxTokens: remainingTokens,
-                temperature: temperature,
                 language: language
             )
 

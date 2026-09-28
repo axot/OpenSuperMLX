@@ -130,7 +130,7 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
         let prefixTokenIds = buildPrefixTokenIds()
         let draftTokenIds = isRecovery || prefixTokenIds.isEmpty
-            ? [] : Array(allDecodedTokens.suffix(min(config.rollbackTokens, allDecodedTokens.count)))
+            ? [] : Array(allDecodedTokens.suffix(config.rollbackTokens))
         let conditioningTokenIds = prefixTokenIds + draftTokenIds
         if !conditioningTokenIds.isEmpty {
             let conditioningMLX = MLXArray(conditioningTokenIds.map { Int32($0) }).expandedDimensions(axis: 0)

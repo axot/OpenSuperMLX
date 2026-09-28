@@ -314,7 +314,7 @@ final class ContinuousChunkProcessorDraftTests: XCTestCase {
             mel = mel.map { MLX.concatenated([$0, chunkMel], axis: 0) } ?? chunkMel
             let history = processor.allDecodedTokens
             let expected = try freshSequentialDecode(model: model, config: config, mel: mel!, history: history)
-            let draft = history.suffix(min(config.rollbackTokens, history.count))
+            let draft = history.suffix(config.rollbackTokens)
             let accepted = zip(draft, expected).prefix { $0 == $1 }.count
             if accepted > 0 && accepted < draft.count { partlyAcceptedDrafts += 1 }
 

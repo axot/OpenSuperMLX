@@ -4,7 +4,6 @@
 import Foundation
 import os
 
-/// The compiled Core ML audio tower for the Neural Engine, downloaded on first use.
 enum CoreMLAudioTowerAssets {
     static let repositoryID = "axot/Qwen3-ASR-1.7B-CoreML-INT8"
     static let modelName = "qwen3_asr_audio_tower_int8.mlmodelc"

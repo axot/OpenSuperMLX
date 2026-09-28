@@ -6,8 +6,9 @@
 import Accelerate
 import CoreML
 import Foundation
-import MLX
 import os
+
+import MLX
 
 public enum Qwen3ASRCoreMLAudioTowerError: Error {
     case loadFailed(Error)

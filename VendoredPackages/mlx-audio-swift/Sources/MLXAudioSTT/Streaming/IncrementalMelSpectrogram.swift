@@ -236,6 +236,6 @@ public class IncrementalMelSpectrogram {
         }
 
         totalFrames += numFrames
-        return MLXArray(melSpec, [numFrames, nMels])  // [numFrames, nMels]
+        return MLXArray(melSpec, [numFrames, nMels])
     }
 }
