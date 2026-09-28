@@ -321,7 +321,9 @@ enum TinyQwen3ASR {
     static let vocabularySize = 97
     static let hiddenSize = 32
 
-    static func make(seed: UInt64, tiedEmbeddings: Bool = true) -> Qwen3ASRModel {
+    static func make(
+        seed: UInt64, tiedEmbeddings: Bool = true, audioTokenId: Int = Qwen3ASRConfig().audioTokenId
+    ) -> Qwen3ASRModel {
         MLXRandom.seed(seed)
         let text = Qwen3TextConfig(
             vocabSize: vocabularySize, hiddenSize: hiddenSize, intermediateSize: 64, numHiddenLayers: 2,
@@ -331,7 +333,7 @@ enum TinyQwen3ASR {
             encoderLayers: 1, encoderAttentionHeads: 2, encoderFfnDim: 32, dModel: 16,
             outputDim: hiddenSize, downsampleHiddenSize: 8
         )
-        let model = Qwen3ASRModel(Qwen3ASRConfig(audioConfig: audio, textConfig: text))
+        let model = Qwen3ASRModel(Qwen3ASRConfig(audioConfig: audio, textConfig: text, audioTokenId: audioTokenId))
         eval(model.model)
         if let lmHead = model.lmHead { eval(lmHead) }
         return model
