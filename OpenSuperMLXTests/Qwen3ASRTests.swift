@@ -171,6 +171,26 @@ final class Qwen3ASRGreedyDecodeTests: XCTestCase {
         XCTAssertEqual(cacheOffset, promptRows + end)
     }
 
+    func testCacheAfterEndTokenContinuesLikeSequentialDecoding() throws {
+        let end = try XCTUnwrap((1..<reference.count).first { !reference[..<$0].contains(reference[$0]) })
+        let cache = model.makeCache()
+        let logits = model.prefill(inputEmbeddings: prompt, cache: cache)
+        _ = model.greedyDecode(
+            logits: logits, cache: cache, maxTokens: 12, isEndToken: { $0 == self.reference[end] }
+        )
+        let referenceCache = model.makeCache()
+        _ = model.prefill(inputEmbeddings: prompt, cache: referenceCache)
+        for token in reference.prefix(end) {
+            eval(model.callAsFunction(inputIds: MLXArray([Int32(token)]).reshaped(1, 1), cache: referenceCache))
+        }
+
+        let probe = MLXArray([Int32(wrongToken(for: reference[end]))]).reshaped(1, 1)
+        TinyQwen3ASR.assertClose(
+            model.callAsFunction(inputIds: probe, cache: cache),
+            model.callAsFunction(inputIds: probe, cache: referenceCache)
+        )
+    }
+
     func testStopCallbackEndsBeforeFeedingTheToken() {
         let (result, cacheOffset) = decode(draft: [], maxTokens: 12, stopAfter: 3)
 

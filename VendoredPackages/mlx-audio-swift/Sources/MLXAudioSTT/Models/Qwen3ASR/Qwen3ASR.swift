@@ -999,6 +999,9 @@ public class Qwen3ASRModel: Module {
     /// position per `draft` token. The longest draft prefix matching the model's own choices is accepted
     /// without decode steps and the remaining draft rows are trimmed from `cache`. `onToken` receives the
     /// tokens after each append and returns `true` to stop before that token is fed back.
+    ///
+    /// Each decode step is queued before the CPU reads the token it consumes, so the GPU works while the
+    /// CPU checks that token; a token that ends decoding discards its already-queued step.
     public func greedyDecode(
         logits: MLXArray, draft: [Int] = [], cache: [KVCache], maxTokens: Int,
         isEndToken: (Int) -> Bool, onToken: ([Int]) -> Bool = { _ in false }
@@ -1030,25 +1033,40 @@ public class Qwen3ASRModel: Module {
             return result
         }
 
-        var token = choices[accepted]
+        func queueStep(consuming input: MLXArray) -> (logits: MLXArray, next: MLXArray) {
+            let stepLogits = callAsFunction(inputIds: input, cache: cache)
+            let next = stepLogits[0..., -1, 0...].argMax(axis: -1).reshaped(1, 1)
+            asyncEval(next)
+            result.decodeSteps += 1
+            return (stepLogits, next)
+        }
+        func discardQueuedStep() {
+            for layerCache in cache { layerCache.trim(1) }
+        }
+
+        var input = MLXArray([Int32(choices[accepted])]).reshaped(1, 1)
+        var knownToken: Int? = choices[accepted]
         while true {
+            let queued = knownToken == nil ? queueStep(consuming: input) : nil
+            let token = knownToken ?? input.item(Int.self)
+            knownToken = nil
             if isEndToken(token) {
                 result.endToken = token
+                if queued != nil { discardQueuedStep() }
                 break
             }
             result.tokens.append(token)
             if onToken(result.tokens) {
                 result.stopped = true
+                if queued != nil { discardQueuedStep() }
                 break
             }
-            let stepLogits = callAsFunction(inputIds: MLXArray([Int32(token)]).reshaped(1, 1), cache: cache)
-            eval(stepLogits)
-            result.decodeSteps += 1
+            let step = queued ?? queueStep(consuming: input)
             if result.tokens.count >= maxTokens {
-                result.nextLogits = stepLogits
+                result.nextLogits = step.logits
                 break
             }
-            token = stepLogits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
+            input = step.next
         }
         return result
     }
@@ -1201,28 +1219,21 @@ public class Qwen3ASRModel: Module {
         )
 
         let cache = makeCache()
-        var logits = prefill(inputEmbeddings: inputsEmbeds, cache: cache)
+        let logits = prefill(inputEmbeddings: inputsEmbeds, cache: cache)
         eval(logits)
 
-        var generatedTokens: [Int] = []
         var consecutiveRepeatCount = 0
         var lastToken: Int = -1
         var maxConsecutiveRepeat = 0
         var repetitionLogged = false
         var blockPatternDetected = false
 
-        for i in 0..<maxTokens {
-            var lastLogits = logits[0..., -1, 0...]
-            if temperature > 0 {
-                lastLogits = lastLogits / temperature
-            }
-            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
-
-            if eosTokenIds.contains(nextToken) {
-                logger.warning("[generateSingleChunk] EOS at token \(i, privacy: .public), total=\(generatedTokens.count, privacy: .public)")
-                break
-            }
-
+        let decoded = greedyDecode(
+            logits: logits, cache: cache, maxTokens: maxTokens,
+            isEndToken: { eosTokenIds.contains($0) }
+        ) { generatedTokens in
+            let i = generatedTokens.count - 1
+            let nextToken = generatedTokens[i]
             if nextToken == lastToken {
                 consecutiveRepeatCount += 1
                 if consecutiveRepeatCount > maxConsecutiveRepeat {
@@ -1238,8 +1249,6 @@ public class Qwen3ASRModel: Module {
                 lastToken = nextToken
                 repetitionLogged = false
             }
-
-            generatedTokens.append(nextToken)
 
             if !blockPatternDetected && generatedTokens.count >= 20 && i % 50 == 0 {
                 for period in 2...6 {
@@ -1264,12 +1273,14 @@ public class Qwen3ASRModel: Module {
                 }
             }
 
-            let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
-            logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
-            eval(logits)
             if generatedTokens.count % 100 == 0 {
                 Memory.clearCache()
             }
+            return false
+        }
+        let generatedTokens = decoded.tokens
+        if decoded.endToken != nil {
+            logger.warning("[generateSingleChunk] EOS at token \(generatedTokens.count, privacy: .public), total=\(generatedTokens.count, privacy: .public)")
         }
 
         if maxConsecutiveRepeat >= 5 {
