@@ -1,6 +1,7 @@
 // DiagnoseCommand.swift
 // OpenSuperMLX
 
+import ApplicationServices
 import AVFoundation
 import Foundation
 
