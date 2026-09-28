@@ -1,6 +1,7 @@
 // Qwen3ASRCoreMLAudioTowerTests.swift
 // OpenSuperMLXTests
 
+import CoreML
 import XCTest
 
 import HuggingFace
@@ -25,6 +26,40 @@ final class Qwen3ASRCoreMLAudioTowerTests: XCTestCase {
             Qwen3ASRCoreMLAudioTower.windowRanges(frames: 1750),
             [0..<800, 800..<1600, 1600..<1750]
         )
+    }
+
+    // MARK: - Data Layout
+
+    func testWindowInputCopiesEachBinRowAndZeroPads() throws {
+        let binMajor: [Float] = [0, 1, 2, 3, 4, 10, 11, 12, 13, 14]
+        let input = try binMajor.withUnsafeBufferPointer {
+            try Qwen3ASRCoreMLAudioTower.windowInput(binMajor: $0.baseAddress! + 1, rowStride: 5, frames: 3, melBins: 2)
+        }
+
+        XCTAssertEqual(input.shape, [1, 2, 800])
+        let values = input.dataPointer.assumingMemoryBound(to: Float.self)
+        XCTAssertEqual((0..<4).map { values[$0] }, [1, 2, 3, 0])
+        XCTAssertEqual((0..<4).map { values[800 + $0] }, [11, 12, 13, 0])
+        XCTAssertEqual(values[2 * 800 - 1], 0)
+    }
+
+    func testValidRowsCopiesTheLeadingFloat32Rows() throws {
+        let features = try MLMultiArray(shape: [1, 3, 2], dataType: .float32)
+        for index in 0..<6 { features[index] = NSNumber(value: Float(index)) }
+
+        let rows = try Qwen3ASRCoreMLAudioTower.validRows(of: features, count: 2)
+
+        XCTAssertEqual(rows.shape, [2, 2])
+        XCTAssertEqual(rows.asType(.float32).asArray(Float.self), [0, 1, 2, 3])
+    }
+
+    func testValidRowsConvertsFloat16Output() throws {
+        let features = try MLMultiArray(shape: [1, 2, 2], dataType: .float16)
+        for index in 0..<4 { features[index] = NSNumber(value: Float(index) + 0.5) }
+
+        let rows = try Qwen3ASRCoreMLAudioTower.validRows(of: features, count: 1)
+
+        XCTAssertEqual(rows.asType(.float32).asArray(Float.self), [0.5, 1.5])
     }
 
     // MARK: - Parity (real models, opt-in)

@@ -3,6 +3,7 @@
 //  MLXAudioSTT
 //
 
+import Accelerate
 import CoreML
 import Foundation
 import MLX
@@ -75,32 +76,11 @@ public final class Qwen3ASRCoreMLAudioTower: Qwen3ASRCoreMLEncoding {
         precondition(frames > 0 && frames <= Self.windowFrames, "window must hold 1...800 mel frames")
         precondition(melFrames.dim(1) == melBins, "expected \(melBins) mel bins")
 
-        let validTokens = Self.validTokenCount(frames: frames)
-        let values = melFrames.asArray(Float.self)
-        return try autoreleasepool {
-            let mel = try MLMultiArray(
-                shape: [1, NSNumber(value: melBins), NSNumber(value: Self.windowFrames)],
-                dataType: .float32
-            )
-            let melPointer = mel.dataPointer.assumingMemoryBound(to: Float.self)
-            melPointer.initialize(repeating: 0, count: melBins * Self.windowFrames)
-            for frame in 0..<frames {
-                for bin in 0..<melBins {
-                    melPointer[bin * Self.windowFrames + frame] = values[frame * melBins + bin]
-                }
-            }
-            let length = try MLMultiArray(shape: [1], dataType: .int32)
-            length[0] = NSNumber(value: validTokens)
-
-            let input = try MLDictionaryFeatureProvider(dictionary: [
-                "mel": MLFeatureValue(multiArray: mel),
-                "length": MLFeatureValue(multiArray: length),
-            ])
-            let output = try model.prediction(from: input)
-            guard let features = output.featureValue(for: "audio_features")?.multiArrayValue else {
-                throw Qwen3ASRCoreMLAudioTowerError.invalidOutput
-            }
-            return try Self.validRows(of: features, count: validTokens)
+        let frameMajor = melFrames.asArray(Float.self)
+        var binMajor = [Float](repeating: 0, count: frames * melBins)
+        vDSP_mtrans(frameMajor, 1, &binMajor, 1, vDSP_Length(melBins), vDSP_Length(frames))
+        return try binMajor.withUnsafeBufferPointer {
+            try encodeWindow(binMajor: $0.baseAddress!, rowStride: frames, frames: frames)
         }
     }
 
@@ -109,15 +89,58 @@ public final class Qwen3ASRCoreMLAudioTower: Qwen3ASRCoreMLEncoding {
     func encode(features: MLXArray, lengths: [Int]) throws -> MLXArray {
         var outputs: [MLXArray] = []
         for (index, length) in lengths.enumerated() {
-            let frames = features[index][0..., 0..<length].transposed(1, 0)
-            for range in Self.windowRanges(frames: length) {
-                outputs.append(try encodeWindow(frames[range]))
+            let values = features[index][0..., 0..<length].asArray(Float.self)
+            try values.withUnsafeBufferPointer { mel in
+                for range in Self.windowRanges(frames: length) {
+                    outputs.append(try encodeWindow(
+                        binMajor: mel.baseAddress! + range.lowerBound, rowStride: length, frames: range.count
+                    ))
+                }
             }
         }
         return MLX.concatenated(outputs, axis: 0)
     }
 
-    private static func validRows(of features: MLMultiArray, count: Int) throws -> MLXArray {
+    /// Frame `frame` of mel bin `bin` is at `mel[bin * rowStride + frame]`.
+    private func encodeWindow(binMajor mel: UnsafePointer<Float>, rowStride: Int, frames: Int) throws -> MLXArray {
+        let validTokens = Self.validTokenCount(frames: frames)
+        return try autoreleasepool {
+            let length = try MLMultiArray(shape: [1], dataType: .int32)
+            length[0] = NSNumber(value: validTokens)
+
+            let input = try MLDictionaryFeatureProvider(dictionary: [
+                "mel": MLFeatureValue(multiArray: try Self.windowInput(
+                    binMajor: mel, rowStride: rowStride, frames: frames, melBins: melBins
+                )),
+                "length": MLFeatureValue(multiArray: length),
+            ])
+            let output = try model.prediction(from: input)
+            guard let features = output.featureValue(for: "audio_features")?.multiArrayValue else {
+                throw Qwen3ASRCoreMLAudioTowerError.invalidOutput
+            }
+            // Evaluated per window so its float32 copy is freed before the next prediction.
+            let rows = try Self.validRows(of: features, count: validTokens)
+            eval(rows)
+            return rows
+        }
+    }
+
+    /// Copies the first `frames` frames of each mel bin row into the zero-padded `[1, nMels, 800]` input.
+    static func windowInput(
+        binMajor mel: UnsafePointer<Float>, rowStride: Int, frames: Int, melBins: Int
+    ) throws -> MLMultiArray {
+        let input = try MLMultiArray(
+            shape: [1, NSNumber(value: melBins), NSNumber(value: windowFrames)], dataType: .float32
+        )
+        let destination = input.dataPointer.assumingMemoryBound(to: Float.self)
+        destination.initialize(repeating: 0, count: melBins * windowFrames)
+        for bin in 0..<melBins {
+            (destination + bin * windowFrames).update(from: mel + bin * rowStride, count: frames)
+        }
+        return input
+    }
+
+    static func validRows(of features: MLMultiArray, count: Int) throws -> MLXArray {
         guard features.shape.count == 3, features.shape[1].intValue >= count else {
             throw Qwen3ASRCoreMLAudioTowerError.invalidOutput
         }
@@ -127,6 +150,13 @@ public final class Qwen3ASRCoreMLAudioTower: Qwen3ASRCoreMLEncoding {
         var values = [Float](repeating: 0, count: count * width)
 
         switch features.dataType {
+        case .float32 where columnStride == 1:
+            let source = features.dataPointer.assumingMemoryBound(to: Float.self)
+            values.withUnsafeMutableBufferPointer { destination in
+                for row in 0..<count {
+                    (destination.baseAddress! + row * width).update(from: source + row * rowStride, count: width)
+                }
+            }
         case .float32:
             let source = features.dataPointer.assumingMemoryBound(to: Float.self)
             for row in 0..<count {

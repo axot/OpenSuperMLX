@@ -36,6 +36,8 @@ Capping prefill passes at 256 rows and computing logits only for the rows that n
 
 A multi-pass prefill grows each KV cache once for the whole prompt. Growing it by the default 256-row step instead reallocates and copies the whole cache on every pass. Measured on prefill alone (Debug test build, M1 Max), sizing it up front lowered the peak for a 3,900-row prompt (5 minutes of audio) from ~2,710 MB to ~2,540 MB. For a 15,600-row prompt (a 20-minute chunk) the peak fell from ~4,080 MB to ~3,680 MB, and the time from 19–27 s to ~16 s.
 
+In Neural Engine mode, whole-file encoding converts each window's Core ML output to bfloat16 as soon as it is read, instead of holding every window's float32 copy until the windows are concatenated. For 10 minutes of audio this lowered the encoder's transient MLX memory from ~122 MB to ~61 MB.
+
 ### Encoder dtype
 
 The audio encoder weights are bfloat16. Mel spectrogram input is cast to bfloat16 at the entry of `encodeSingleWindow` to match — otherwise MLX promotes all intermediates to float32, doubling transient memory. The sinusoidal positional embedding is also cast to match (`posEmb.asType(x.dtype)`).
