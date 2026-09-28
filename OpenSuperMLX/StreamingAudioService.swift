@@ -82,7 +82,6 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var confirmedText = ""
     @Published private(set) var provisionalText = ""
     @Published private(set) var isStreaming = false
-    @Published private(set) var isSpeechDetected = false
     @Published private(set) var currentRMSLevel: Float = 0
 
     // MARK: - Private State
@@ -189,10 +188,6 @@ class StreamingAudioService: ObservableObject {
 
     nonisolated static func shouldContinueFeedLoop(isCancelled: Bool, shouldStop: Bool) -> Bool {
         !isCancelled && !shouldStop
-    }
-
-    nonisolated static func shouldPublishSpeechDetection(lastPublished: Bool?, current: Bool) -> Bool {
-        lastPublished != current
     }
 
     nonisolated static func waitForNextFeedIteration() async -> Bool {
@@ -1184,12 +1179,11 @@ class StreamingAudioService: ObservableObject {
         let speakerActiveRef = self.speakerCaptureActiveLock
         let captureStateRef = self.captureState
         let sampleRate = self.nativeSampleRate
-        feedTask = Task.detached { [weak self] in
+        feedTask = Task.detached {
             var feedState = StreamingFeedState(archive: archive)
             var consecutiveEmptyDrains = 0
             var feedIterationCount = 0
             var lastStatusLogTime = ContinuousClock.now
-            var lastPublishedSpeechActive: Bool?
 
             while Self.shouldContinueFeedLoop(
                 isCancelled: Task.isCancelled,
@@ -1263,17 +1257,6 @@ class StreamingAudioService: ObservableObject {
                     let bufferSize = ringBufferRef.withLock { $0.count }
                     logger.info("Feed loop status: iteration=\(feedIterationCount, privacy: .public) ringBuf=\(bufferSize, privacy: .public) emptyDrains=\(consecutiveEmptyDrains, privacy: .public)")
                     lastStatusLogTime = now
-                }
-
-                let speechActive = session.isSpeechActive
-                if Self.shouldPublishSpeechDetection(
-                    lastPublished: lastPublishedSpeechActive,
-                    current: speechActive
-                ) {
-                    lastPublishedSpeechActive = speechActive
-                    await MainActor.run { [weak self] in
-                        self?.isSpeechDetected = speechActive
-                    }
                 }
 
                 guard await Self.waitForNextFeedIteration() else { break }
@@ -1692,7 +1675,6 @@ class StreamingAudioService: ObservableObject {
         hasTranscriptionGaps = false
         confirmedText = ""
         provisionalText = ""
-        isSpeechDetected = false
         recordingStartTime = nil
         currentRecordingID = nil
         currentRecordingFileName = nil

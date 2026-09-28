@@ -29,7 +29,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
     private let makeProcessor: (StreamingConfig, Int) -> (any StreamingChunkProcessing)?
     private let config: StreamingConfig
     private let melProcessor: IncrementalMelSpectrogram
-    private let vadSegmenter: VADSegmenter?
 
     private let shared = OSAllocatedUnfairLock(initialState: SessionState())
     private let sessionLock = OSAllocatedUnfairLock(initialState: 0)
@@ -66,7 +65,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.init(
             config: config, sampleRate: model.sampleRate, melBins: model.config.audioConfig.numMelBins,
             sourceSampleLimit: sourceSampleLimit,
-            vadSegmenter: VADSegmenter(),
             decodeTokens: { model.tokenizer?.decode(tokens: $0) ?? "" },
             makeProcessor: { config, offset in
                 guard let tokenizer = model.tokenizer else { return nil }
@@ -79,7 +77,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     init(
         config: StreamingConfig, sampleRate: Int, melBins: Int, sourceSampleLimit: Int? = nil,
-        vadSegmenter: VADSegmenter? = nil,
         decodeTokens: @escaping ([Int]) -> String,
         makeProcessor: @escaping (StreamingConfig, Int) -> (any StreamingChunkProcessing)?
     ) {
@@ -96,7 +93,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
             hopLength: 160,
             nMels: melBins
         )
-        self.vadSegmenter = vadSegmenter
 
         Memory.cacheLimit = 64 * 1024 * 1024
 
@@ -105,10 +101,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
         self.continuation = continuation
         self.isActive = true
     }
-
-    public var isVADAvailable: Bool { vadSegmenter?.isAvailable ?? false }
-
-    public var isSpeechActive: Bool { vadSegmenter?.isSpeechActive ?? false }
 
     // 16000 Hz / 160 hop = 100 mel frames per second
     private var chunkSizeMelFrames: Int {
@@ -127,7 +119,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
             totalSamplesFed += samples.count
             audioTimeline.append(sampleCount: samples.count, skippedSamples: skippedSamples)
 
-            _ = vadSegmenter?.feedSamples(samples)
             if let newMelFrames = melProcessor.process(samples: samples) {
                 accumulateChunkMel(newMelFrames)
                 let chunksBefore = chunkProcessor?.chunkIndex ?? 0
@@ -491,7 +482,6 @@ public class StreamingInferenceSession: @unchecked Sendable {
 
     private func resetProcessingState() {
         melProcessor.reset()
-        vadSegmenter?.reset()
         chunkProcessor = nil
         chunkMelBuffer = nil
         chunkMelFrameCount = 0
