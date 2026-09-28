@@ -138,7 +138,7 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
         eval(inputsEmbeds)
 
         let prefillStart = ContinuousClock.now
-        let logits = prefillWithEmbeddingDiff(inputsEmbeds, inputIds: inputIds)
+        let logits = prefillWithEmbeddingDiff(inputsEmbeds)
         let prefillMs = prefillStart.duration(to: .now).milliseconds
         let decodeStart = ContinuousClock.now
         let historyText = tokenizer.decode(tokens: Self.filterTextTokens(prefixTokenIds))
@@ -377,9 +377,7 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
     // MARK: - KV Cache Reuse via Embedding Diff
 
-    private func prefillWithEmbeddingDiff(
-        _ inputsEmbeds: MLXArray, inputIds: MLXArray
-    ) -> MLXArray {
+    private func prefillWithEmbeddingDiff(_ inputsEmbeds: MLXArray) -> MLXArray {
         var matchedRows = Self.findEmbeddingPrefixMatch(
             current: inputsEmbeds, previous: prevPrefillEmbeds
         )
@@ -401,19 +399,12 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
             }
 
             let newEmbeds = inputsEmbeds[0..., matchedRows..<seqLen, 0...]
-            logits = model.callAsFunction(
-                inputIds: inputIds,
-                inputEmbeddings: newEmbeds,
-                cache: decoderCache
-            )
+            logits = model.prefill(inputEmbeddings: newEmbeds, cache: cache)
         } else {
             cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] prefill: full (no reuse) seqLen=\(seqLen, privacy: .public) matched=\(matchedRows, privacy: .public) hadPrev=\(self.prevPrefillEmbeds != nil, privacy: .public)")
-            decoderCache = model.makeCache()
-            logits = model.callAsFunction(
-                inputIds: inputIds,
-                inputEmbeddings: inputsEmbeds,
-                cache: decoderCache
-            )
+            let cache = model.makeCache()
+            decoderCache = cache
+            logits = model.prefill(inputEmbeddings: inputsEmbeds, cache: cache)
         }
 
         eval(logits)

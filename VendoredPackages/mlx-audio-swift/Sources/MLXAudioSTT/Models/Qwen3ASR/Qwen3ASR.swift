@@ -956,7 +956,19 @@ public class Qwen3ASRModel: Module {
         }
 
         let hiddenStates = model(inputsEmbeds: inputsEmbeds, cache: cache)
+        return vocabularyLogits(hiddenStates)
+    }
 
+    /// Runs the decoder over a prompt and returns logits for its last `logitsRows` positions only.
+    /// Projecting the other rows onto the vocabulary would add about a fifth of the decoder layers'
+    /// compute and allocate `rows × vocabSize` logits that are never read.
+    public func prefill(inputEmbeddings: MLXArray, cache: [KVCache], logitsRows: Int = 1) -> MLXArray {
+        let hiddenStates = model(inputsEmbeds: inputEmbeddings, cache: cache)
+        let rows = hiddenStates.dim(1)
+        return vocabularyLogits(hiddenStates[0..., (rows - min(logitsRows, rows))..., 0...])
+    }
+
+    private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {
         if let lmHead = lmHead {
             return lmHead(hiddenStates)
         } else {
@@ -1104,11 +1116,7 @@ public class Qwen3ASRModel: Module {
         )
 
         let cache = makeCache()
-        var logits = callAsFunction(
-            inputIds: inputIds,
-            inputEmbeddings: inputsEmbeds,
-            cache: cache
-        )
+        var logits = prefill(inputEmbeddings: inputsEmbeds, cache: cache)
         eval(logits)
 
         var generatedTokens: [Int] = []
@@ -1327,11 +1335,7 @@ public class Qwen3ASRModel: Module {
                         )
 
                         let cache = model.makeCache()
-                        var logits = model.callAsFunction(
-                            inputIds: inputIds,
-                            inputEmbeddings: inputsEmbeds,
-                            cache: cache
-                        )
+                        var logits = model.prefill(inputEmbeddings: inputsEmbeds, cache: cache)
                         eval(logits)
 
                         var chunkTokens: [Int] = []
