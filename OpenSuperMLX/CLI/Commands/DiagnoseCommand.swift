@@ -36,12 +36,14 @@ struct DiagnoseResult: Encodable {
 
     struct SettingsSummary: Encodable {
         let model: String
+        let neuralEngineAudioTower: Bool
         let language: String
         let streaming: Bool
         let llmCorrectionEnabled: Bool
 
         enum CodingKeys: String, CodingKey {
             case model, language, streaming
+            case neuralEngineAudioTower = "neural_engine_audio_tower"
             case llmCorrectionEnabled = "llm_correction_enabled"
         }
     }
@@ -80,6 +82,7 @@ struct DiagnoseCommand: ParsableCommand {
             ),
             settings: DiagnoseResult.SettingsSummary(
                 model: MLXModelManager.model.repoID,
+                neuralEngineAudioTower: AppPreferences.store.bool(forKey: "useNeuralEngineAudioTower"),
                 language: AppPreferences.store.string(forKey: "mlxLanguage") ?? "auto",
                 streaming: AppPreferences.store.object(forKey: "useStreamingTranscription") != nil
                     ? AppPreferences.store.bool(forKey: "useStreamingTranscription")

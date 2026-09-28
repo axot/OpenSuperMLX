@@ -39,6 +39,8 @@ enum SettingsSubtab: Int, CaseIterable, Identifiable {
 
 struct SettingsRedesignView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    @ObservedObject private var transcriptionService = TranscriptionService.shared
+    @ObservedObject private var streamingService = StreamingAudioService.shared
     @State private var subtab: SettingsSubtab = .shortcuts
 
     var body: some View {
@@ -153,6 +155,18 @@ struct SettingsRedesignView: View {
                         .foregroundStyle(DesignTokens.txt3)
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
+                }
+                SettingsFieldDivider()
+                SettingsField(
+                    label: "Neural Engine audio encoder",
+                    detail: "Run the audio encoder on the Neural Engine to free the GPU"
+                ) {
+                    DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
+                        .disabled(
+                            streamingService.isStreaming
+                                || transcriptionService.isTranscribing
+                                || transcriptionService.isLoading
+                        )
                 }
             }
             SettingsGroup(title: "Models Directory") {

@@ -20,6 +20,7 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | Component | Size | Where |
 |---|---|---|
 | Model weights | ~1,820 MB (5-bit decoder ~1,190 MB + BF16 audio encoder ~635 MB) | GPU (MLX), fixed after load |
+| Neural Engine audio encoder (when enabled) | ~300 MB INT8, replaces the ~635 MB MLX encoder | Core ML, mapped outside the app's footprint |
 | Encoder cache (4 windows) | ~60 MB | GPU, bounded by `maxEncoderWindows` |
 | KV cache (decoder) | ~100-200 MB | GPU, bounded by sliding window + prefix cap |
 | Encoder transient (per window) | ~95 MB | GPU, freed after each encoder forward pass |
@@ -28,7 +29,7 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | Metal driver overhead | ~300 MB | Kernel, unavoidable framework cost |
 | Swift runtime + dylibs | ~200 MB | CPU |
 
-Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug build, M1 Max): **~2,230 MB median / 2,720 MB max**. The previous Qwen3-ASR-1.7B-8bit build measured ~2,840 MB median / 3,240 MB max.
+Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug build, M1 Max): **~2,230 MB median / 2,720 MB max** with the GPU encoder and **~1,620 MB median / 2,110 MB max** with the Neural Engine encoder. The previous Qwen3-ASR-1.7B-8bit build measured ~2,840 MB median / 3,240 MB max.
 
 ### Encoder dtype
 

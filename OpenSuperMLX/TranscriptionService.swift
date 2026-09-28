@@ -27,6 +27,10 @@ class TranscriptionService: ObservableObject {
     var streamingModel: Qwen3ASRModel? {
         (currentEngine as? MLXEngine)?.qwen3Model
     }
+
+    var audioEncoderBackend: String {
+        streamingModel?.usesCoreMLAudioTower == true ? "neural_engine" : "gpu"
+    }
     private var totalDuration: Float = 0.0
     private var transcriptionTask: Task<String, Error>?
     private var isCancelled = false
@@ -60,7 +64,7 @@ class TranscriptionService: ObservableObject {
     private func loadEngine() {
         logger.info("Loading MLX engine")
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Engine load requested: model=\(MLXModelManager.model.repoID, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
+            logger.debug("[DEBUG] Engine load requested: model=\(MLXModelManager.model.repoID, privacy: .public), neuralEngineAudioTower=\(AppPreferences.shared.useNeuralEngineAudioTower, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
         }
         
         isLoading = true

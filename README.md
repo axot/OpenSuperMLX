@@ -85,6 +85,8 @@ System-audio capture also requires Screen Recording permission when you enable t
 
 The app uses one model, **Qwen3-ASR-1.7B-5bit** (about 1.8 GB), downloaded automatically from Hugging Face.
 
+**Settings → Model → Neural Engine audio encoder** (off by default) runs the model's audio encoder on the Neural Engine instead of the GPU. The first time it is enabled, the app downloads a Core ML version of the encoder (about 300 MB).
+
 ## CLI
 
 The app binary also works as a headless CLI harness. It supports `transcribe`, `stream-simulate`, `correct`, `config`, `recordings`, `queue`, `mic`, `model`, `benchmark`, and `diagnose`.

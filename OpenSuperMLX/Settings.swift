@@ -5,6 +5,15 @@ import SwiftUI
 import KeyboardShortcuts
 
 class SettingsViewModel: ObservableObject {
+    @Published var useNeuralEngineAudioTower: Bool {
+        didSet {
+            AppPreferences.shared.useNeuralEngineAudioTower = useNeuralEngineAudioTower
+            Task { @MainActor in
+                TranscriptionService.shared.reloadEngine()
+            }
+        }
+    }
+    
     @Published var selectedLanguage: String {
         didSet {
             AppPreferences.shared.mlxLanguage = selectedLanguage
@@ -121,6 +130,7 @@ class SettingsViewModel: ObservableObject {
     
     init() {
         let prefs = AppPreferences.shared
+        self.useNeuralEngineAudioTower = prefs.useNeuralEngineAudioTower
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
         self.temperature = prefs.temperature
@@ -285,6 +295,16 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    
+                    Toggle(isOn: $viewModel.useNeuralEngineAudioTower) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Neural Engine audio encoder")
+                            Text("Runs the audio encoder on the Neural Engine to free the GPU.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)

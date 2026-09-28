@@ -92,6 +92,7 @@ struct StreamSimulateCommand: ParsableCommand {
                 text: injectionResult.text,
                 language: language,
                 model: MLXModelManager.model.repoID,
+                audioEncoder: transcriptionService.audioEncoderBackend,
                 audioDurationS: injectionResult.audioDurationS,
                 processingTimeS: elapsed,
                 chunksFed: injectionResult.chunksFed,
@@ -122,6 +123,7 @@ struct StreamSimulateResult: Encodable {
     let text: String
     let language: String
     let model: String
+    let audioEncoder: String
     let audioDurationS: Double
     let processingTimeS: Double
     let chunksFed: Int
@@ -132,6 +134,7 @@ struct StreamSimulateResult: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
+        case audioEncoder = "audio_encoder"
         case audioDurationS = "audio_duration_s"
         case processingTimeS = "processing_time_s"
         case chunksFed = "chunks_fed"

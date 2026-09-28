@@ -225,7 +225,8 @@ OpenSuperMLX/                    # Main app target
 ├── PermissionsManager.swift     # Microphone + accessibility permission checks
 ├── Engines/
 │   ├── TranscriptionEngine.swift  # Protocol definition
-│   └── MLXEngine.swift            # MLX-based implementation
+│   ├── MLXEngine.swift            # MLX-based implementation, optional Neural Engine audio encoder
+│   └── CoreMLAudioTowerAssets.swift # Download/validate the Core ML audio encoder (axot/Qwen3-ASR-1.7B-CoreML-INT8)
 ├── CLI/
 │   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
 │   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation

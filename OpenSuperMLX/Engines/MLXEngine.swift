@@ -33,11 +33,48 @@ class MLXEngine: TranscriptionEngine {
         let modelId = MLXModelManager.model.repoID
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
-        let model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache, progressHandler: downloadProgressHandler)
+        let audioTowerURL = await Self.neuralEngineAudioTowerURL(
+            enabled: AppPreferences.shared.useNeuralEngineAudioTower,
+            resolve: { try await CoreMLAudioTowerAssets.resolve() },
+            onFallback: Self.reportNeuralEngineFallback
+        )
+        let model: Qwen3ASRModel
+        do {
+            model = try await Qwen3ASRModel.fromPretrained(
+                modelId, cache: cache, audioTowerURL: audioTowerURL, progressHandler: downloadProgressHandler
+            )
+        } catch let error as Qwen3ASRCoreMLAudioTowerError {
+            Self.reportNeuralEngineFallback(error)
+            model = try await Qwen3ASRModel.fromPretrained(modelId, cache: cache, progressHandler: downloadProgressHandler)
+        }
+        model.onCoreMLAudioTowerFallback = Self.reportNeuralEngineFallback
         self.model = model
-        logger.info("MLX model initialized")
+        logger.info("MLX model initialized, audio encoder: \(model.usesCoreMLAudioTower ? "Neural Engine" : "GPU", privacy: .public)")
         if AppPreferences.shared.debugMode {
             logger.debug("[DEBUG] MLX engine config: modelId=\(modelId, privacy: .public), cacheDir=\(MLXModelManager.modelsDirectory.path, privacy: .public)")
+        }
+    }
+
+    // MARK: - Neural Engine Audio Tower
+
+    static func neuralEngineAudioTowerURL(
+        enabled: Bool,
+        resolve: () async throws -> URL,
+        onFallback: (Error) -> Void
+    ) async -> URL? {
+        guard enabled else { return nil }
+        do {
+            return try await resolve()
+        } catch {
+            onFallback(error)
+            return nil
+        }
+    }
+
+    private static func reportNeuralEngineFallback(_ error: Error) {
+        logger.error("Neural Engine audio encoder unavailable, using the GPU: \(error, privacy: .public)")
+        Task { @MainActor in
+            ErrorToastManager.shared.show("Neural Engine audio encoder unavailable. Using the GPU instead.")
         }
     }
 

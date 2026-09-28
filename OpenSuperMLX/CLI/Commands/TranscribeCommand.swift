@@ -91,6 +91,7 @@ struct TranscribeCommand: ParsableCommand {
                 text: text,
                 language: language,
                 model: MLXModelManager.model.repoID,
+                audioEncoder: service.audioEncoderBackend,
                 audioDurationS: audioDuration,
                 processingTimeS: elapsed,
                 correctionsApplied: Self.buildCorrectionsList(
@@ -129,12 +130,14 @@ struct TranscribeResult: Encodable {
     let text: String
     let language: String
     let model: String
+    let audioEncoder: String
     let audioDurationS: Double
     let processingTimeS: Double
     let correctionsApplied: [String]
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
+        case audioEncoder = "audio_encoder"
         case audioDurationS = "audio_duration_s"
         case processingTimeS = "processing_time_s"
         case correctionsApplied = "corrections_applied"

@@ -57,6 +57,7 @@ final class StreamSimulateCommandTests: XCTestCase {
             text: "hello world",
             language: "en",
             model: "mlx-community/Qwen3-ASR-1.7B-5bit",
+            audioEncoder: "gpu",
             audioDurationS: 5.0,
             processingTimeS: 2.1,
             chunksFed: 10,
@@ -74,6 +75,7 @@ final class StreamSimulateCommandTests: XCTestCase {
         XCTAssertEqual(data?["text"] as? String, "hello world")
         XCTAssertEqual(data?["language"] as? String, "en")
         XCTAssertEqual(data?["model"] as? String, "mlx-community/Qwen3-ASR-1.7B-5bit")
+        XCTAssertEqual(data?["audio_encoder"] as? String, "gpu")
         XCTAssertEqual(data?["audio_duration_s"] as? Double, 5.0)
         XCTAssertEqual(data?["processing_time_s"] as? Double, 2.1)
         XCTAssertEqual(data?["chunks_fed"] as? Int, 10)
@@ -84,7 +86,7 @@ final class StreamSimulateCommandTests: XCTestCase {
 
     func testIncompleteResultIncludesTheSkippedAudioLocations() throws {
         let result = StreamSimulateResult(
-            text: "before after", language: "auto", model: "test",
+            text: "before after", language: "auto", model: "test", audioEncoder: "gpu",
             audioDurationS: 20, processingTimeS: 1, chunksFed: 40,
             chunkDurationS: 0.5, intermediateUpdates: 10, isComplete: false,
             gaps: [.init(startSeconds: 8, endSeconds: 10, reason: "token_limit")]

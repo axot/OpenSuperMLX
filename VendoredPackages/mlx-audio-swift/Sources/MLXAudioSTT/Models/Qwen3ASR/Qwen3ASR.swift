@@ -342,6 +342,33 @@ public class Qwen3ASRAudioEncoder: Module {
 
     let positionalEmbedding: Qwen3ASRSinusoidalPE
 
+    /// When set, both encode paths run on Core ML instead of these MLX weights.
+    var coreMLTower: Qwen3ASRCoreMLAudioTower?
+    /// Loads the MLX weights that were skipped while Core ML was active.
+    var loadMLXWeights: (() throws -> Void)?
+    var onCoreMLFailure: ((Error) -> Void)?
+    private let coreMLLock = NSLock()
+
+    /// Runs `body` on the Core ML tower; on failure switches permanently to the MLX weights
+    /// and returns nil so the caller continues on MLX.
+    private func coreMLEncode(_ body: (Qwen3ASRCoreMLAudioTower) throws -> MLXArray) -> MLXArray? {
+        coreMLLock.lock()
+        defer { coreMLLock.unlock() }
+        guard let tower = coreMLTower else { return nil }
+        do {
+            return try body(tower)
+        } catch {
+            coreMLTower = nil
+            do {
+                try loadMLXWeights?()
+            } catch let loadError {
+                fatalError("Neither the Core ML nor the MLX audio tower is usable: \(error); \(loadError)")
+            }
+            onCoreMLFailure?(error)
+            return nil
+        }
+    }
+
     private static func padChunksToMaxLength(
         _ chunks: [MLXArray], lengths: [Int], maxLength: Int
     ) -> [MLXArray] {
@@ -431,6 +458,10 @@ public class Qwen3ASRAudioEncoder: Module {
             featureLens = (0..<batchSize).map { Int(lens[$0].item(Int32.self)) }
         } else {
             featureLens = [Int](repeating: nFrames, count: batchSize)
+        }
+
+        if let output = coreMLEncode({ try $0.encode(features: inputFeatures, lengths: featureLens) }) {
+            return output
         }
 
         let featureLensArray = MLXArray(featureLens.map { Int32($0) })
@@ -590,6 +621,9 @@ public class Qwen3ASRAudioEncoder: Module {
     ///   Frames are automatically split into conv-sized chunks internally.
     /// - Returns: Encoded features `[numTokens, outputDim]`
     public func encodeSingleWindow(_ melFrames: MLXArray) -> MLXArray {
+        if let output = coreMLEncode({ try $0.encodeWindow(melFrames) }) {
+            return output
+        }
         let mel = melFrames.asType(.bfloat16)
         let numFrames = mel.dim(0)
         let chunkSize = nWindow * 2  // 100 mel frames per conv chunk
@@ -876,6 +910,14 @@ public class Qwen3ASRModel: Module {
     }
 
     // MARK: - Audio Features
+
+    public var usesCoreMLAudioTower: Bool { audioTower.coreMLTower != nil }
+
+    /// Called once if the Core ML audio tower fails at runtime and encoding switches to MLX.
+    public var onCoreMLAudioTowerFallback: ((Error) -> Void)? {
+        get { audioTower.onCoreMLFailure }
+        set { audioTower.onCoreMLFailure = newValue }
+    }
 
     public func getAudioFeatures(
         _ inputFeatures: MLXArray,
@@ -1519,9 +1561,13 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Model Loading
 
+    /// - Parameter audioTowerURL: compiled Core ML audio tower to run on the Neural Engine; the MLX
+    ///   audio tower weights are then left unloaded. Throws `Qwen3ASRCoreMLAudioTowerError.loadFailed`
+    ///   before loading any weights if the tower cannot be loaded.
     public static func fromPretrained(
         _ modelPath: String,
         cache: HubCache = .default,
+        audioTowerURL: URL? = nil,
         progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> Qwen3ASRModel {
         let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
@@ -1550,6 +1596,14 @@ public class Qwen3ASRModel: Module {
 
         // Get per-layer quantization
         let perLayerQuantization = config.perLayerQuantization
+
+        let coreMLTower = try audioTowerURL.map { url in
+            do {
+                return try Qwen3ASRCoreMLAudioTower(url: url, melBins: config.audioConfig.numMelBins)
+            } catch {
+                throw Qwen3ASRCoreMLAudioTowerError.loadFailed(error)
+            }
+        }
 
         // Create model
         let model = Qwen3ASRModel(config)
@@ -1591,8 +1645,33 @@ public class Qwen3ASRModel: Module {
         }
 
         // Load weights into model
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: .all)
-        eval(model)
+        if let coreMLTower {
+            // Leave the MLX audio tower unloaded and unevaluated so its weights never occupy memory.
+            let decoderWeights = sanitizedWeights.filter { !$0.key.hasPrefix("audio_tower.") }
+            try model.update(
+                parameters: ModuleParameters.unflattened(decoderWeights),
+                verify: [.noUnusedKeys, .shapeMismatch]
+            )
+            model.audioTower.coreMLTower = coreMLTower
+            model.audioTower.loadMLXWeights = { [weak model] in
+                guard let model else { return }
+                var weights: [String: MLXArray] = [:]
+                for file in safetensorFiles {
+                    weights.merge(try MLX.loadArrays(url: file)) { _, new in new }
+                }
+                let towerWeights = Qwen3ASRModel.sanitize(weights: weights, skipLmHead: skipLmHead)
+                    .filter { $0.key.hasPrefix("audio_tower.") }
+                try model.update(
+                    parameters: ModuleParameters.unflattened(towerWeights),
+                    verify: [.noUnusedKeys, .shapeMismatch]
+                )
+                eval(model.audioTower)
+            }
+            eval(model.parameters().flattened().filter { !$0.0.hasPrefix("audio_tower.") }.map { $0.1 })
+        } else {
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: .all)
+            eval(model)
+        }
 
         return model
     }

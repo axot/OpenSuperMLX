@@ -131,6 +131,13 @@ final class ConfigCommandTests: XCTestCase {
         XCTAssertEqual(error, .invalidConfigValue)
     }
 
+    func testConfigSetsNeuralEngineAudioTower() throws {
+        guard case .success = ConfigSetCommand.executeSet(key: "useNeuralEngineAudioTower", value: "true") else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertTrue(testDefaults.bool(forKey: "useNeuralEngineAudioTower"))
+    }
+
     func testConfigNoLongerExposesModelSelection() throws {
         guard case .failure(let error) = ConfigSetCommand.executeSet(key: "selectedMLXModel", value: "x") else {
             XCTFail("Expected failure"); return
