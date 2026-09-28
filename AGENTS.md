@@ -472,6 +472,7 @@ All plans MUST follow **Test-Driven Development (TDD)** — plans that list impl
 | [`docs/release_build.md`](docs/release_build.md) | **Making a release.** Official tag-driven CI flow and legacy local notarization limitations. |
 | [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
 | [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality or save issues.** Pipeline trace, AAC/WAV analysis, channel handling, recovery flow, and known issue patterns. |
+| [`docs/apple-asr-research-todo.md`](docs/apple-asr-research-todo.md) | **Planning ASR quality or efficiency work.** Ideas from Apple's on-device speech stack (ITN, vocabulary biasing, confidence, streaming) with evidence and how to measure each. |
 
 ## Release
 
