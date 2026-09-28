@@ -45,7 +45,8 @@ final class TranscribeCommandTests: XCTestCase {
         let result = TranscribeResult(
             text: "hello world",
             language: "en",
-            model: "mlx-community/Qwen3-ASR-1.7B-8bit",
+            model: "mlx-community/Qwen3-ASR-1.7B-5bit",
+            audioEncoder: "neural_engine",
             audioDurationS: 3.5,
             processingTimeS: 1.2,
             correctionsApplied: ["itn", "autocorrect"]
@@ -60,7 +61,8 @@ final class TranscribeCommandTests: XCTestCase {
         XCTAssertNotNil(data)
         XCTAssertEqual(data?["text"] as? String, "hello world")
         XCTAssertEqual(data?["language"] as? String, "en")
-        XCTAssertEqual(data?["model"] as? String, "mlx-community/Qwen3-ASR-1.7B-8bit")
+        XCTAssertEqual(data?["model"] as? String, "mlx-community/Qwen3-ASR-1.7B-5bit")
+        XCTAssertEqual(data?["audio_encoder"] as? String, "neural_engine")
         XCTAssertEqual(data?["audio_duration_s"] as? Double, 3.5)
         XCTAssertEqual(data?["processing_time_s"] as? Double, 1.2)
         let corrections = data?["corrections_applied"] as? [String]
@@ -83,11 +85,10 @@ final class TranscribeCommandTests: XCTestCase {
         XCTAssertEqual(command.language, "zh")
     }
 
-    func testTranscribeModelOption() throws {
-        let command = try OpenSuperMLXCLI.parseAsRoot(
+    func testTranscribeRejectsModelOption() {
+        XCTAssertThrowsError(try OpenSuperMLXCLI.parseAsRoot(
             ["transcribe", "file.wav", "--model", "mlx-community/Qwen3-ASR-1.7B-8bit"]
-        ) as! TranscribeCommand
-        XCTAssertEqual(command.model, "mlx-community/Qwen3-ASR-1.7B-8bit")
+        ))
     }
 
     // MARK: - Successful Transcription

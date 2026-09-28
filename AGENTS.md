@@ -218,14 +218,15 @@ OpenSuperMLX/                    # Main app target
 ├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
 ├── TranscriptionService.swift   # Transcription orchestration (singleton)
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
-├── MLXModelManager.swift        # Model catalog + custom model management
+├── MLXModelManager.swift        # The single built-in model (Qwen3-ASR-1.7B-5bit) + models directory
 ├── MicrophoneService.swift      # Audio device enumeration, selection, CoreAudio
 ├── ShortcutManager.swift        # Global hotkey handling + hold-to-record
 ├── FileDropHandler.swift        # Drag-and-drop audio file import
 ├── PermissionsManager.swift     # Microphone + accessibility permission checks
 ├── Engines/
 │   ├── TranscriptionEngine.swift  # Protocol definition
-│   └── MLXEngine.swift            # MLX-based implementation
+│   ├── MLXEngine.swift            # MLX-based implementation, optional Neural Engine audio encoder
+│   └── CoreMLAudioTowerAssets.swift # Download/validate the Core ML audio encoder (ax0t/Qwen3-ASR-1.7B-CoreML-INT8)
 ├── CLI/
 │   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
 │   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation
@@ -471,6 +472,7 @@ All plans MUST follow **Test-Driven Development (TDD)** — plans that list impl
 | [`docs/release_build.md`](docs/release_build.md) | **Making a release.** Official tag-driven CI flow and legacy local notarization limitations. |
 | [`docs/cli.md`](docs/cli.md) | **Running CLI commands, CLI tests, pre-commit verification.** Full command reference, error codes, and verification lookup table. |
 | [`docs/audio-diagnostics.md`](docs/audio-diagnostics.md) | **Diagnosing audio quality or save issues.** Pipeline trace, AAC/WAV analysis, channel handling, recovery flow, and known issue patterns. |
+| [`docs/apple-asr-research-todo.md`](docs/apple-asr-research-todo.md) | **Planning ASR quality or efficiency work.** Ideas from Apple's on-device speech stack (ITN, vocabulary biasing, confidence, streaming) with evidence and how to measure each. |
 
 ## Release
 

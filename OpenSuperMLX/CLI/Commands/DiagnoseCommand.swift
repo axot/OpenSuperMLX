@@ -1,6 +1,7 @@
 // DiagnoseCommand.swift
 // OpenSuperMLX
 
+import ApplicationServices
 import AVFoundation
 import Foundation
 
@@ -35,12 +36,14 @@ struct DiagnoseResult: Encodable {
 
     struct SettingsSummary: Encodable {
         let model: String
+        let neuralEngineAudioTower: Bool
         let language: String
         let streaming: Bool
         let llmCorrectionEnabled: Bool
 
         enum CodingKeys: String, CodingKey {
             case model, language, streaming
+            case neuralEngineAudioTower = "neural_engine_audio_tower"
             case llmCorrectionEnabled = "llm_correction_enabled"
         }
     }
@@ -78,7 +81,8 @@ struct DiagnoseCommand: ParsableCommand {
                 accessibility: accessibilityStatus()
             ),
             settings: DiagnoseResult.SettingsSummary(
-                model: AppPreferences.store.string(forKey: "selectedMLXModel") ?? "mlx-community/Qwen3-ASR-1.7B-8bit",
+                model: MLXModelManager.model.repoID,
+                neuralEngineAudioTower: AppPreferences.shared.useNeuralEngineAudioTower,
                 language: AppPreferences.store.string(forKey: "mlxLanguage") ?? "auto",
                 streaming: AppPreferences.store.object(forKey: "useStreamingTranscription") != nil
                     ? AppPreferences.store.bool(forKey: "useStreamingTranscription")
@@ -100,14 +104,31 @@ struct DiagnoseCommand: ParsableCommand {
         return String(cString: buffer)
     }
 
-    private static func listInstalledModels() -> [String] {
-        let modelsDir = MLXModelManager.modelsDirectory
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: modelsDir.path) else {
-            return []
+    static func listInstalledModels(in modelsDirectory: URL = MLXModelManager.modelsDirectory) -> [String] {
+        var installed: [String] = []
+        let modelID = MLXModelManager.model.repoID
+        let modelDirectory = modelsDirectory
+            .appendingPathComponent("mlx-audio")
+            .appendingPathComponent(modelID.replacingOccurrences(of: "/", with: "_"))
+        if hasWeights(modelDirectory) {
+            installed.append(modelID)
         }
-        return contents
-            .filter { $0.hasPrefix("models--") }
-            .map { $0.replacingOccurrences(of: "models--", with: "").replacingOccurrences(of: "--", with: "/") }
+        let encoder = CoreMLAudioTowerAssets.installDirectory(in: modelsDirectory)
+            .appendingPathComponent(CoreMLAudioTowerAssets.modelName)
+        if CoreMLAudioTowerAssets.isInstalled(at: encoder) {
+            installed.append(CoreMLAudioTowerAssets.repositoryID)
+        }
+        return installed
+    }
+
+    private static func hasWeights(_ directory: URL) -> Bool {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        return files.contains { file in
+            file.pathExtension == "safetensors"
+                && ((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) > 0
+        }
     }
 
     private static func microphoneAuthStatus() -> String {

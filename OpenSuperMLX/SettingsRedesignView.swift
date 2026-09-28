@@ -39,9 +39,9 @@ enum SettingsSubtab: Int, CaseIterable, Identifiable {
 
 struct SettingsRedesignView: View {
     @ObservedObject var viewModel: SettingsViewModel
-    @ObservedObject var modelManager: MLXModelManager
+    @ObservedObject private var transcriptionService = TranscriptionService.shared
+    @State private var isStreaming = StreamingAudioService.shared.isStreaming
     @State private var subtab: SettingsSubtab = .shortcuts
-    @State private var customModelInput = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +63,7 @@ struct SettingsRedesignView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DesignTokens.bg)
+        .onReceive(StreamingAudioService.shared.$isStreaming) { isStreaming = $0 }
     }
 
     private var header: some View {
@@ -148,36 +149,25 @@ struct SettingsRedesignView: View {
 
     private var modelTab: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "MLX Speech Recognition Model") {
-                ForEach(Array(modelManager.availableModels.enumerated()), id: \.element.id) { idx, model in
-                    if idx > 0 { SettingsFieldDivider() }
-                    ModelRow(
-                        model: model,
-                        isSelected: viewModel.selectedMLXModel == model.repoID,
-                        onSelect: { viewModel.selectedMLXModel = model.repoID },
-                        onDelete: model.isCustom ? {
-                            if viewModel.selectedMLXModel == model.repoID {
-                                viewModel.selectedMLXModel = MLXModelManager.builtInModels[1].repoID
-                            }
-                            modelManager.removeCustomModel(model)
-                        } : nil
-                    )
+            SettingsGroup(title: "Speech Recognition Model") {
+                SettingsField(label: MLXModelManager.model.name, detail: MLXModelManager.model.description) {
+                    Text(MLXModelManager.model.size)
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(DesignTokens.txt3)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
                 }
-            }
-            SettingsGroup(title: "Custom Model") {
-                SettingsField(label: "Add from HuggingFace", detail: "Enter repo ID or URL") {
-                    HStack(spacing: 8) {
-                        TextField("mlx-community/…", text: $customModelInput)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12.5))
-                            .frame(width: 180)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .fieldSurface()
-                            .onSubmit(addCustomModel)
-                        Button("Add", action: addCustomModel)
-                            .controlSize(.small)
-                            .disabled(customModelInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
+                SettingsFieldDivider()
+                SettingsField(
+                    label: "Neural Engine audio encoder",
+                    detail: "Run the audio encoder on the Neural Engine to free the GPU"
+                ) {
+                    DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
+                        .disabled(
+                            isStreaming
+                                || transcriptionService.isTranscribing
+                                || transcriptionService.isLoading
+                        )
                 }
             }
             SettingsGroup(title: "Models Directory") {
@@ -190,11 +180,6 @@ struct SettingsRedesignView: View {
                 }
             }
         }
-    }
-
-    private func addCustomModel() {
-        modelManager.addCustomModel(repoID: customModelInput)
-        customModelInput = ""
     }
 
     // MARK: - Transcription
@@ -545,42 +530,6 @@ struct OpenFolderButton: View {
             .fieldSurface()
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct ModelRow: View {
-    let model: MLXModel
-    let isSelected: Bool
-    let onSelect: () -> Void
-    var onDelete: (() -> Void)?
-
-    var body: some View {
-        HStack(spacing: 11) {
-            ZStack {
-                Circle().stroke(isSelected ? DesignTokens.acc : DesignTokens.line, lineWidth: 1.5)
-                if isSelected { Circle().fill(DesignTokens.acc).frame(width: 8, height: 8) }
-            }
-            .frame(width: 16, height: 16)
-            Text(model.name)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DesignTokens.txt)
-            Spacer(minLength: 8)
-            Text(model.size)
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(DesignTokens.txt3)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
-            if let onDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(DesignTokens.red.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture { if !isSelected { onSelect() } }
     }
 }
 

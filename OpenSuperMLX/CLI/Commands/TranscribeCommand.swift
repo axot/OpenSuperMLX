@@ -20,9 +20,6 @@ struct TranscribeCommand: ParsableCommand {
     @Option(name: .long, help: "Language code (default: auto)")
     var language: String = "auto"
 
-    @Option(name: .long, help: "Model repository ID")
-    var model: String?
-
     @Flag(name: .long, help: "Skip LLM correction")
     var noCorrection = false
 
@@ -54,10 +51,6 @@ struct TranscribeCommand: ParsableCommand {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(.audioFileNotFound)
-        }
-
-        if let model = model {
-            AppPreferences.shared.selectedMLXModel = model
         }
 
         let settings = Settings(
@@ -97,7 +90,8 @@ struct TranscribeCommand: ParsableCommand {
             let data = TranscribeResult(
                 text: text,
                 language: language,
-                model: AppPreferences.shared.selectedMLXModel,
+                model: MLXModelManager.model.repoID,
+                audioEncoder: service.audioEncoderBackend,
                 audioDurationS: audioDuration,
                 processingTimeS: elapsed,
                 correctionsApplied: Self.buildCorrectionsList(
@@ -136,12 +130,14 @@ struct TranscribeResult: Encodable {
     let text: String
     let language: String
     let model: String
+    let audioEncoder: String
     let audioDurationS: Double
     let processingTimeS: Double
     let correctionsApplied: [String]
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
+        case audioEncoder = "audio_encoder"
         case audioDurationS = "audio_duration_s"
         case processingTimeS = "processing_time_s"
         case correctionsApplied = "corrections_applied"

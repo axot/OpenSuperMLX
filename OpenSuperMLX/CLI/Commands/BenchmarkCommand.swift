@@ -72,9 +72,6 @@ struct BenchmarkCommand: ParsableCommand {
     @Option(name: .long, help: "Language code (default: auto)")
     var language: String = "auto"
 
-    @Option(name: .long, help: "Model repository ID")
-    var model: String?
-
     @Option(name: .long, help: "Number of timed runs (default: 3)")
     var runs: Int = 3
 
@@ -109,10 +106,6 @@ struct BenchmarkCommand: ParsableCommand {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(.audioFileNotFound)
-        }
-
-        if let model = model {
-            AppPreferences.shared.selectedMLXModel = model
         }
 
         let service = TranscriptionService.shared

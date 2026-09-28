@@ -20,9 +20,6 @@ struct StreamSimulateCommand: ParsableCommand {
     @Option(name: .long, help: "Language code (default: auto)")
     var language: String = "auto"
 
-    @Option(name: .long, help: "Model repository ID")
-    var model: String?
-
     @Option(name: .long, help: "Chunk duration in seconds")
     var chunkDuration: Double = 0.5
 
@@ -54,10 +51,6 @@ struct StreamSimulateCommand: ParsableCommand {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(.audioFileNotFound)
-        }
-
-        if let model = model {
-            AppPreferences.shared.selectedMLXModel = model
         }
 
         CLIOutput.printProgress("Loading model...", quiet: globalOptions.quiet)
@@ -98,7 +91,8 @@ struct StreamSimulateCommand: ParsableCommand {
             let data = StreamSimulateResult(
                 text: injectionResult.text,
                 language: language,
-                model: AppPreferences.shared.selectedMLXModel,
+                model: MLXModelManager.model.repoID,
+                audioEncoder: transcriptionService.audioEncoderBackend,
                 audioDurationS: injectionResult.audioDurationS,
                 processingTimeS: elapsed,
                 chunksFed: injectionResult.chunksFed,
@@ -129,6 +123,7 @@ struct StreamSimulateResult: Encodable {
     let text: String
     let language: String
     let model: String
+    let audioEncoder: String
     let audioDurationS: Double
     let processingTimeS: Double
     let chunksFed: Int
@@ -139,6 +134,7 @@ struct StreamSimulateResult: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case text, language, model
+        case audioEncoder = "audio_encoder"
         case audioDurationS = "audio_duration_s"
         case processingTimeS = "processing_time_s"
         case chunksFed = "chunks_fed"

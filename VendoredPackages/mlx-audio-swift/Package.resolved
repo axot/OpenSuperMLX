@@ -29,15 +29,6 @@
       }
     },
     {
-      "identity" : "silero-vad-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/paean-ai/silero-vad-swift.git",
-      "state" : {
-        "revision" : "60bbe344f72845a4dbd0543ed02917147016709a",
-        "version" : "1.0.0"
-      }
-    },
-    {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser",

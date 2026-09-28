@@ -43,8 +43,8 @@ extension Qwen3ASRModel: STTGenerationModel {
         )
     }
 
-    public func generate(audio: MLXArray, generationParameters: STTGenerateParameters) -> STTOutput {
-        generate(
+    public func generate(audio: MLXArray, generationParameters: STTGenerateParameters) throws -> STTOutput {
+        try generate(
             audio: audio,
             maxTokens: generationParameters.maxTokens,
             temperature: generationParameters.temperature,
@@ -75,7 +75,7 @@ func getFeatExtractOutputLengths(_ inputLengths: MLXArray) -> MLXArray {
     let outputLengths = (
         floorDiv(floorDiv(featLengths - 1, 2) + 1 - 1, 2)
         + 1
-        + (inputLengths / 100) * 13
+        + floorDiv(inputLengths, 100) * 13
     )
     return outputLengths
 }
@@ -326,6 +326,17 @@ class Qwen3ASRAudioEncoderLayer: Module {
 
 // MARK: - Audio Encoder
 
+/// The Core ML audio tower failed and its MLX weights could not be loaded, so no audio can be encoded.
+public struct Qwen3ASRAudioTowerUnavailableError: LocalizedError {
+    public let coreMLError: Error
+    public let mlxWeightsError: Error
+
+    public var errorDescription: String? {
+        "The audio encoder can't run: the Neural Engine encoder failed and the GPU encoder's weights "
+            + "could not be loaded (\(mlxWeightsError.localizedDescription))."
+    }
+}
+
 public class Qwen3ASRAudioEncoder: Module {
     let config: Qwen3AudioEncoderConfig
     let nWindow: Int
@@ -341,6 +352,38 @@ public class Qwen3ASRAudioEncoder: Module {
     @ModuleInfo(key: "proj2") var proj2: Linear
 
     let positionalEmbedding: Qwen3ASRSinusoidalPE
+
+    /// When set, both encode paths run on Core ML instead of these MLX weights.
+    var coreMLTower: (any Qwen3ASRCoreMLEncoding)?
+    /// Loads the MLX weights that were skipped while Core ML was active.
+    var loadMLXWeights: (() throws -> Void)?
+    var onCoreMLFailure: ((Error) -> Void)?
+    private let coreMLLock = NSLock()
+    private var unavailableError: Qwen3ASRAudioTowerUnavailableError?
+
+    /// Runs `body` on the Core ML tower; on failure switches permanently to the MLX weights
+    /// and returns nil so the caller continues on MLX. If those weights cannot be loaded, every
+    /// later call throws, because the skipped MLX weights must never run.
+    private func coreMLEncode(_ body: (any Qwen3ASRCoreMLEncoding) throws -> MLXArray) throws -> MLXArray? {
+        coreMLLock.lock()
+        defer { coreMLLock.unlock() }
+        if let unavailableError { throw unavailableError }
+        guard let tower = coreMLTower else { return nil }
+        do {
+            return try body(tower)
+        } catch {
+            coreMLTower = nil
+            do {
+                try loadMLXWeights?()
+            } catch let loadError {
+                let failure = Qwen3ASRAudioTowerUnavailableError(coreMLError: error, mlxWeightsError: loadError)
+                unavailableError = failure
+                throw failure
+            }
+            onCoreMLFailure?(error)
+            return nil
+        }
+    }
 
     private static func padChunksToMaxLength(
         _ chunks: [MLXArray], lengths: [Int], maxLength: Int
@@ -419,7 +462,7 @@ public class Qwen3ASRAudioEncoder: Module {
     public func callAsFunction(
         _ inputFeatures: MLXArray,
         featureAttentionMask: MLXArray? = nil
-    ) -> MLXArray {
+    ) throws -> MLXArray {
         // inputFeatures shape: [batch, n_mels, n_frames]
         let batchSize = inputFeatures.dim(0)
         let nFrames = inputFeatures.dim(2)
@@ -431,6 +474,10 @@ public class Qwen3ASRAudioEncoder: Module {
             featureLens = (0..<batchSize).map { Int(lens[$0].item(Int32.self)) }
         } else {
             featureLens = [Int](repeating: nFrames, count: batchSize)
+        }
+
+        if let output = try coreMLEncode({ try $0.encode(features: inputFeatures, lengths: featureLens) }) {
+            return output
         }
 
         let featureLensArray = MLXArray(featureLens.map { Int32($0) })
@@ -589,7 +636,10 @@ public class Qwen3ASRAudioEncoder: Module {
     /// - Parameter melFrames: Mel spectrogram frames `[numFrames, nMels]` where numFrames ≤ nWindowInfer (800).
     ///   Frames are automatically split into conv-sized chunks internally.
     /// - Returns: Encoded features `[numTokens, outputDim]`
-    public func encodeSingleWindow(_ melFrames: MLXArray) -> MLXArray {
+    public func encodeSingleWindow(_ melFrames: MLXArray) throws -> MLXArray {
+        if let output = try coreMLEncode({ try $0.encodeWindow(melFrames) }) {
+            return output
+        }
         let mel = melFrames.asType(.bfloat16)
         let numFrames = mel.dim(0)
         let chunkSize = nWindow * 2  // 100 mel frames per conv chunk
@@ -877,11 +927,19 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Audio Features
 
+    public var usesCoreMLAudioTower: Bool { audioTower.coreMLTower != nil }
+
+    /// Called once if the Core ML audio tower fails at runtime and encoding switches to MLX.
+    public var onCoreMLAudioTowerFallback: ((Error) -> Void)? {
+        get { audioTower.onCoreMLFailure }
+        set { audioTower.onCoreMLFailure = newValue }
+    }
+
     public func getAudioFeatures(
         _ inputFeatures: MLXArray,
         featureAttentionMask: MLXArray? = nil
-    ) -> MLXArray {
-        return audioTower(inputFeatures, featureAttentionMask: featureAttentionMask)
+    ) throws -> MLXArray {
+        return try audioTower(inputFeatures, featureAttentionMask: featureAttentionMask)
     }
 
     // MARK: - Forward Pass
@@ -889,10 +947,21 @@ public class Qwen3ASRModel: Module {
     public func callAsFunction(
         inputIds: MLXArray,
         inputEmbeddings: MLXArray? = nil,
-        inputFeatures: MLXArray? = nil,
-        featureAttentionMask: MLXArray? = nil,
         cache: [KVCache]? = nil
     ) -> MLXArray {
+        let inputsEmbeds = inputEmbeddings ?? model.embedTokens(inputIds)
+        let hiddenStates = model(inputsEmbeds: inputsEmbeds, cache: cache)
+        return vocabularyLogits(hiddenStates)
+    }
+
+    /// Encodes `inputFeatures` into the audio placeholder rows on the first pass, then decodes.
+    public func callAsFunction(
+        inputIds: MLXArray,
+        inputEmbeddings: MLXArray? = nil,
+        inputFeatures: MLXArray,
+        featureAttentionMask: MLXArray? = nil,
+        cache: [KVCache]? = nil
+    ) throws -> MLXArray {
         var inputsEmbeds: MLXArray
         if let embeddings = inputEmbeddings {
             inputsEmbeds = embeddings
@@ -900,10 +969,8 @@ public class Qwen3ASRModel: Module {
             inputsEmbeds = model.embedTokens(inputIds)
         }
 
-        // Encode and merge audio features on first pass
-        if let features = inputFeatures,
-           cache == nil || cache?.first == nil || (cache?.first as? KVCacheSimple)?.offset == 0 {
-            let audioFeatures = getAudioFeatures(features, featureAttentionMask: featureAttentionMask)
+        if cache == nil || cache?.first == nil || (cache?.first as? KVCacheSimple)?.offset == 0 {
+            let audioFeatures = try getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
                 .asType(inputsEmbeds.dtype)
 
             inputsEmbeds = mergeAudioFeatures(
@@ -913,13 +980,143 @@ public class Qwen3ASRModel: Module {
             )
         }
 
-        let hiddenStates = model(inputsEmbeds: inputsEmbeds, cache: cache)
+        return callAsFunction(inputIds: inputIds, inputEmbeddings: inputsEmbeds, cache: cache)
+    }
 
+    private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {
         if let lmHead = lmHead {
             return lmHead(hiddenStates)
         } else {
             return model.embedTokens.asLinear(hiddenStates)
         }
+    }
+
+    // MARK: - Prefill
+
+    // Quantized matmuls run in 32-row tiles; passes under 8 tiles lose GPU efficiency per tile.
+    public static let prefillRowsPerPass = 256
+
+    /// Runs the decoder over a prompt and returns logits for its last `logitsRows` positions only.
+    /// Projecting the other rows onto the vocabulary would add about a fifth of the decoder layers'
+    /// compute and allocate `rows × vocabSize` logits that are never read. Rows are processed in
+    /// passes of at most `maxRowsPerPass`, which bounds activation memory for long prompts.
+    public func prefill(
+        inputEmbeddings: MLXArray, cache: [KVCache], logitsRows: Int = 1,
+        maxRowsPerPass: Int = Qwen3ASRModel.prefillRowsPerPass
+    ) -> MLXArray {
+        let rows = inputEmbeddings.dim(1)
+        let logitsRows = min(logitsRows, rows)
+        let finalPassStart = min(rows - logitsRows, (rows - 1) / maxRowsPerPass * maxRowsPerPass)
+        // A full KVCacheSimple copies itself into a new buffer one `step` larger, so growing it
+        // pass by pass would copy the whole cache every pass. Size its next growth for the prompt.
+        let growingCaches = finalPassStart > 0 ? cache.compactMap { $0 as? KVCacheSimple } : []
+        let steps = growingCaches.map(\.step)
+        for (layerCache, step) in zip(growingCaches, steps) {
+            layerCache.step = (rows + step - 1) / step * step
+        }
+        defer {
+            for (layerCache, step) in zip(growingCaches, steps) {
+                layerCache.step = step
+            }
+        }
+        var start = 0
+        while start < finalPassStart {
+            let end = min(start + maxRowsPerPass, finalPassStart)
+            _ = model(inputsEmbeds: inputEmbeddings[0..., start..<end, 0...], cache: cache)
+            eval(cache.flatMap { $0.innerState() })
+            start = end
+        }
+        let hiddenStates = model(inputsEmbeds: inputEmbeddings[0..., finalPassStart..., 0...], cache: cache)
+        let finalRows = hiddenStates.dim(1)
+        return vocabularyLogits(hiddenStates[0..., (finalRows - logitsRows)..., 0...])
+    }
+
+    // MARK: - Greedy Decoding
+
+    public struct GreedyDecodeResult {
+        public var tokens: [Int] = []
+        public var endToken: Int?
+        public var stopped = false
+        public var acceptedDraftTokens = 0
+        public var decodeSteps = 0
+        /// Logits after the last token when decoding stopped at `maxTokens`.
+        public var nextLogits: MLXArray?
+    }
+
+    /// Greedy decoding after `prefill`, whose `logits` cover the prompt's last position followed by one
+    /// position per `draft` token. The longest draft prefix matching the model's own choices is accepted
+    /// without decode steps and the remaining draft rows are trimmed from `cache`. `onToken` receives the
+    /// tokens after each append and returns `true` to stop before that token is fed back.
+    ///
+    /// Each decode step is queued before the CPU reads the token it consumes, so the GPU works while the
+    /// CPU checks that token; a token that ends decoding discards its already-queued step.
+    public func greedyDecode(
+        logits: MLXArray, draft: [Int] = [], cache: [KVCache], maxTokens: Int,
+        isEndToken: (Int) -> Bool, onToken: ([Int]) -> Bool = { _ in false }
+    ) -> GreedyDecodeResult {
+        precondition(logits.dim(1) == draft.count + 1, "prefill logits must cover the prompt end and each draft token")
+        var result = GreedyDecodeResult()
+        let choices = logits[0].argMax(axis: -1).asType(.int32).asArray(Int32.self).map(Int.init)
+        func keepDraftRows(_ kept: Int) {
+            let rejected = draft.count - kept
+            if rejected > 0 {
+                for layerCache in cache { layerCache.trim(rejected) }
+            }
+        }
+
+        while result.acceptedDraftTokens < draft.count, result.tokens.count < maxTokens,
+              choices[result.acceptedDraftTokens] == draft[result.acceptedDraftTokens] {
+            result.tokens.append(draft[result.acceptedDraftTokens])
+            if onToken(result.tokens) {
+                result.stopped = true
+                keepDraftRows(result.acceptedDraftTokens)
+                return result
+            }
+            result.acceptedDraftTokens += 1
+        }
+        keepDraftRows(result.acceptedDraftTokens)
+        let accepted = result.acceptedDraftTokens
+        if result.tokens.count >= maxTokens {
+            result.nextLogits = logits[0..., accepted..<(accepted + 1), 0...]
+            return result
+        }
+
+        func queueStep(consuming input: MLXArray) -> (logits: MLXArray, next: MLXArray) {
+            let stepLogits = callAsFunction(inputIds: input, cache: cache)
+            let next = stepLogits[0..., -1, 0...].argMax(axis: -1).reshaped(1, 1)
+            asyncEval(next)
+            result.decodeSteps += 1
+            return (stepLogits, next)
+        }
+        func discardQueuedStep() {
+            for layerCache in cache { layerCache.trim(1) }
+        }
+
+        var input = MLXArray([Int32(choices[accepted])]).reshaped(1, 1)
+        var knownToken: Int? = choices[accepted]
+        while true {
+            let queued = knownToken == nil ? queueStep(consuming: input) : nil
+            let token = knownToken ?? input.item(Int.self)
+            knownToken = nil
+            if isEndToken(token) {
+                result.endToken = token
+                if queued != nil { discardQueuedStep() }
+                break
+            }
+            result.tokens.append(token)
+            if onToken(result.tokens) {
+                result.stopped = true
+                if queued != nil { discardQueuedStep() }
+                break
+            }
+            let step = queued ?? queueStep(consuming: input)
+            if result.tokens.count >= maxTokens {
+                result.nextLogits = step.logits
+                break
+            }
+            input = step.next
+        }
+        return result
     }
 
     // MARK: - Audio-Text Merging
@@ -1038,9 +1235,8 @@ public class Qwen3ASRModel: Module {
     private func generateSingleChunk(
         audio: MLXArray,
         maxTokens: Int,
-        temperature: Float,
         language: String
-    ) -> (text: String, promptTokens: Int, generationTokens: Int) {
+    ) throws -> (text: String, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
@@ -1051,7 +1247,7 @@ public class Qwen3ASRModel: Module {
         let inputIds = buildPrompt(numAudioTokens: numAudioTokens, language: language)
         let promptTokenCount = inputIds.dim(1)
 
-        let audioFeatures = getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
+        let audioFeatures = try getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
         eval(audioFeatures)
 
         let embeds = model.embedTokens(inputIds)
@@ -1062,32 +1258,21 @@ public class Qwen3ASRModel: Module {
         )
 
         let cache = makeCache()
-        var logits = callAsFunction(
-            inputIds: inputIds,
-            inputEmbeddings: inputsEmbeds,
-            cache: cache
-        )
+        let logits = prefill(inputEmbeddings: inputsEmbeds, cache: cache)
         eval(logits)
 
-        var generatedTokens: [Int] = []
         var consecutiveRepeatCount = 0
         var lastToken: Int = -1
         var maxConsecutiveRepeat = 0
         var repetitionLogged = false
         var blockPatternDetected = false
 
-        for i in 0..<maxTokens {
-            var lastLogits = logits[0..., -1, 0...]
-            if temperature > 0 {
-                lastLogits = lastLogits / temperature
-            }
-            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
-
-            if eosTokenIds.contains(nextToken) {
-                logger.warning("[generateSingleChunk] EOS at token \(i, privacy: .public), total=\(generatedTokens.count, privacy: .public)")
-                break
-            }
-
+        let decoded = greedyDecode(
+            logits: logits, cache: cache, maxTokens: maxTokens,
+            isEndToken: { eosTokenIds.contains($0) }
+        ) { generatedTokens in
+            let i = generatedTokens.count - 1
+            let nextToken = generatedTokens[i]
             if nextToken == lastToken {
                 consecutiveRepeatCount += 1
                 if consecutiveRepeatCount > maxConsecutiveRepeat {
@@ -1103,8 +1288,6 @@ public class Qwen3ASRModel: Module {
                 lastToken = nextToken
                 repetitionLogged = false
             }
-
-            generatedTokens.append(nextToken)
 
             if !blockPatternDetected && generatedTokens.count >= 20 && i % 50 == 0 {
                 for period in 2...6 {
@@ -1129,12 +1312,14 @@ public class Qwen3ASRModel: Module {
                 }
             }
 
-            let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
-            logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
-            eval(logits)
             if generatedTokens.count % 100 == 0 {
                 Memory.clearCache()
             }
+            return false
+        }
+        let generatedTokens = decoded.tokens
+        if decoded.endToken != nil {
+            logger.warning("[generateSingleChunk] EOS at token \(generatedTokens.count, privacy: .public), total=\(generatedTokens.count, privacy: .public)")
         }
 
         if maxConsecutiveRepeat >= 5 {
@@ -1160,7 +1345,7 @@ public class Qwen3ASRModel: Module {
         language: String = "English",
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         let startTime = Date()
 
         // Split audio into chunks
@@ -1183,10 +1368,9 @@ public class Qwen3ASRModel: Module {
             let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
             logger.warning("[generate] chunk \(chunks.firstIndex(where: { $0.1 == offsetSec }) ?? -1, privacy: .public)/\(chunks.count, privacy: .public): offset=\(String(format: "%.1f", offsetSec), privacy: .public)s, duration=\(String(format: "%.1f", actualChunkDuration), privacy: .public)s, remainingTokens=\(remainingTokens, privacy: .public)")
 
-            let result = generateSingleChunk(
+            let result = try generateSingleChunk(
                 audio: chunkAudio,
                 maxTokens: remainingTokens,
-                temperature: temperature,
                 language: language
             )
 
@@ -1272,7 +1456,7 @@ public class Qwen3ASRModel: Module {
                         totalPromptTokens += promptTokenCount
 
                         // Encode audio
-                        let audioFeatures = model.getAudioFeatures(
+                        let audioFeatures = try model.getAudioFeatures(
                             inputFeatures, featureAttentionMask: featureAttentionMask
                         )
                         eval(audioFeatures)
@@ -1285,11 +1469,7 @@ public class Qwen3ASRModel: Module {
                         )
 
                         let cache = model.makeCache()
-                        var logits = model.callAsFunction(
-                            inputIds: inputIds,
-                            inputEmbeddings: inputsEmbeds,
-                            cache: cache
-                        )
+                        var logits = model.prefill(inputEmbeddings: inputsEmbeds, cache: cache)
                         eval(logits)
 
                         var chunkTokens: [Int] = []
@@ -1519,9 +1699,13 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Model Loading
 
+    /// - Parameter audioTowerURL: compiled Core ML audio tower to run on the Neural Engine; the MLX
+    ///   audio tower weights are then left unloaded. Throws `Qwen3ASRCoreMLAudioTowerError.loadFailed`
+    ///   before loading any weights if the tower cannot be loaded.
     public static func fromPretrained(
         _ modelPath: String,
         cache: HubCache = .default,
+        audioTowerURL: URL? = nil,
         progressHandler: (@Sendable @MainActor (Progress) -> Void)? = nil
     ) async throws -> Qwen3ASRModel {
         let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
@@ -1550,6 +1734,14 @@ public class Qwen3ASRModel: Module {
 
         // Get per-layer quantization
         let perLayerQuantization = config.perLayerQuantization
+
+        let coreMLTower = try audioTowerURL.map { url in
+            do {
+                return try Qwen3ASRCoreMLAudioTower(url: url, melBins: config.audioConfig.numMelBins)
+            } catch {
+                throw Qwen3ASRCoreMLAudioTowerError.loadFailed(error)
+            }
+        }
 
         // Create model
         let model = Qwen3ASRModel(config)
@@ -1591,8 +1783,33 @@ public class Qwen3ASRModel: Module {
         }
 
         // Load weights into model
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: .all)
-        eval(model)
+        if let coreMLTower {
+            // Leave the MLX audio tower unloaded and unevaluated so its weights never occupy memory.
+            let decoderWeights = sanitizedWeights.filter { !$0.key.hasPrefix("audio_tower.") }
+            try model.update(
+                parameters: ModuleParameters.unflattened(decoderWeights),
+                verify: [.noUnusedKeys, .shapeMismatch]
+            )
+            model.audioTower.coreMLTower = coreMLTower
+            model.audioTower.loadMLXWeights = { [weak model] in
+                guard let model else { return }
+                var weights: [String: MLXArray] = [:]
+                for file in safetensorFiles {
+                    weights.merge(try MLX.loadArrays(url: file)) { _, new in new }
+                }
+                let towerWeights = Qwen3ASRModel.sanitize(weights: weights, skipLmHead: skipLmHead)
+                    .filter { $0.key.hasPrefix("audio_tower.") }
+                try model.update(
+                    parameters: ModuleParameters.unflattened(towerWeights),
+                    verify: [.noUnusedKeys, .shapeMismatch]
+                )
+                eval(model.audioTower)
+            }
+            eval(model.parameters().flattened().filter { !$0.0.hasPrefix("audio_tower.") }.map { $0.1 })
+        } else {
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: .all)
+            eval(model)
+        }
 
         return model
     }
