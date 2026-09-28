@@ -16,7 +16,11 @@ enum CoreMLAudioTowerAssets {
     ]
 
     static var installDirectory: URL {
-        MLXModelManager.modelsDirectory.appendingPathComponent("coreml")
+        installDirectory(in: MLXModelManager.modelsDirectory)
+    }
+
+    static func installDirectory(in modelsDirectory: URL) -> URL {
+        modelsDirectory.appendingPathComponent("coreml")
     }
 
     static func downloadURL(for file: String) -> URL {

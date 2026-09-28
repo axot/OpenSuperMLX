@@ -59,10 +59,48 @@ final class DiagnoseCommandTests: XCTestCase {
         XCTAssertTrue(DiagnoseCommand.collectDiagnostics().settings.neuralEngineAudioTower)
     }
 
+    // MARK: - Installed Models
+
+    func testDiagnoseListsTheModelOnceItsWeightsAreDownloaded() throws {
+        let directory = try makeModelsDirectory()
+        let model = directory.appendingPathComponent("mlx-audio/mlx-community_Qwen3-ASR-1.7B-5bit")
+        try writeFile(at: model.appendingPathComponent("config.json"))
+        XCTAssertEqual(DiagnoseCommand.listInstalledModels(in: directory), [])
+
+        try writeFile(at: model.appendingPathComponent("model.safetensors"))
+        XCTAssertEqual(DiagnoseCommand.listInstalledModels(in: directory), ["mlx-community/Qwen3-ASR-1.7B-5bit"])
+    }
+
+    func testDiagnoseListsTheInstalledNeuralEngineAudioEncoder() throws {
+        let directory = try makeModelsDirectory()
+        let model = CoreMLAudioTowerAssets.installDirectory(in: directory)
+            .appendingPathComponent(CoreMLAudioTowerAssets.modelName)
+        for file in CoreMLAudioTowerAssets.modelFiles {
+            try writeFile(at: model.appendingPathComponent(file))
+        }
+
+        XCTAssertEqual(DiagnoseCommand.listInstalledModels(in: directory), [CoreMLAudioTowerAssets.repositoryID])
+    }
+
     // MARK: - Option Parsing
 
     func testDiagnoseParses() throws {
         let command = try DiagnoseCommand.parse([])
         XCTAssertNotNil(command)
+    }
+
+    // MARK: - Helpers
+
+    private func makeModelsDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DiagnoseCommandTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private func writeFile(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: url)
     }
 }

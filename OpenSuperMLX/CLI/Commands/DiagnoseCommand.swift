@@ -104,14 +104,31 @@ struct DiagnoseCommand: ParsableCommand {
         return String(cString: buffer)
     }
 
-    private static func listInstalledModels() -> [String] {
-        let modelsDir = MLXModelManager.modelsDirectory
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: modelsDir.path) else {
-            return []
+    static func listInstalledModels(in modelsDirectory: URL = MLXModelManager.modelsDirectory) -> [String] {
+        var installed: [String] = []
+        let modelID = MLXModelManager.model.repoID
+        let modelDirectory = modelsDirectory
+            .appendingPathComponent("mlx-audio")
+            .appendingPathComponent(modelID.replacingOccurrences(of: "/", with: "_"))
+        if hasWeights(modelDirectory) {
+            installed.append(modelID)
         }
-        return contents
-            .filter { $0.hasPrefix("models--") }
-            .map { $0.replacingOccurrences(of: "models--", with: "").replacingOccurrences(of: "--", with: "/") }
+        let encoder = CoreMLAudioTowerAssets.installDirectory(in: modelsDirectory)
+            .appendingPathComponent(CoreMLAudioTowerAssets.modelName)
+        if CoreMLAudioTowerAssets.isInstalled(at: encoder) {
+            installed.append(CoreMLAudioTowerAssets.repositoryID)
+        }
+        return installed
+    }
+
+    private static func hasWeights(_ directory: URL) -> Bool {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        return files.contains { file in
+            file.pathExtension == "safetensors"
+                && ((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) > 0
+        }
     }
 
     private static func microphoneAuthStatus() -> String {
