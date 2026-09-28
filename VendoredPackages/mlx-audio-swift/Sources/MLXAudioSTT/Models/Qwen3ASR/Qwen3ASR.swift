@@ -75,7 +75,7 @@ func getFeatExtractOutputLengths(_ inputLengths: MLXArray) -> MLXArray {
     let outputLengths = (
         floorDiv(floorDiv(featLengths - 1, 2) + 1 - 1, 2)
         + 1
-        + (inputLengths / 100) * 13
+        + floorDiv(inputLengths, 100) * 13
     )
     return outputLengths
 }
