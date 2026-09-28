@@ -13,6 +13,12 @@ public enum Qwen3ASRCoreMLAudioTowerError: Error {
     case invalidOutput
 }
 
+/// The encode calls `Qwen3ASRAudioEncoder` routes to Core ML instead of its MLX weights.
+protocol Qwen3ASRCoreMLEncoding {
+    func encode(features: MLXArray, lengths: [Int]) throws -> MLXArray
+    func encodeWindow(_ melFrames: MLXArray) throws -> MLXArray
+}
+
 /// Runs the Qwen3-ASR audio tower as a Core ML program so it can execute on the Neural Engine.
 ///
 /// The program encodes one fixed 800-frame window: `mel` is `[1, nMels, 800]` (zero-padded after
@@ -20,7 +26,7 @@ public enum Qwen3ASRCoreMLAudioTowerError: Error {
 /// `audio_features` `[1, 104, outputDim]`. Padded frames sit in the same 100-frame conv chunks the
 /// MLX encoder uses and padded tokens are masked out of attention, so the first `length` tokens
 /// match the MLX encoder.
-public final class Qwen3ASRCoreMLAudioTower {
+public final class Qwen3ASRCoreMLAudioTower: Qwen3ASRCoreMLEncoding {
     static let framesPerChunk = 100
     static let tokensPerChunk = 13
     static let windowFrames = 800

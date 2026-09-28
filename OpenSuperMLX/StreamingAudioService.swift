@@ -101,6 +101,7 @@ class StreamingAudioService: ObservableObject {
     private var currentRecordingID: UUID?
     private var currentRecordingFileName: String?
     private var hasTranscriptionGaps = false
+    private var hasReportedUnavailableEncoder = false
     var transcriptSessionStore: TranscriptSessionStore = .shared
     private(set) var currentTranscriptSessionID: String?
 
@@ -1562,7 +1563,12 @@ class StreamingAudioService: ObservableObject {
                 let details = "recording=\(fileName) start_seconds=\(gap.startSeconds) end_seconds=\(gap.endSeconds) reason=\(gap.reason)"
                 logger.error("Transcription gap: \(details, privacy: .public)")
                 PipelineTrace.shared.log("TRANSCRIPTION_GAP", details)
-                ErrorToastManager.shared.show("Transcription skipped \(gap.timeRange). Continuing; audio is still being saved.")
+                if gap.reason != StreamingTranscriptionGap.audioEncoderUnavailableReason {
+                    ErrorToastManager.shared.show("Transcription skipped \(gap.timeRange). Continuing; audio is still being saved.")
+                } else if !hasReportedUnavailableEncoder {
+                    hasReportedUnavailableEncoder = true
+                    ErrorToastManager.shared.show("Transcription stopped: the audio encoder can't be loaded. Audio is still being saved. Restart the app to reload the model.")
+                }
             }
             if AppPreferences.shared.debugMode {
                 logger.debug(
@@ -1583,6 +1589,7 @@ class StreamingAudioService: ObservableObject {
     @discardableResult
     func beginTranscriptSession(startedAt: Date = Date()) -> String {
         hasTranscriptionGaps = false
+        hasReportedUnavailableEncoder = false
         let sessionID = transcriptSessionStore.startSession(startedAt: startedAt)
         currentTranscriptSessionID = sessionID
         return sessionID
@@ -1673,6 +1680,7 @@ class StreamingAudioService: ObservableObject {
 
     private func clearState() {
         hasTranscriptionGaps = false
+        hasReportedUnavailableEncoder = false
         confirmedText = ""
         provisionalText = ""
         recordingStartTime = nil

@@ -42,8 +42,8 @@ final class BenchmarkTests: XCTestCase {
         return audio
     }
 
-    private func transcribe(model: Qwen3ASRModel, audio: MLXArray) -> STTOutput {
-        model.generate(audio: audio, language: "English")
+    private func transcribe(model: Qwen3ASRModel, audio: MLXArray) throws -> STTOutput {
+        try model.generate(audio: audio, language: "English")
     }
 
     // MARK: - Baseline
@@ -95,13 +95,13 @@ final class BenchmarkTests: XCTestCase {
         let model = try await loadModel()
 
         // Warmup
-        _ = transcribe(model: model, audio: audio)
+        _ = try transcribe(model: model, audio: audio)
         Memory.clearCache()
 
         var latencies: [Double] = []
         for _ in 0..<3 {
             let start = Date()
-            let output = transcribe(model: model, audio: audio)
+            let output = try transcribe(model: model, audio: audio)
             let elapsed = Date().timeIntervalSince(start)
             latencies.append(output.totalTime > 0 ? output.totalTime : elapsed)
             Memory.clearCache()
@@ -127,13 +127,13 @@ final class BenchmarkTests: XCTestCase {
         let model = try await loadModel()
 
         // Warmup to stabilize allocations
-        _ = transcribe(model: model, audio: audio)
+        _ = try transcribe(model: model, audio: audio)
         Memory.clearCache()
 
         GPU.resetPeakMemory()
         let memoryBefore = Memory.peakMemory
 
-        _ = transcribe(model: model, audio: audio)
+        _ = try transcribe(model: model, audio: audio)
 
         let peakBytes = Memory.peakMemory
         let deltaMB = Double(peakBytes - memoryBefore) / 1_048_576.0
@@ -157,7 +157,7 @@ final class BenchmarkTests: XCTestCase {
         let audio = try loadJFKAudio()
         let model = try await loadModel()
 
-        let output = transcribe(model: model, audio: audio)
+        let output = try transcribe(model: model, audio: audio)
         Memory.clearCache()
 
         let text = output.text
@@ -183,7 +183,7 @@ final class BenchmarkTests: XCTestCase {
         let audio = try loadJFKAudio()
         let model = try await loadModel()
 
-        let output = model.generate(audio: audio, language: "auto")
+        let output = try model.generate(audio: audio, language: "auto")
         Memory.clearCache()
 
         guard let detectedLanguage = output.language else {

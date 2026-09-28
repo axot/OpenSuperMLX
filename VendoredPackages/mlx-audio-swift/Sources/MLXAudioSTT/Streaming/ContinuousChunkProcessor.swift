@@ -41,7 +41,7 @@ protocol StreamingChunkProcessing: AnyObject {
     var allDecodedTokens: [Int] { get }
     func processChunk(
         melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool
-    ) -> ChunkProcessingResult
+    ) throws -> ChunkProcessingResult
     func recoveryMel(from startFrame: Int) -> MLXArray?
     func finalizeAccepted() -> ChunkProcessingResult
 }
@@ -98,14 +98,14 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
     func processChunk(
         melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool = false
-    ) -> ChunkProcessingResult {
+    ) throws -> ChunkProcessingResult {
         defer { chunkIndex += 1 }
         let chunkStart = ContinuousClock.now
 
         accumulateMel(melFrames)
-        encodeCompleteWindows()
+        try encodeCompleteWindows()
 
-        guard let audioFeatures = assembleAudioFeatures() else {
+        guard let audioFeatures = try assembleAudioFeatures() else {
             cpLogger.info("chunk[\(self.chunkIndex)] coldStart: accMel=\(self.accumulatedMelFrameCount) encWin=\(self.encodedWindowCount)")
             return ChunkProcessingResult(
                 confirmedTokens: [], provisionalTokens: [],
@@ -306,7 +306,7 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
     // MARK: - Encoder Window Management
 
-    private func encodeCompleteWindows() {
+    private func encodeCompleteWindows() throws {
         let windowSize = config.encoderWindowSizeMelFrames
         let totalComplete = Self.computeCompleteWindowCount(
             totalMelFrames: accumulatedMelFrameCount, windowSize: windowSize
@@ -317,7 +317,7 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
             let windowEnd = windowStart + windowSize
             let windowMel = accumulatedMel![windowStart..<windowEnd]
 
-            let encoderOutput = model.audioTower.encodeSingleWindow(windowMel)
+            let encoderOutput = try model.audioTower.encodeSingleWindow(windowMel)
             eval(encoderOutput)
 
             encoderCache.addWindow(CachedWindow(
@@ -332,13 +332,13 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
     // MARK: - Audio Feature Assembly
 
-    private func assembleAudioFeatures() -> MLXArray? {
+    private func assembleAudioFeatures() throws -> MLXArray? {
         let windowSize = config.encoderWindowSizeMelFrames
         let tailStart = encodedWindowCount * windowSize
 
         if tailStart < accumulatedMelFrameCount {
             let tailMel = accumulatedMel![tailStart..<accumulatedMelFrameCount]
-            let tailOutput = model.audioTower.encodeSingleWindow(tailMel)
+            let tailOutput = try model.audioTower.encodeSingleWindow(tailMel)
             eval(tailOutput)
 
             if let cachedOutput = encoderCache.concatenatedOutput() {

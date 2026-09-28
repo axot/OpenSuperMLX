@@ -175,9 +175,18 @@ public class StreamingInferenceSession: @unchecked Sendable {
         let startTime = Date()
         let lang = effectiveLanguage
         var replacingTranscript = false
-        var result = processor.processChunk(
-            melFrames: melFrames, language: lang, isFinal: isFinal, isRecovery: false
-        )
+        var result: ChunkProcessingResult
+        do {
+            result = try processor.processChunk(
+                melFrames: melFrames, language: lang, isFinal: isFinal, isRecovery: false
+            )
+        } catch {
+            skipFailedRecovery(
+                frozenText: windowRecovery.acceptedText, startFrame: windowRecovery.acceptedFrame,
+                endFrame: processor.endMelFrame, reason: Self.gapReason(for: error)
+            )
+            return
+        }
         if result.action == .repetitionDetected {
             guard let checkpoint = windowRecovery.begin(
                 endFrame: processor.endMelFrame, availableStartFrame: processor.melFrameOffset
@@ -205,9 +214,18 @@ public class StreamingInferenceSession: @unchecked Sendable {
                 )
                 return
             }
-            let candidate = replacement.processChunk(
-                melFrames: replay, language: lang, isFinal: isFinal, isRecovery: true
-            )
+            let candidate: ChunkProcessingResult
+            do {
+                candidate = try replacement.processChunk(
+                    melFrames: replay, language: lang, isFinal: isFinal, isRecovery: true
+                )
+            } catch {
+                skipFailedRecovery(
+                    frozenText: checkpoint.text, startFrame: checkpoint.frame,
+                    endFrame: processor.endMelFrame, reason: Self.gapReason(for: error)
+                )
+                return
+            }
             guard candidate.action == .normal else {
                 skipFailedRecovery(
                     frozenText: checkpoint.text, startFrame: checkpoint.frame,
@@ -369,6 +387,11 @@ public class StreamingInferenceSession: @unchecked Sendable {
             Self.logger.warning("No-decode watchdog: \(String(format: "%.1f", Double(self.processedMelFrameCount - self.lastDecodeMelFrame) / 100.0), privacy: .public)s without decode output — resetting inference context")
             resetInferenceContext()
         }
+    }
+
+    private static func gapReason(for error: Error) -> String {
+        error is Qwen3ASRAudioTowerUnavailableError
+            ? StreamingTranscriptionGap.audioEncoderUnavailableReason : "chunk_processing_failed"
     }
 
     private func skipFailedRecovery(frozenText: String, startFrame: Int, endFrame: Int, reason: String) {

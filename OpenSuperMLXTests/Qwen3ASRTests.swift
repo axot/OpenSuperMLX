@@ -258,6 +258,63 @@ final class Qwen3ASRGreedyDecodeTests: XCTestCase {
     }
 }
 
+// MARK: - Audio Tower Fallback
+
+final class Qwen3ASRAudioTowerFallbackTests: XCTestCase {
+    private var model: Qwen3ASRModel!
+    private var mel: MLXArray!
+
+    override func setUp() {
+        super.setUp()
+        model = TinyQwen3ASR.make(seed: 5)
+        mel = MLXRandom.normal([200, model.config.audioConfig.numMelBins], key: MLXRandom.key(3))
+    }
+
+    func testFailingCoreMLTowerFallsBackToTheMLXWeights() throws {
+        let expected = try model.audioTower.encodeSingleWindow(mel)
+        var reportedFailures = 0
+        model.audioTower.coreMLTower = FailingCoreMLTower()
+        model.audioTower.loadMLXWeights = {}
+        model.audioTower.onCoreMLFailure = { _ in reportedFailures += 1 }
+
+        TinyQwen3ASR.assertClose(try model.audioTower.encodeSingleWindow(mel), expected)
+        XCTAssertNil(model.audioTower.coreMLTower)
+        XCTAssertEqual(reportedFailures, 1)
+    }
+
+    func testAudioTowerThrowsWhenNeitherTowerCanRun() {
+        model.audioTower.coreMLTower = FailingCoreMLTower()
+        model.audioTower.loadMLXWeights = { throw TowerFailure.missingWeights }
+
+        XCTAssertThrowsError(try model.audioTower.encodeSingleWindow(mel)) { error in
+            XCTAssertTrue(error is Qwen3ASRAudioTowerUnavailableError, "\(error)")
+        }
+    }
+
+    func testUnavailableAudioTowerKeepsFailingWithoutReloading() {
+        var loadAttempts = 0
+        model.audioTower.coreMLTower = FailingCoreMLTower()
+        model.audioTower.loadMLXWeights = {
+            loadAttempts += 1
+            throw TowerFailure.missingWeights
+        }
+        _ = try? model.audioTower.encodeSingleWindow(mel)
+
+        XCTAssertThrowsError(try model.audioTower(mel.transposed().expandedDimensions(axis: 0)))
+        XCTAssertEqual(loadAttempts, 1)
+    }
+}
+
+private struct FailingCoreMLTower: Qwen3ASRCoreMLEncoding {
+    func encode(features: MLXArray, lengths: [Int]) throws -> MLXArray { throw TowerFailure.prediction }
+    func encodeWindow(_ melFrames: MLXArray) throws -> MLXArray { throw TowerFailure.prediction }
+}
+
+private enum TowerFailure: Error {
+    case prediction
+    case missingWeights
+}
+
 // MARK: - Tiny Random Model
 
 enum TinyQwen3ASR {

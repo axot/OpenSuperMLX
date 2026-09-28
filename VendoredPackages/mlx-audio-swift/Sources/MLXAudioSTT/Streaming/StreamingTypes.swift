@@ -93,6 +93,9 @@ public struct StreamingStats: Sendable {
 // MARK: - Transcription Gaps
 
 public struct StreamingTranscriptionGap: Sendable, Equatable, Encodable {
+    /// Every later chunk of the session is skipped with this reason too.
+    public static let audioEncoderUnavailableReason = "audio_encoder_unavailable"
+
     public let startSeconds: Double
     public let endSeconds: Double
     public let reason: String

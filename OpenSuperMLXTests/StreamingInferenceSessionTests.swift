@@ -424,6 +424,25 @@ final class StreamingInferenceSessionGapTests: XCTestCase {
         }
     }
 
+    func testUnavailableAudioEncoderSkipsEveryLaterChunkAndKeepsAcceptedText() async {
+        let probe = RecoveryProbe(fails: false)
+        probe.encoderFailsAfterFrame = 400
+        let session = makeSession(probe)
+        let eventsTask = Task { await collect(session.events) }
+        session.feedAudio(samples: Array(repeating: 0.01, count: 160_000))
+        session.stop()
+        let events = await eventsTask.value
+        let gaps = recoveryGaps(events)
+
+        XCTAssertEqual(Set(gaps.map(\.reason)), [StreamingTranscriptionGap.audioEncoderUnavailableReason])
+        XCTAssertEqual(gaps.first?.startSeconds, 4)
+        XCTAssertGreaterThanOrEqual(gaps.last?.endSeconds ?? 0, 10)
+        for (previous, next) in zip(gaps, gaps.dropFirst()) {
+            XCTAssertEqual(previous.endSeconds, next.startSeconds)
+        }
+        XCTAssertEqual(endedText(events), ["before tail"])
+    }
+
     private func recoveryGaps(_ events: [TranscriptionEvent]) -> [StreamingTranscriptionGap] {
         events.compactMap {
             if case .stats(let stats) = $0 { return stats.recoveryGap }
@@ -513,6 +532,7 @@ private final class RecoveryProbe: @unchecked Sendable {
     var additionalFailureFrames: Set<Int> = []
     var failedRecoveryFrames: Set<Int> = []
     var unavailableReason: String?
+    var encoderFailsAfterFrame: Int?
 
     init(
         fails: Bool, shrinksConfirmedPrefix: Bool = false, pendingRecoveryText: String? = nil,
@@ -545,11 +565,15 @@ private final class RecoveryProcessor: StreamingChunkProcessing {
 
     func processChunk(
         melFrames: MLXArray, language: String, isFinal: Bool, isRecovery: Bool
-    ) -> ChunkProcessingResult {
+    ) throws -> ChunkProcessingResult {
         let start = endMelFrame
         endMelFrame += melFrames.dim(0)
         chunkIndex += 1
         probe.calls.append(.init(start: start, end: endMelFrame, isRecovery: isRecovery))
+        if let frame = probe.encoderFailsAfterFrame, endMelFrame > frame {
+            let cause = CocoaError(.fileNoSuchFile)
+            throw Qwen3ASRAudioTowerUnavailableError(coreMLError: cause, mlxWeightsError: cause)
+        }
         if melFrameOffset == 0 && probe.factoryOffsets.filter({ $0 == 0 }).count > 1,
            let text = probe.resumeAfterWatchdog {
             return result(text, pending: "", action: .normal)

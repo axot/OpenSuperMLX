@@ -361,11 +361,11 @@ public class Qwen3ForcedAlignerModel: Module {
         inputIds: MLXArray,
         inputFeatures: MLXArray? = nil,
         featureAttentionMask: MLXArray? = nil
-    ) -> MLXArray {
+    ) throws -> MLXArray {
         var inputsEmbeds = model.embedTokens(inputIds)
 
         if let features = inputFeatures {
-            let audioFeatures = audioTower(features, featureAttentionMask: featureAttentionMask)
+            let audioFeatures = try audioTower(features, featureAttentionMask: featureAttentionMask)
                 .asType(inputsEmbeds.dtype)
 
             let flatMask = (inputIds .== MLXArray(Int32(config.audioTokenId))).reshaped(-1)
@@ -438,7 +438,7 @@ public class Qwen3ForcedAlignerModel: Module {
         audio: MLXArray,
         text: String,
         language: String = "English"
-    ) -> ForcedAlignResult {
+    ) throws -> ForcedAlignResult {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
@@ -459,7 +459,7 @@ public class Qwen3ForcedAlignerModel: Module {
         let inputIds = MLXArray(inputIdsList.map { Int32($0) }).expandedDimensions(axis: 0)
         let promptTokenCount = inputIds.dim(1)
 
-        let logits = callAsFunction(
+        let logits = try callAsFunction(
             inputIds: inputIds,
             inputFeatures: inputFeatures,
             featureAttentionMask: featureAttentionMask

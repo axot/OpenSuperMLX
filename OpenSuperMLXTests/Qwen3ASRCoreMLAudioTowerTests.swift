@@ -45,7 +45,7 @@ final class Qwen3ASRCoreMLAudioTowerTests: XCTestCase {
 
         for frames in [250, 800] {
             let mel = MLXRandom.uniform(low: -1, high: 1, [frames, melBins], key: MLXRandom.key(UInt64(frames)))
-            let reference = model.audioTower.encodeSingleWindow(mel).asType(.float32)
+            let reference = try model.audioTower.encodeSingleWindow(mel).asType(.float32)
             let candidate = try tower.encodeWindow(mel).asType(.float32)
             XCTAssertEqual(candidate.shape, reference.shape, "frames=\(frames)")
 

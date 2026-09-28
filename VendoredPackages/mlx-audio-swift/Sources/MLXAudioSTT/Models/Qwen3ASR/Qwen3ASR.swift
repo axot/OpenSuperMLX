@@ -43,8 +43,8 @@ extension Qwen3ASRModel: STTGenerationModel {
         )
     }
 
-    public func generate(audio: MLXArray, generationParameters: STTGenerateParameters) -> STTOutput {
-        generate(
+    public func generate(audio: MLXArray, generationParameters: STTGenerateParameters) throws -> STTOutput {
+        try generate(
             audio: audio,
             maxTokens: generationParameters.maxTokens,
             temperature: generationParameters.temperature,
@@ -326,6 +326,17 @@ class Qwen3ASRAudioEncoderLayer: Module {
 
 // MARK: - Audio Encoder
 
+/// The Core ML audio tower failed and its MLX weights could not be loaded, so no audio can be encoded.
+public struct Qwen3ASRAudioTowerUnavailableError: LocalizedError {
+    public let coreMLError: Error
+    public let mlxWeightsError: Error
+
+    public var errorDescription: String? {
+        "The audio encoder can't run: the Neural Engine encoder failed and the GPU encoder's weights "
+            + "could not be loaded (\(mlxWeightsError.localizedDescription))."
+    }
+}
+
 public class Qwen3ASRAudioEncoder: Module {
     let config: Qwen3AudioEncoderConfig
     let nWindow: Int
@@ -343,17 +354,20 @@ public class Qwen3ASRAudioEncoder: Module {
     let positionalEmbedding: Qwen3ASRSinusoidalPE
 
     /// When set, both encode paths run on Core ML instead of these MLX weights.
-    var coreMLTower: Qwen3ASRCoreMLAudioTower?
+    var coreMLTower: (any Qwen3ASRCoreMLEncoding)?
     /// Loads the MLX weights that were skipped while Core ML was active.
     var loadMLXWeights: (() throws -> Void)?
     var onCoreMLFailure: ((Error) -> Void)?
     private let coreMLLock = NSLock()
+    private var unavailableError: Qwen3ASRAudioTowerUnavailableError?
 
     /// Runs `body` on the Core ML tower; on failure switches permanently to the MLX weights
-    /// and returns nil so the caller continues on MLX.
-    private func coreMLEncode(_ body: (Qwen3ASRCoreMLAudioTower) throws -> MLXArray) -> MLXArray? {
+    /// and returns nil so the caller continues on MLX. If those weights cannot be loaded, every
+    /// later call throws, because the skipped MLX weights must never run.
+    private func coreMLEncode(_ body: (any Qwen3ASRCoreMLEncoding) throws -> MLXArray) throws -> MLXArray? {
         coreMLLock.lock()
         defer { coreMLLock.unlock() }
+        if let unavailableError { throw unavailableError }
         guard let tower = coreMLTower else { return nil }
         do {
             return try body(tower)
@@ -362,7 +376,9 @@ public class Qwen3ASRAudioEncoder: Module {
             do {
                 try loadMLXWeights?()
             } catch let loadError {
-                fatalError("Neither the Core ML nor the MLX audio tower is usable: \(error); \(loadError)")
+                let failure = Qwen3ASRAudioTowerUnavailableError(coreMLError: error, mlxWeightsError: loadError)
+                unavailableError = failure
+                throw failure
             }
             onCoreMLFailure?(error)
             return nil
@@ -446,7 +462,7 @@ public class Qwen3ASRAudioEncoder: Module {
     public func callAsFunction(
         _ inputFeatures: MLXArray,
         featureAttentionMask: MLXArray? = nil
-    ) -> MLXArray {
+    ) throws -> MLXArray {
         // inputFeatures shape: [batch, n_mels, n_frames]
         let batchSize = inputFeatures.dim(0)
         let nFrames = inputFeatures.dim(2)
@@ -460,7 +476,7 @@ public class Qwen3ASRAudioEncoder: Module {
             featureLens = [Int](repeating: nFrames, count: batchSize)
         }
 
-        if let output = coreMLEncode({ try $0.encode(features: inputFeatures, lengths: featureLens) }) {
+        if let output = try coreMLEncode({ try $0.encode(features: inputFeatures, lengths: featureLens) }) {
             return output
         }
 
@@ -620,8 +636,8 @@ public class Qwen3ASRAudioEncoder: Module {
     /// - Parameter melFrames: Mel spectrogram frames `[numFrames, nMels]` where numFrames ≤ nWindowInfer (800).
     ///   Frames are automatically split into conv-sized chunks internally.
     /// - Returns: Encoded features `[numTokens, outputDim]`
-    public func encodeSingleWindow(_ melFrames: MLXArray) -> MLXArray {
-        if let output = coreMLEncode({ try $0.encodeWindow(melFrames) }) {
+    public func encodeSingleWindow(_ melFrames: MLXArray) throws -> MLXArray {
+        if let output = try coreMLEncode({ try $0.encodeWindow(melFrames) }) {
             return output
         }
         let mel = melFrames.asType(.bfloat16)
@@ -922,8 +938,8 @@ public class Qwen3ASRModel: Module {
     public func getAudioFeatures(
         _ inputFeatures: MLXArray,
         featureAttentionMask: MLXArray? = nil
-    ) -> MLXArray {
-        return audioTower(inputFeatures, featureAttentionMask: featureAttentionMask)
+    ) throws -> MLXArray {
+        return try audioTower(inputFeatures, featureAttentionMask: featureAttentionMask)
     }
 
     // MARK: - Forward Pass
@@ -931,10 +947,21 @@ public class Qwen3ASRModel: Module {
     public func callAsFunction(
         inputIds: MLXArray,
         inputEmbeddings: MLXArray? = nil,
-        inputFeatures: MLXArray? = nil,
-        featureAttentionMask: MLXArray? = nil,
         cache: [KVCache]? = nil
     ) -> MLXArray {
+        let inputsEmbeds = inputEmbeddings ?? model.embedTokens(inputIds)
+        let hiddenStates = model(inputsEmbeds: inputsEmbeds, cache: cache)
+        return vocabularyLogits(hiddenStates)
+    }
+
+    /// Encodes `inputFeatures` into the audio placeholder rows on the first pass, then decodes.
+    public func callAsFunction(
+        inputIds: MLXArray,
+        inputEmbeddings: MLXArray? = nil,
+        inputFeatures: MLXArray,
+        featureAttentionMask: MLXArray? = nil,
+        cache: [KVCache]? = nil
+    ) throws -> MLXArray {
         var inputsEmbeds: MLXArray
         if let embeddings = inputEmbeddings {
             inputsEmbeds = embeddings
@@ -942,10 +969,8 @@ public class Qwen3ASRModel: Module {
             inputsEmbeds = model.embedTokens(inputIds)
         }
 
-        // Encode and merge audio features on first pass
-        if let features = inputFeatures,
-           cache == nil || cache?.first == nil || (cache?.first as? KVCacheSimple)?.offset == 0 {
-            let audioFeatures = getAudioFeatures(features, featureAttentionMask: featureAttentionMask)
+        if cache == nil || cache?.first == nil || (cache?.first as? KVCacheSimple)?.offset == 0 {
+            let audioFeatures = try getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
                 .asType(inputsEmbeds.dtype)
 
             inputsEmbeds = mergeAudioFeatures(
@@ -955,8 +980,7 @@ public class Qwen3ASRModel: Module {
             )
         }
 
-        let hiddenStates = model(inputsEmbeds: inputsEmbeds, cache: cache)
-        return vocabularyLogits(hiddenStates)
+        return callAsFunction(inputIds: inputIds, inputEmbeddings: inputsEmbeds, cache: cache)
     }
 
     // Quantized matmuls run in 32-row tiles; passes under 8 tiles lose GPU efficiency per tile.
@@ -1209,7 +1233,7 @@ public class Qwen3ASRModel: Module {
         maxTokens: Int,
         temperature: Float,
         language: String
-    ) -> (text: String, promptTokens: Int, generationTokens: Int) {
+    ) throws -> (text: String, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
@@ -1220,7 +1244,7 @@ public class Qwen3ASRModel: Module {
         let inputIds = buildPrompt(numAudioTokens: numAudioTokens, language: language)
         let promptTokenCount = inputIds.dim(1)
 
-        let audioFeatures = getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
+        let audioFeatures = try getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
         eval(audioFeatures)
 
         let embeds = model.embedTokens(inputIds)
@@ -1318,7 +1342,7 @@ public class Qwen3ASRModel: Module {
         language: String = "English",
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         let startTime = Date()
 
         // Split audio into chunks
@@ -1341,7 +1365,7 @@ public class Qwen3ASRModel: Module {
             let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
             logger.warning("[generate] chunk \(chunks.firstIndex(where: { $0.1 == offsetSec }) ?? -1, privacy: .public)/\(chunks.count, privacy: .public): offset=\(String(format: "%.1f", offsetSec), privacy: .public)s, duration=\(String(format: "%.1f", actualChunkDuration), privacy: .public)s, remainingTokens=\(remainingTokens, privacy: .public)")
 
-            let result = generateSingleChunk(
+            let result = try generateSingleChunk(
                 audio: chunkAudio,
                 maxTokens: remainingTokens,
                 temperature: temperature,
@@ -1430,7 +1454,7 @@ public class Qwen3ASRModel: Module {
                         totalPromptTokens += promptTokenCount
 
                         // Encode audio
-                        let audioFeatures = model.getAudioFeatures(
+                        let audioFeatures = try model.getAudioFeatures(
                             inputFeatures, featureAttentionMask: featureAttentionMask
                         )
                         eval(audioFeatures)

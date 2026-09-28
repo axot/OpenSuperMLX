@@ -113,7 +113,7 @@ class MLXEngine: TranscriptionEngine {
         }
         logger.info("Generating with language: \(language, privacy: .public), maxTokens: \(maxTokens, privacy: .public), chunks: ~\(expectedChunks, privacy: .public), chunkDuration: \(chunkDuration, privacy: .public)s")
         let startTime = Date()
-        let output = model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
+        let output = try model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
         let elapsed = Date().timeIntervalSince(startTime)
         logger.info("Generate completed in \(String(format: "%.1f", elapsed), privacy: .public)s, tokens: \(output.totalTokens, privacy: .public), text length: \(output.text.count, privacy: .public)")
         if AppPreferences.shared.debugMode {
