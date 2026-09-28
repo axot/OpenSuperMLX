@@ -84,7 +84,7 @@ final class AppPreferences {
         }
     }
     
-    @UserDefault(key: "useNeuralEngineAudioTower", defaultValue: false)
+    @UserDefault(key: "useNeuralEngineAudioTower", defaultValue: true)
     var useNeuralEngineAudioTower: Bool
     
     @UserDefault(key: "mlxLanguage", defaultValue: "auto")

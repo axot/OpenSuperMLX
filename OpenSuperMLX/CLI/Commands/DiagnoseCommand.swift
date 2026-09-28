@@ -82,7 +82,7 @@ struct DiagnoseCommand: ParsableCommand {
             ),
             settings: DiagnoseResult.SettingsSummary(
                 model: MLXModelManager.model.repoID,
-                neuralEngineAudioTower: AppPreferences.store.bool(forKey: "useNeuralEngineAudioTower"),
+                neuralEngineAudioTower: AppPreferences.shared.useNeuralEngineAudioTower,
                 language: AppPreferences.store.string(forKey: "mlxLanguage") ?? "auto",
                 streaming: AppPreferences.store.object(forKey: "useStreamingTranscription") != nil
                     ? AppPreferences.store.bool(forKey: "useStreamingTranscription")

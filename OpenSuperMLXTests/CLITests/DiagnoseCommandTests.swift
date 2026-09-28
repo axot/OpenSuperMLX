@@ -44,6 +44,21 @@ final class DiagnoseCommandTests: XCTestCase {
         XCTAssertNotNil(json["settings"] as? [String: Any])
     }
 
+    // MARK: - Settings
+
+    func testDiagnoseReportsNeuralEngineAudioTowerOnWhenUnset() {
+        let suiteName = "DiagnoseCommandTests.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        AppPreferences.store = defaults
+        defer {
+            AppPreferences.store = .standard
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        XCTAssertTrue(DiagnoseCommand.collectDiagnostics().settings.neuralEngineAudioTower)
+    }
+
     // MARK: - Option Parsing
 
     func testDiagnoseParses() throws {

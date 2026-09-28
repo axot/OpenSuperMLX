@@ -81,7 +81,7 @@ final class AppPreferencesTests: XCTestCase {
 
     // MARK: - Neural Engine Audio Tower
 
-    func testNeuralEngineAudioTowerIsOffByDefault() {
-        XCTAssertFalse(AppPreferences.shared.useNeuralEngineAudioTower)
+    func testNeuralEngineAudioTowerIsOnByDefault() {
+        XCTAssertTrue(AppPreferences.shared.useNeuralEngineAudioTower)
     }
 }
