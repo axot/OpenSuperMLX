@@ -103,7 +103,7 @@ public class IncrementalMelSpectrogram {
         }
 
         // Calculate how many complete frames we can compute
-        let numFrames = max(0, (signal.count - nFft) / hopLength + 1)
+        let numFrames = signal.count >= nFft ? (signal.count - nFft) / hopLength + 1 : 0
         guard numFrames > 0 else {
             // Not enough samples yet - save everything as overlap
             overlapBuffer = signal
