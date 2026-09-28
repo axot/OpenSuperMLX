@@ -959,13 +959,30 @@ public class Qwen3ASRModel: Module {
         return vocabularyLogits(hiddenStates)
     }
 
+    // Quantized matmuls run in 32-row tiles; passes under 8 tiles lose GPU efficiency per tile.
+    public static let prefillRowsPerPass = 256
+
     /// Runs the decoder over a prompt and returns logits for its last `logitsRows` positions only.
     /// Projecting the other rows onto the vocabulary would add about a fifth of the decoder layers'
-    /// compute and allocate `rows × vocabSize` logits that are never read.
-    public func prefill(inputEmbeddings: MLXArray, cache: [KVCache], logitsRows: Int = 1) -> MLXArray {
-        let hiddenStates = model(inputsEmbeds: inputEmbeddings, cache: cache)
-        let rows = hiddenStates.dim(1)
-        return vocabularyLogits(hiddenStates[0..., (rows - min(logitsRows, rows))..., 0...])
+    /// compute and allocate `rows × vocabSize` logits that are never read. Rows are processed in
+    /// passes of at most `maxRowsPerPass`, which bounds activation memory for long prompts.
+    public func prefill(
+        inputEmbeddings: MLXArray, cache: [KVCache], logitsRows: Int = 1,
+        maxRowsPerPass: Int = Qwen3ASRModel.prefillRowsPerPass
+    ) -> MLXArray {
+        let rows = inputEmbeddings.dim(1)
+        let logitsRows = min(logitsRows, rows)
+        let finalPassStart = min(rows - logitsRows, (rows - 1) / maxRowsPerPass * maxRowsPerPass)
+        var start = 0
+        while start < finalPassStart {
+            let end = min(start + maxRowsPerPass, finalPassStart)
+            _ = model(inputsEmbeds: inputEmbeddings[0..., start..<end, 0...], cache: cache)
+            eval(cache.flatMap { $0.innerState() })
+            start = end
+        }
+        let hiddenStates = model(inputsEmbeds: inputEmbeddings[0..., finalPassStart..., 0...], cache: cache)
+        let finalRows = hiddenStates.dim(1)
+        return vocabularyLogits(hiddenStates[0..., (finalRows - logitsRows)..., 0...])
     }
 
     private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {

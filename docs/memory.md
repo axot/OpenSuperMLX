@@ -23,6 +23,7 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | Neural Engine audio encoder (when enabled) | ~300 MB INT8, replaces the ~635 MB MLX encoder | Core ML, mapped outside the app's footprint |
 | Encoder cache (4 windows) | ~60 MB | GPU, bounded by `maxEncoderWindows` |
 | KV cache (decoder) | ~100-200 MB | GPU, bounded by sliding window + prefix cap |
+| Decoder prefill transient | ~1.2 MB per row, ≤ ~350 MB per 256-row pass | GPU, freed after each prefill pass |
 | Encoder transient (per window) | ~95 MB | GPU, freed after each encoder forward pass |
 | Audio samples (`[Float]`) | ~5 MB/min | CPU, proportional to input duration |
 | Mel spectrogram tail | <0.4 MB | GPU, truncated each reset cycle |
@@ -30,6 +31,8 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | Swift runtime + dylibs | ~200 MB | CPU |
 
 Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug build, M1 Max): **~2,230 MB median / 2,720 MB max** with the GPU encoder and **~1,620 MB median / 2,110 MB max** with the Neural Engine encoder. The previous Qwen3-ASR-1.7B-8bit build measured ~2,840 MB median / 3,240 MB max.
+
+Capping prefill passes at 256 rows and computing logits only for the rows that need them lowered the peak on a 43 s clip (Release build, Neural Engine encoder) from ~2,120 MB to ~1,720 MB, and on a 5-minute file transcription from ~3,560 MB to ~2,370 MB.
 
 ### Encoder dtype
 
@@ -79,6 +82,7 @@ The streaming pipeline (`ContinuousChunkProcessor`) must maintain O(1) memory re
 2. **Encoder cache**: sliding window, max `maxEncoderWindows` (default 4)
 3. **KV cache**: rebuilt from bounded context after each reset — prefix capped at `maxPrefixTokens` (150)
 4. **MLX cache**: cleared via `Memory.clearCache()` in `reset()` and after each decode pass
+5. **Prefill**: `Qwen3ASRModel.prefill` runs at most `prefillRowsPerPass` (256) rows per pass and projects only the last rows onto the vocabulary, so rebuilding the prompt after a window eviction stays bounded. Smaller passes cost GPU efficiency: matmuls run in 32-row tiles, and passes under 8 tiles are slower per tile.
 
 Periodic reset fires every `resetIntervalChunks` chunks (default 45 × 2s = 90s). Between resets, mel grows to ~9,000 frames (~4.6 MB) which is acceptable.
 

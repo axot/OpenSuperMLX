@@ -73,6 +73,36 @@ final class Qwen3ASRPrefillTests: XCTestCase {
             model.callAsFunction(inputIds: token, cache: fullCache)
         )
     }
+
+    // MARK: - Bounded Passes
+
+    func testSplitPrefillMatchesSinglePass() {
+        let embeds = TinyQwen3ASR.embeddings(rows: 70)
+        let singleCache = model.makeCache()
+        let single = model.prefill(inputEmbeddings: embeds, cache: singleCache, logitsRows: 3, maxRowsPerPass: .max)
+        let splitCache = model.makeCache()
+
+        let split = model.prefill(inputEmbeddings: embeds, cache: splitCache, logitsRows: 3, maxRowsPerPass: 32)
+
+        TinyQwen3ASR.assertClose(split, single)
+        XCTAssertEqual(splitCache[0].offset, 70)
+        let token = MLXArray([Int32(5)]).reshaped(1, 1)
+        TinyQwen3ASR.assertClose(
+            model.callAsFunction(inputIds: token, cache: splitCache),
+            model.callAsFunction(inputIds: token, cache: singleCache)
+        )
+    }
+
+    func testSplitPrefillKeepsRequestedRowsInFinalPass() {
+        let embeds = TinyQwen3ASR.embeddings(rows: 67)
+        let full = model.callAsFunction(
+            inputIds: TinyQwen3ASR.placeholderIds(67), inputEmbeddings: embeds, cache: model.makeCache()
+        )
+
+        let trailing = model.prefill(inputEmbeddings: embeds, cache: model.makeCache(), logitsRows: 5, maxRowsPerPass: 32)
+
+        TinyQwen3ASR.assertClose(trailing, full[0..., 62..., 0...])
+    }
 }
 
 // MARK: - Tiny Random Model
