@@ -973,6 +973,18 @@ public class Qwen3ASRModel: Module {
         let rows = inputEmbeddings.dim(1)
         let logitsRows = min(logitsRows, rows)
         let finalPassStart = min(rows - logitsRows, (rows - 1) / maxRowsPerPass * maxRowsPerPass)
+        // A full KVCacheSimple copies itself into a new buffer one `step` larger, so growing it
+        // pass by pass would copy the whole cache every pass. Size its next growth for the prompt.
+        let growingCaches = finalPassStart > 0 ? cache.compactMap { $0 as? KVCacheSimple } : []
+        let steps = growingCaches.map(\.step)
+        for (layerCache, step) in zip(growingCaches, steps) {
+            layerCache.step = (rows + step - 1) / step * step
+        }
+        defer {
+            for (layerCache, step) in zip(growingCaches, steps) {
+                layerCache.step = step
+            }
+        }
         var start = 0
         while start < finalPassStart {
             let end = min(start + maxRowsPerPass, finalPassStart)

@@ -103,6 +103,17 @@ final class Qwen3ASRPrefillTests: XCTestCase {
 
         TinyQwen3ASR.assertClose(trailing, full[0..., 62..., 0...])
     }
+
+    func testSplitPrefillAllocatesTheCacheOnceForTheWholePrompt() throws {
+        let cache = model.makeCache()
+
+        _ = model.prefill(inputEmbeddings: TinyQwen3ASR.embeddings(rows: 600), cache: cache, maxRowsPerPass: 100)
+
+        let layer = try XCTUnwrap(cache[0] as? KVCacheSimple)
+        // Growing by the 256-row step pass after pass would end at 656 rows after three copies.
+        XCTAssertEqual(layer.innerState()[0].dim(2), 768)
+        XCTAssertEqual(layer.step, 256)
+    }
 }
 
 // MARK: - Greedy Decode

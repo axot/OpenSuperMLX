@@ -34,6 +34,8 @@ Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug
 
 Capping prefill passes at 256 rows and computing logits only for the rows that need them lowered the peak on a 43 s clip (Release build, Neural Engine encoder) from ~2,120 MB to ~1,720 MB, and on a 5-minute file transcription from ~3,560 MB to ~2,370 MB.
 
+A multi-pass prefill grows each KV cache once for the whole prompt. Growing it by the default 256-row step instead reallocates and copies the whole cache on every pass. Measured on prefill alone (Debug test build, M1 Max), sizing it up front lowered the peak for a 3,900-row prompt (5 minutes of audio) from ~2,710 MB to ~2,540 MB. For a 15,600-row prompt (a 20-minute chunk) the peak fell from ~4,080 MB to ~3,680 MB, and the time from 19–27 s to ~16 s.
+
 ### Encoder dtype
 
 The audio encoder weights are bfloat16. Mel spectrogram input is cast to bfloat16 at the entry of `encodeSingleWindow` to match — otherwise MLX promotes all intermediates to float32, doubling transient memory. The sinusoidal positional embedding is also cast to match (`posEmb.asType(x.dtype)`).
