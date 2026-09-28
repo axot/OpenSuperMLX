@@ -2,6 +2,7 @@
 // OpenSuperMLX
 
 import Foundation
+import os
 
 /// The compiled Core ML audio tower for the Neural Engine, downloaded on first use.
 enum CoreMLAudioTowerAssets {
@@ -14,6 +15,8 @@ enum CoreMLAudioTowerAssets {
         "model.mil",
         "weights/weight.bin",
     ]
+
+    typealias ProgressHandler = @Sendable @MainActor (Progress) -> Void
 
     static var installDirectory: URL {
         installDirectory(in: MLXModelManager.modelsDirectory)
@@ -38,7 +41,8 @@ enum CoreMLAudioTowerAssets {
     /// interrupted download never leaves a partial model in place.
     static func resolve(
         in directory: URL = installDirectory,
-        fetch: (URL, URL) async throws -> Void = download
+        progressHandler: ProgressHandler? = nil,
+        fetch: (URL, URL, ProgressHandler?) async throws -> Void = download
     ) async throws -> URL {
         let modelURL = directory.appendingPathComponent(modelName)
         if isInstalled(at: modelURL) {
@@ -53,7 +57,7 @@ enum CoreMLAudioTowerAssets {
                     at: destination.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
-                try await fetch(downloadURL(for: file), destination)
+                try await fetch(downloadURL(for: file), destination, progressHandler)
             }
             guard isInstalled(at: staging) else {
                 throw CocoaError(.fileReadCorruptFile)
@@ -67,12 +71,51 @@ enum CoreMLAudioTowerAssets {
         }
     }
 
-    static func download(from remote: URL, to destination: URL) async throws {
-        let (temporary, response) = try await URLSession.shared.download(from: remote)
+    /// Reports the file's byte progress every 200 ms, like the MLX model download, and once when done.
+    static func download(from remote: URL, to destination: URL, progressHandler: ProgressHandler?) async throws {
+        let observer = DownloadTaskObserver()
+        let reporting = progressHandler.map { handler in
+            Task {
+                while !Task.isCancelled {
+                    if let progress = observer.updatedProgress() {
+                        await handler(progress)
+                    }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+        }
+        defer { reporting?.cancel() }
+
+        let (temporary, response) = try await URLSession.shared.download(from: remote, delegate: observer)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             try? FileManager.default.removeItem(at: temporary)
             throw URLError(.badServerResponse)
         }
         try FileManager.default.moveItem(at: temporary, to: destination)
+        if let progressHandler, let progress = observer.updatedProgress() {
+            await progressHandler(progress)
+        }
+    }
+}
+
+// MARK: - Download Progress
+
+/// Counts the bytes of the task that `URLSession.download(from:delegate:)` creates. That task's own
+/// `progress` lags far behind the bytes received, and the async API never calls `didWriteData`.
+private final class DownloadTaskObserver: NSObject, URLSessionTaskDelegate, Sendable {
+    private let task = OSAllocatedUnfairLock<URLSessionTask?>(initialState: nil)
+    private let progress = Progress(totalUnitCount: -1)
+
+    func updatedProgress() -> Progress? {
+        guard let task = task.withLock({ $0 }) else { return nil }
+        if task.countOfBytesExpectedToReceive > 0 {
+            progress.totalUnitCount = task.countOfBytesExpectedToReceive
+        }
+        progress.completedUnitCount = task.countOfBytesReceived
+        return progress
+    }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        self.task.withLock { $0 = task }
     }
 }

@@ -35,7 +35,7 @@ class MLXEngine: TranscriptionEngine {
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
         let audioTowerURL = await Self.neuralEngineAudioTowerURL(
             enabled: AppPreferences.shared.useNeuralEngineAudioTower,
-            resolve: { try await CoreMLAudioTowerAssets.resolve() },
+            resolve: { try await CoreMLAudioTowerAssets.resolve(progressHandler: downloadProgressHandler) },
             onFallback: Self.reportNeuralEngineFallback
         )
         let model: Qwen3ASRModel

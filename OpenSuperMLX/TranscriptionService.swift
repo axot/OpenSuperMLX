@@ -18,8 +18,9 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var progress: Float = 0.0
     @Published private(set) var downloadProgress: Double?
 
-    /// Highest download fraction seen this load — keeps the bar monotonic across
-    /// HuggingFace's per-file Progress objects (each restarts at 0).
+    /// Loading may download the Neural Engine encoder's files and then the model, each with its
+    /// own Progress. The bar restarts for each one and never moves back within one.
+    private var currentDownload: Progress?
     private var maxDownloadProgress: Double = 0
 
     private var currentEngine: TranscriptionEngine?
@@ -75,14 +76,7 @@ class TranscriptionService: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let engine = await MLXEngine()
             engine.downloadProgressHandler = { [weak self] progress in
-                let fraction = progress.fractionCompleted
-                logger.info("Download: \(Int(fraction * 100))% (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
-                guard let self else { return }
-                // Monotonic: ignore per-file resets so the bar never jumps back to 0%.
-                if fraction > self.maxDownloadProgress {
-                    self.maxDownloadProgress = fraction
-                    self.downloadProgress = fraction
-                }
+                self?.updateDownloadProgress(progress)
             }
             
             do {
@@ -106,6 +100,19 @@ class TranscriptionService: ObservableObject {
         }
     }
     
+    func updateDownloadProgress(_ progress: Progress) {
+        let fraction = progress.fractionCompleted
+        logger.info("Download: \(Int(fraction * 100))% (\(progress.completedUnitCount)/\(progress.totalUnitCount))")
+        if progress !== currentDownload {
+            currentDownload = progress
+            maxDownloadProgress = 0
+        }
+        if fraction > maxDownloadProgress {
+            maxDownloadProgress = fraction
+            downloadProgress = fraction
+        }
+    }
+
     func reloadEngine() {
         guard !isTranscribing else {
             logger.warning("Cannot reload engine while transcribing")
