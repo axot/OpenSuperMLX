@@ -40,7 +40,7 @@ enum SettingsSubtab: Int, CaseIterable, Identifiable {
 struct SettingsRedesignView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject private var transcriptionService = TranscriptionService.shared
-    @ObservedObject private var streamingService = StreamingAudioService.shared
+    @State private var isStreaming = StreamingAudioService.shared.isStreaming
     @State private var subtab: SettingsSubtab = .shortcuts
 
     var body: some View {
@@ -63,6 +63,7 @@ struct SettingsRedesignView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DesignTokens.bg)
+        .onReceive(StreamingAudioService.shared.$isStreaming) { isStreaming = $0 }
     }
 
     private var header: some View {
@@ -163,7 +164,7 @@ struct SettingsRedesignView: View {
                 ) {
                     DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
                         .disabled(
-                            streamingService.isStreaming
+                            isStreaming
                                 || transcriptionService.isTranscribing
                                 || transcriptionService.isLoading
                         )
