@@ -129,21 +129,24 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
         )
 
         let prefixTokenIds = buildPrefixTokenIds()
-        if !prefixTokenIds.isEmpty {
-            let prefixMLX = MLXArray(prefixTokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
-            let prefixEmbeds = model.model.embedTokens(prefixMLX)
-            inputsEmbeds = MLX.concatenated([inputsEmbeds, prefixEmbeds], axis: 1)
+        let draftTokenIds = isRecovery || prefixTokenIds.isEmpty
+            ? [] : Array(allDecodedTokens.suffix(min(config.rollbackTokens, allDecodedTokens.count)))
+        let conditioningTokenIds = prefixTokenIds + draftTokenIds
+        if !conditioningTokenIds.isEmpty {
+            let conditioningMLX = MLXArray(conditioningTokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
+            let conditioningEmbeds = model.model.embedTokens(conditioningMLX)
+            inputsEmbeds = MLX.concatenated([inputsEmbeds, conditioningEmbeds], axis: 1)
         }
 
         eval(inputsEmbeds)
 
         let prefillStart = ContinuousClock.now
-        let logits = prefillWithEmbeddingDiff(inputsEmbeds)
+        let logits = prefillWithEmbeddingDiff(inputsEmbeds, draftRows: draftTokenIds.count)
         let prefillMs = prefillStart.duration(to: .now).milliseconds
         let decodeStart = ContinuousClock.now
         let historyText = tokenizer.decode(tokens: Self.filterTextTokens(prefixTokenIds))
         let decoded = decodeTokens(
-            initialLogits: logits, historyText: historyText,
+            initialLogits: logits, draft: draftTokenIds, historyText: historyText,
             maxTokens: isRecovery ? 256 : config.maxNewTokensPerChunk, verifyEndAtLimit: isRecovery
         )
         let rawNewTokenIds = decoded.tokens
@@ -377,13 +380,13 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
 
     // MARK: - KV Cache Reuse via Embedding Diff
 
-    private func prefillWithEmbeddingDiff(_ inputsEmbeds: MLXArray) -> MLXArray {
+    private func prefillWithEmbeddingDiff(_ inputsEmbeds: MLXArray, draftRows: Int) -> MLXArray {
         var matchedRows = Self.findEmbeddingPrefixMatch(
             current: inputsEmbeds, previous: prevPrefillEmbeds
         )
 
         let seqLen = inputsEmbeds.dim(1)
-        matchedRows = min(matchedRows, seqLen - 1)
+        matchedRows = min(matchedRows, seqLen - draftRows - 1)
 
         let logits: MLXArray
 
@@ -399,62 +402,54 @@ class ContinuousChunkProcessor: StreamingChunkProcessing {
             }
 
             let newEmbeds = inputsEmbeds[0..., matchedRows..<seqLen, 0...]
-            logits = model.prefill(inputEmbeddings: newEmbeds, cache: cache)
+            logits = model.prefill(inputEmbeddings: newEmbeds, cache: cache, logitsRows: draftRows + 1)
         } else {
             cpLogger.info("chunk[\(self.chunkIndex, privacy: .public)] prefill: full (no reuse) seqLen=\(seqLen, privacy: .public) matched=\(matchedRows, privacy: .public) hadPrev=\(self.prevPrefillEmbeds != nil, privacy: .public)")
             let cache = model.makeCache()
             decoderCache = cache
-            logits = model.prefill(inputEmbeddings: inputsEmbeds, cache: cache)
+            logits = model.prefill(inputEmbeddings: inputsEmbeds, cache: cache, logitsRows: draftRows + 1)
         }
 
         eval(logits)
         Memory.clearCache()
-        prevPrefillEmbeds = inputsEmbeds
+        // Rejected draft rows are trimmed from the cache, so the next chunk must not match against them.
+        prevPrefillEmbeds = inputsEmbeds[0..., 0..<(seqLen - draftRows), 0...]
         return logits
     }
 
     // MARK: - Token Decoding
 
     private func decodeTokens(
-        initialLogits: MLXArray, historyText: String, maxTokens: Int, verifyEndAtLimit: Bool
+        initialLogits: MLXArray, draft: [Int], historyText: String, maxTokens: Int, verifyEndAtLimit: Bool
     ) -> (tokens: [Int], hitMaxTokens: Bool, repeated: Bool) {
-        var logits = initialLogits
-        var newTokenIds: [Int] = []
-        var eosToken: Int?
         var detector = StreamingRepetitionDetector()
-
-        for _ in 0..<maxTokens {
-            let lastLogits = logits[0..., -1, 0...]
-            let nextToken = lastLogits.argMax(axis: -1).item(Int.self)
-
-            if Self.eosTokenIds.contains(nextToken) {
-                eosToken = nextToken
-                break
+        let checksRepetition = config.repetitionRecoveryEnabled && !historyText.isEmpty
+        let decoded = model.greedyDecode(
+            logits: initialLogits, draft: draft, cache: decoderCache!, maxTokens: maxTokens,
+            isEndToken: { Self.eosTokenIds.contains($0) },
+            onToken: { tokens in
+                guard checksRepetition else { return false }
+                let text = self.tokenizer.decode(tokens: Self.filterTextTokens(tokens))
+                guard let match = detector.update(history: historyText, query: text) else { return false }
+                cpLogger.warning("repetition: endMelFrame=\(self.endMelFrame, privacy: .public) token=\(tokens.count, privacy: .public) bytes=\(match.utf8Bytes, privacy: .public) edits=\(match.edits, privacy: .public) history=\(match.historyRange.lowerBound, privacy: .public)..<\(match.historyRange.upperBound, privacy: .public) new=\(match.queryRange.lowerBound, privacy: .public)..<\(match.queryRange.upperBound, privacy: .public)")
+                return true
             }
-
-            newTokenIds.append(nextToken)
-            if config.repetitionRecoveryEnabled && !historyText.isEmpty {
-                let text = tokenizer.decode(tokens: Self.filterTextTokens(newTokenIds))
-                if let match = detector.update(history: historyText, query: text) {
-                    cpLogger.warning("repetition: endMelFrame=\(self.endMelFrame, privacy: .public) token=\(newTokenIds.count, privacy: .public) bytes=\(match.utf8Bytes, privacy: .public) edits=\(match.edits, privacy: .public) history=\(match.historyRange.lowerBound, privacy: .public)..<\(match.historyRange.upperBound, privacy: .public) new=\(match.queryRange.lowerBound, privacy: .public)..<\(match.queryRange.upperBound, privacy: .public)")
-                    return (newTokenIds, false, true)
-                }
-            }
-
-            let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
-            logits = model.callAsFunction(inputIds: nextTokenArray, cache: decoderCache)
-            eval(logits)
+        )
+        let newTokenIds = decoded.tokens
+        if decoded.stopped {
+            return (newTokenIds, false, true)
         }
 
-        if eosToken == nil && verifyEndAtLimit {
-            let nextToken = logits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
+        var eosToken = decoded.endToken
+        if eosToken == nil && verifyEndAtLimit, let nextLogits = decoded.nextLogits {
+            let nextToken = nextLogits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
             if Self.eosTokenIds.contains(nextToken) { eosToken = nextToken }
         }
         let hitMax = eosToken == nil && newTokenIds.count >= maxTokens
         if hitMax {
             cpLogger.info("chunk[\(self.chunkIndex)] decode: hitMaxTokens (\(maxTokens)), no EOS found")
         } else if let eos = eosToken {
-            cpLogger.info("chunk[\(self.chunkIndex)] decode: EOS=\(eos) after \(newTokenIds.count) tokens")
+            cpLogger.info("chunk[\(self.chunkIndex)] decode: EOS=\(eos) after \(newTokenIds.count) tokens, \(decoded.acceptedDraftTokens)/\(draft.count) draft tokens accepted")
         }
 
         Memory.clearCache()

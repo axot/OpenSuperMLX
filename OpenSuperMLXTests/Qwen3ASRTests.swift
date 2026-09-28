@@ -105,17 +105,139 @@ final class Qwen3ASRPrefillTests: XCTestCase {
     }
 }
 
+// MARK: - Greedy Decode
+
+final class Qwen3ASRGreedyDecodeTests: XCTestCase {
+    private let promptRows = 9
+    private var model: Qwen3ASRModel!
+    private var prompt: MLXArray!
+    private var reference: [Int] = []
+
+    override func setUp() {
+        super.setUp()
+        model = TinyQwen3ASR.make(seed: 11, tiedEmbeddings: false)
+        prompt = TinyQwen3ASR.embeddings(rows: promptRows)
+        reference = sequentialGreedy(count: 12)
+        XCTAssertGreaterThan(Set(reference).count, 3, "the fixture must decode varied tokens")
+    }
+
+    func testDecodeWithoutDraftMatchesSequentialGreedy() {
+        let (result, cacheOffset) = decode(draft: [], maxTokens: 12)
+
+        XCTAssertEqual(result.tokens, reference)
+        XCTAssertEqual(result.decodeSteps, 12)
+        XCTAssertEqual(cacheOffset, promptRows + 12)
+        XCTAssertNotNil(result.nextLogits)
+    }
+
+    func testMatchingDraftPrefixIsAcceptedWithoutDecodeSteps() {
+        let draft = Array(reference.prefix(3)) + [wrongToken(for: reference[3])]
+
+        let (result, cacheOffset) = decode(draft: draft, maxTokens: 12)
+
+        XCTAssertEqual(result.tokens, reference)
+        XCTAssertEqual(result.acceptedDraftTokens, 3)
+        XCTAssertEqual(result.decodeSteps, 9)
+        XCTAssertEqual(cacheOffset, promptRows + 12)
+    }
+
+    func testFullyMatchingDraftIsAccepted() {
+        let (result, cacheOffset) = decode(draft: Array(reference.prefix(5)), maxTokens: 12)
+
+        XCTAssertEqual(result.tokens, reference)
+        XCTAssertEqual(result.acceptedDraftTokens, 5)
+        XCTAssertEqual(result.decodeSteps, 7)
+        XCTAssertEqual(cacheOffset, promptRows + 12)
+    }
+
+    func testRejectedDraftFallsBackToModelChoice() {
+        let draft = [wrongToken(for: reference[0]), reference[1]]
+
+        let (result, cacheOffset) = decode(draft: draft, maxTokens: 12)
+
+        XCTAssertEqual(result.tokens, reference)
+        XCTAssertEqual(result.acceptedDraftTokens, 0)
+        XCTAssertEqual(cacheOffset, promptRows + 12)
+    }
+
+    func testEndTokenStopsWithoutFeedingIt() throws {
+        let end = try XCTUnwrap((1..<reference.count).first { !reference[..<$0].contains(reference[$0]) })
+
+        let (result, cacheOffset) = decode(draft: Array(reference.prefix(1)), maxTokens: 12, endToken: reference[end])
+
+        XCTAssertEqual(result.tokens, Array(reference.prefix(end)))
+        XCTAssertEqual(result.endToken, reference[end])
+        XCTAssertNil(result.nextLogits)
+        XCTAssertEqual(cacheOffset, promptRows + end)
+    }
+
+    func testStopCallbackEndsBeforeFeedingTheToken() {
+        let (result, cacheOffset) = decode(draft: [], maxTokens: 12, stopAfter: 3)
+
+        XCTAssertEqual(result.tokens, Array(reference.prefix(3)))
+        XCTAssertTrue(result.stopped)
+        XCTAssertEqual(cacheOffset, promptRows + 2)
+    }
+
+    func testStopInsideAcceptedDraftTrimsRemainingDraftRows() {
+        let (result, cacheOffset) = decode(draft: Array(reference.prefix(5)), maxTokens: 12, stopAfter: 3)
+
+        XCTAssertEqual(result.tokens, Array(reference.prefix(3)))
+        XCTAssertTrue(result.stopped)
+        XCTAssertEqual(cacheOffset, promptRows + 2)
+    }
+
+    // MARK: - Helpers
+
+    private func sequentialGreedy(count: Int) -> [Int] {
+        let cache = model.makeCache()
+        var logits = model.callAsFunction(
+            inputIds: TinyQwen3ASR.placeholderIds(promptRows), inputEmbeddings: prompt, cache: cache
+        )
+        var tokens: [Int] = []
+        for _ in 0..<count {
+            let token = logits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
+            tokens.append(token)
+            logits = model.callAsFunction(inputIds: MLXArray([Int32(token)]).reshaped(1, 1), cache: cache)
+            eval(logits)
+        }
+        return tokens
+    }
+
+    private func decode(
+        draft: [Int], maxTokens: Int, endToken: Int? = nil, stopAfter: Int? = nil
+    ) -> (Qwen3ASRModel.GreedyDecodeResult, Int) {
+        let cache = model.makeCache()
+        var embeds: MLXArray = prompt
+        if !draft.isEmpty {
+            let ids = MLXArray(draft.map { Int32($0) }).reshaped(1, draft.count)
+            embeds = MLX.concatenated([prompt, model.model.embedTokens(ids)], axis: 1)
+        }
+        let logits = model.prefill(inputEmbeddings: embeds, cache: cache, logitsRows: draft.count + 1)
+        let result = model.greedyDecode(
+            logits: logits, draft: draft, cache: cache, maxTokens: maxTokens,
+            isEndToken: { $0 == endToken },
+            onToken: { $0.count == stopAfter }
+        )
+        return (result, cache[0].offset)
+    }
+
+    private func wrongToken(for token: Int) -> Int {
+        (token + 1) % TinyQwen3ASR.vocabularySize
+    }
+}
+
 // MARK: - Tiny Random Model
 
 enum TinyQwen3ASR {
     static let vocabularySize = 97
     static let hiddenSize = 32
 
-    static func make(seed: UInt64) -> Qwen3ASRModel {
+    static func make(seed: UInt64, tiedEmbeddings: Bool = true) -> Qwen3ASRModel {
         MLXRandom.seed(seed)
         let text = Qwen3TextConfig(
             vocabSize: vocabularySize, hiddenSize: hiddenSize, intermediateSize: 64, numHiddenLayers: 2,
-            numAttentionHeads: 4, numKeyValueHeads: 2, headDim: 8
+            numAttentionHeads: 4, numKeyValueHeads: 2, headDim: 8, tieWordEmbeddings: tiedEmbeddings
         )
         let audio = Qwen3AudioEncoderConfig(
             encoderLayers: 1, encoderAttentionHeads: 2, encoderFfnDim: 32, dModel: 16,
@@ -123,6 +245,7 @@ enum TinyQwen3ASR {
         )
         let model = Qwen3ASRModel(Qwen3ASRConfig(audioConfig: audio, textConfig: text))
         eval(model.model)
+        if let lmHead = model.lmHead { eval(lmHead) }
         return model
     }
 

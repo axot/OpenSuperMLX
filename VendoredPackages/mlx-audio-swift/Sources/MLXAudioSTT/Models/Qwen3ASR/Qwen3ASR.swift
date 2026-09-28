@@ -985,6 +985,74 @@ public class Qwen3ASRModel: Module {
         return vocabularyLogits(hiddenStates[0..., (finalRows - logitsRows)..., 0...])
     }
 
+    public struct GreedyDecodeResult {
+        public var tokens: [Int] = []
+        public var endToken: Int?
+        public var stopped = false
+        public var acceptedDraftTokens = 0
+        public var decodeSteps = 0
+        /// Logits after the last token when decoding stopped at `maxTokens`.
+        public var nextLogits: MLXArray?
+    }
+
+    /// Greedy decoding after `prefill`, whose `logits` cover the prompt's last position followed by one
+    /// position per `draft` token. The longest draft prefix matching the model's own choices is accepted
+    /// without decode steps and the remaining draft rows are trimmed from `cache`. `onToken` receives the
+    /// tokens after each append and returns `true` to stop before that token is fed back.
+    public func greedyDecode(
+        logits: MLXArray, draft: [Int] = [], cache: [KVCache], maxTokens: Int,
+        isEndToken: (Int) -> Bool, onToken: ([Int]) -> Bool = { _ in false }
+    ) -> GreedyDecodeResult {
+        precondition(logits.dim(1) == draft.count + 1, "prefill logits must cover the prompt end and each draft token")
+        var result = GreedyDecodeResult()
+        let choices = logits[0].argMax(axis: -1).asType(.int32).asArray(Int32.self).map(Int.init)
+        func keepDraftRows(_ kept: Int) {
+            let rejected = draft.count - kept
+            if rejected > 0 {
+                for layerCache in cache { layerCache.trim(rejected) }
+            }
+        }
+
+        while result.acceptedDraftTokens < draft.count, result.tokens.count < maxTokens,
+              choices[result.acceptedDraftTokens] == draft[result.acceptedDraftTokens] {
+            result.tokens.append(draft[result.acceptedDraftTokens])
+            if onToken(result.tokens) {
+                result.stopped = true
+                keepDraftRows(result.acceptedDraftTokens)
+                return result
+            }
+            result.acceptedDraftTokens += 1
+        }
+        keepDraftRows(result.acceptedDraftTokens)
+        let accepted = result.acceptedDraftTokens
+        if result.tokens.count >= maxTokens {
+            result.nextLogits = logits[0..., accepted..<(accepted + 1), 0...]
+            return result
+        }
+
+        var token = choices[accepted]
+        while true {
+            if isEndToken(token) {
+                result.endToken = token
+                break
+            }
+            result.tokens.append(token)
+            if onToken(result.tokens) {
+                result.stopped = true
+                break
+            }
+            let stepLogits = callAsFunction(inputIds: MLXArray([Int32(token)]).reshaped(1, 1), cache: cache)
+            eval(stepLogits)
+            result.decodeSteps += 1
+            if result.tokens.count >= maxTokens {
+                result.nextLogits = stepLogits
+                break
+            }
+            token = stepLogits[0..., -1, 0...].argMax(axis: -1).item(Int.self)
+        }
+        return result
+    }
+
     private func vocabularyLogits(_ hiddenStates: MLXArray) -> MLXArray {
         if let lmHead = lmHead {
             return lmHead(hiddenStates)
