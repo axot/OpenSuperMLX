@@ -14,6 +14,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
     
     func show(nearPoint point: NSPoint? = nil) -> IndicatorViewModel {
         KeyboardShortcuts.enable(.escape)
+        RecordingActivity.shared.report(self, isActive: true)
 
         viewModel?.cleanup()
         let newViewModel = IndicatorViewModel()
@@ -90,10 +91,13 @@ class IndicatorWindowManager: IndicatorViewDelegate {
             
             await viewModel.hideWithAnimation()
             viewModel.cleanup()
-            
+            // A newer session may have started during the hide animation; its own hide tears it down.
+            guard self.viewModel === viewModel else { return }
+
             self.window?.contentView = nil
             self.window?.orderOut(nil)
             self.viewModel = nil
+            RecordingActivity.shared.report(self, isActive: false)
             
             NotificationCenter.default.post(name: .indicatorWindowDidHide, object: nil)
         }

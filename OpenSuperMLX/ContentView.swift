@@ -18,7 +18,13 @@ import KeyboardShortcuts
 class ContentViewModel: ObservableObject {
     // MARK: - State
 
-    @Published var state: RecordingState = .idle
+    @Published var state: RecordingState = .idle {
+        didSet {
+            if (oldValue == .idle) != (state == .idle) {
+                RecordingActivity.shared.report(self, isActive: state != .idle)
+            }
+        }
+    }
     @Published var isBlinking = false
     let transcriptionService = TranscriptionService.shared
     let transcriptionQueue = TranscriptionQueue.shared

@@ -243,6 +243,7 @@ OpenSuperMLX/                    # Main app target
 │       ├── BenchmarkCommand.swift
 │       └── DiagnoseCommand.swift
 ├── Services/
+│   ├── AppUpdater.swift           # Sparkle updates; defers the dialog and relaunch while recording
 │   ├── AudioMixer.swift           # Multi-source audio mixing
 │   ├── BedrockLLMProvider.swift   # AWS Bedrock LLM provider
 │   ├── LLMCorrectionService.swift # Post-transcription LLM correction
@@ -295,7 +296,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 
 ## Dependencies
 
-- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime, ArgumentParser
+- **SPM**: GRDB.swift, KeyboardShortcuts, AWSBedrockRuntime, ArgumentParser, Sparkle
 - **Vendored**: mlx-audio-swift at `VendoredPackages/mlx-audio-swift/`
 - **System frameworks**: Metal, Accelerate, AVFoundation, CoreAudio, ApplicationServices, Carbon
 - **Git submodules**: `asian-autocorrect` (Rust autocorrect dylib), `text-processing-rs` (Rust English ITN dylib) — both bridged through `Bridge.h`; `WeTextProcessing` (C++ Chinese ITN processor, built via cmake)
