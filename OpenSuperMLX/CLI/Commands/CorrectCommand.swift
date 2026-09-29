@@ -72,15 +72,23 @@ struct CorrectCommand: ParsableCommand {
             AppPreferences.shared.customCorrectionPrompt = customPrompt
         }
 
-        let corrected = await service.correctTranscription(inputText, forceEnabled: true)
-        guard service.lastErrorMessage == nil else {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let outcome = await service.correct(inputText, forceEnabled: true)
+        let processingTime = CFAbsoluteTimeGetCurrent() - startTime
+
+        if outcome.errorMessage != nil, !outcome.correctedAnything {
             return .failure(.llmCorrectionFailed)
         }
 
         return .success(CorrectResult(
             originalText: inputText,
-            correctedText: corrected,
-            provider: AppPreferences.shared.llmProvider
+            correctedText: outcome.text,
+            provider: AppPreferences.shared.llmProvider,
+            mode: outcome.mode.rawValue,
+            chunkCount: outcome.chunkCount,
+            failedChunkCount: outcome.failedChunkCount,
+            processingTimeSeconds: processingTime,
+            warning: outcome.errorMessage
         ))
     }
 }
@@ -91,10 +99,20 @@ struct CorrectResult: Encodable {
     let originalText: String
     let correctedText: String
     let provider: String
+    let mode: String
+    let chunkCount: Int
+    let failedChunkCount: Int
+    let processingTimeSeconds: Double
+    let warning: String?
 
     enum CodingKeys: String, CodingKey {
         case originalText = "original_text"
         case correctedText = "corrected_text"
         case provider
+        case mode
+        case chunkCount = "chunk_count"
+        case failedChunkCount = "failed_chunk_count"
+        case processingTimeSeconds = "processing_time_s"
+        case warning
     }
 }

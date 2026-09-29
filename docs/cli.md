@@ -34,7 +34,7 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 |---|---|---|
 | `transcribe <file>` | Transcribe one audio file | `--language`, `--no-correction`, `--temperature` |
 | `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--chunk-duration`, `--disable-repetition-recovery` |
-| `correct <text>` | Apply configured LLM correction | `--file`, `--provider`, `--prompt` |
+| `correct <text>` | Apply configured LLM correction (pass `""` as `<text>` with `--file`) | `--file`, `--provider`, `--prompt` |
 | `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
 | `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
 | `queue` | Manage imported-file transcription | `add <files>...`, `status`, `process` |
@@ -44,6 +44,31 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 | `diagnose` | Print an environment snapshot | No command-specific arguments |
 
 Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for generated usage and defaults.
+
+### LLM correction sizing
+
+`correct` and every app path (streaming stop, file import, queue, regenerate) run the same flow after
+transcription ends. The provider's **Model Limits** settings (`openAIContextTokens` /
+`openAIMaxOutputTokens` / `openAIThinkingEnabled` / `openAIThinkingEffort`, and the `bedrock…` equivalents)
+decide how much text one request can correct:
+
+- Tokens are estimated as 1 per CJK character, ½ per other non-ASCII character and ¼ per ASCII character.
+- Capacity is the smaller of `(max output − thinking reserve) / 1.1` and
+  `(context − prompt − thinking reserve) / 2.1`, times 0.8.
+- A transcript within capacity is corrected in one request (`mode: "single"`). A longer one is split at
+  sentence ends into the fewest balanced chunks that fit and corrected one by one (`mode: "chunked"`).
+  A custom prompt runs once per chunk.
+- If a single request is truncated, times out, returns suspiciously short output, or hits a token-limit
+  error, a transcript of at least 1,000 tokens is retried in at least two chunks.
+- A failed chunk keeps its original text. Network errors stop the remaining chunks; a token-limit error on
+  the first chunk stops with a hint to lower the limits.
+- Thinking parameters the model rejects are dropped automatically and remembered until the app restarts.
+  `openAIExtraBody` (a JSON object) is merged into every request and disables that fallback when it sets
+  `reasoning_effort`, `reasoning`, `thinking` or `output_config` itself.
+
+`correct "" --file transcript.txt --json` reports `mode`, `chunk_count`, `failed_chunk_count`, `processing_time_s`
+and, when some chunks failed, `warning`. It exits with `llm_correction_failed` only when nothing was
+corrected.
 
 ### Streaming repetition recovery
 
@@ -164,7 +189,7 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 |---|---|
 | Transcription, model, ITN | `transcribe <audio> --json` |
 | Streaming pipeline | `stream-simulate <audio> --json` |
-| LLM correction | `correct "text" --json` |
+| LLM correction | `correct "text" --json`; long text: `correct "" --file transcript.txt --json` |
 | Settings / AppPreferences | `config get <key>` |
 | Recordings DB | `recordings list --json` |
 | Audio devices | `mic list --json` |

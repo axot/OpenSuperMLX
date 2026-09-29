@@ -292,6 +292,8 @@ struct SettingsRedesignView: View {
                 openAIConfig
             }
 
+            modelLimitsCard
+
             correctionPromptCard
         }
     }
@@ -338,9 +340,18 @@ struct SettingsRedesignView: View {
         SettingsGroup(title: "OpenAI Configuration") {
             SettingsField(label: "Presets") {
                 HStack(spacing: 6) {
-                    presetButton("OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini")
-                    presetButton("Ollama", baseURL: "http://localhost:11434/v1", model: "llama3.2", clearAPIKey: true)
-                    presetButton("LM Studio", baseURL: "http://localhost:1234/v1", model: "local-model", clearAPIKey: true)
+                    presetButton(
+                        "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini",
+                        contextTokens: 131_072, maxOutputTokens: 16_384
+                    )
+                    presetButton(
+                        "Ollama", baseURL: "http://localhost:11434/v1", model: "llama3.2",
+                        contextTokens: 8192, maxOutputTokens: 4096, clearAPIKey: true
+                    )
+                    presetButton(
+                        "LM Studio", baseURL: "http://localhost:1234/v1", model: "local-model",
+                        contextTokens: 8192, maxOutputTokens: 4096, clearAPIKey: true
+                    )
                 }
             }
             SettingsFieldDivider()
@@ -359,17 +370,121 @@ struct SettingsRedesignView: View {
             SettingsField(label: "Custom Headers") {
                 DesignTextField(text: $viewModel.openAICustomHeaders, prompt: "{\"key\":\"value\"}")
             }
+            SettingsFieldDivider()
+            SettingsField(
+                label: "Extra Body",
+                detail: isExtraBodyValid ? "JSON merged into every request" : "Not a valid JSON object; ignored"
+            ) {
+                DesignTextField(text: $viewModel.openAIExtraBody, prompt: "{\"key\":\"value\"}")
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(DesignTokens.red, lineWidth: isExtraBodyValid ? 0 : 1)
+                    )
+            }
         }
     }
 
-    private func presetButton(_ name: String, baseURL: String, model: String, clearAPIKey: Bool = false) -> some View {
+    private var isExtraBodyValid: Bool {
+        viewModel.openAIExtraBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !OpenAICompatibleLLMProvider.parseJSONObject(viewModel.openAIExtraBody).isEmpty
+    }
+
+    private func presetButton(
+        _ name: String,
+        baseURL: String,
+        model: String,
+        contextTokens: Int,
+        maxOutputTokens: Int,
+        clearAPIKey: Bool = false
+    ) -> some View {
         Button(name) {
             viewModel.openAIBaseURL = baseURL
             viewModel.openAIModel = model
             viewModel.openAIAPIProtocol = OpenAIAPIProtocol.chatCompletions.rawValue
+            viewModel.openAIContextTokens = contextTokens
+            viewModel.openAIMaxOutputTokens = maxOutputTokens
+            viewModel.openAIThinkingEnabled = false
             if clearAPIKey { viewModel.openAIAPIKey = "" }
         }
         .controlSize(.small)
+    }
+
+    // MARK: - Model Limits
+
+    private var isOpenAIProvider: Bool {
+        LLMProviderType(rawValue: viewModel.llmProvider) == .openai
+    }
+
+    private var thinkingEnabled: Binding<Bool> {
+        isOpenAIProvider ? $viewModel.openAIThinkingEnabled : $viewModel.bedrockThinkingEnabled
+    }
+
+    private var thinkingEffort: Binding<String> {
+        isOpenAIProvider ? $viewModel.openAIThinkingEffort : $viewModel.bedrockThinkingEffort
+    }
+
+    private var contextTokens: Binding<Int> {
+        isOpenAIProvider ? $viewModel.openAIContextTokens : $viewModel.bedrockContextTokens
+    }
+
+    private var maxOutputTokens: Binding<Int> {
+        isOpenAIProvider ? $viewModel.openAIMaxOutputTokens : $viewModel.bedrockMaxOutputTokens
+    }
+
+    private var limitsNotice: LLMCorrectionService.LimitsNotice {
+        let prefs = AppPreferences.shared
+        return LLMCorrectionService.limitsNotice(
+            options: prefs.llmRequestOptions(for: isOpenAIProvider ? .openai : .bedrock),
+            userPrompt: prefs.effectiveCorrectionPrompt
+        )
+    }
+
+    private var modelLimitsCard: some View {
+        SettingsGroup(title: "Model Limits") {
+            SettingsField(label: "Thinking", detail: "Skipped automatically if the model doesn't support it") {
+                DesignToggle(isOn: thinkingEnabled)
+            }
+            if thinkingEnabled.wrappedValue {
+                SettingsFieldDivider()
+                SettingsField(label: "Thinking effort") {
+                    Picker("", selection: thinkingEffort) {
+                        ForEach(LLMThinkingEffort.allCases, id: \.rawValue) { effort in
+                            Text(effort.displayName).tag(effort.rawValue)
+                        }
+                    }
+                    .labelsHidden().pickerStyle(.segmented).fixedSize()
+                }
+            }
+            SettingsFieldDivider()
+            SettingsField(
+                label: "Context size",
+                detail: "Tokens. Only used to size requests; set local servers to the same value"
+            ) {
+                DesignNumberField(value: contextTokens)
+            }
+            SettingsFieldDivider()
+            SettingsField(label: "Max output", detail: "Tokens per response, including thinking") {
+                DesignNumberField(value: maxOutputTokens)
+            }
+            SettingsFieldDivider()
+            limitsNoticeRow
+        }
+    }
+
+    private var limitsNoticeRow: some View {
+        let notice = limitsNotice
+        let color: Color
+        switch notice.level {
+        case .info: color = DesignTokens.txt3
+        case .warning: color = .orange
+        case .error: color = DesignTokens.red
+        }
+        return Text(notice.message)
+            .font(.system(size: 11.5))
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
     }
 
     private var correctionPromptCard: some View {
@@ -513,6 +628,19 @@ struct DesignTextField: View {
         .frame(width: 210)
         .padding(.horizontal, 11).padding(.vertical, 7)
         .fieldSurface()
+    }
+}
+
+struct DesignNumberField: View {
+    @Binding var value: Int
+    var body: some View {
+        TextField("", value: $value, format: .number.grouping(.never))
+            .textFieldStyle(.plain)
+            .font(.system(size: 12.5, design: .monospaced))
+            .multilineTextAlignment(.trailing)
+            .frame(width: 110)
+            .padding(.horizontal, 11).padding(.vertical, 7)
+            .fieldSurface()
     }
 }
 
