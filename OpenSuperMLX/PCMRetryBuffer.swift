@@ -11,7 +11,6 @@ struct PCMRetryBuffer: Sendable {
     var isEmpty: Bool { samples.isEmpty }
 
     mutating func append(_ floatSamples: [Float]) {
-        samples.reserveCapacity(samples.count + floatSamples.count)
         for sample in floatSamples {
             let clipped = sample.isFinite ? min(max(sample, -1), 1) : 0
             if clipped == -1 {
