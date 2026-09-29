@@ -37,7 +37,7 @@ public protocol STTGenerationModel: AnyObject {
     func generate(
         audio: MLXArray,
         generationParameters: STTGenerateParameters
-    ) -> STTOutput
+    ) throws -> STTOutput
 
     func generateStream(
         audio: MLXArray,
@@ -49,8 +49,8 @@ public extension STTGenerationModel {
     func generate(
         audio: MLXArray,
         generationParameters: STTGenerateParameters? = nil
-    ) -> STTOutput {
-        generate(audio: audio, generationParameters: generationParameters ?? defaultGenerationParameters)
+    ) throws -> STTOutput {
+        try generate(audio: audio, generationParameters: generationParameters ?? defaultGenerationParameters)
     }
 
     func generateStream(

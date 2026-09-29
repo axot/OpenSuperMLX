@@ -50,6 +50,24 @@ final class PCMRetryBufferTests: XCTestCase {
         XCTAssertEqual(buffer.byteCount, 32_000)
     }
 
+    func testRepeatedAppendsDoNotReallocateStorageEachTime() {
+        var buffer = PCMRetryBuffer()
+        let chunk = [Float](repeating: 0.1, count: 1_600)
+        var capacity = buffer.samples.capacity
+        var reallocations = 0
+
+        for _ in 0..<1_000 {
+            buffer.append(chunk)
+            if buffer.samples.capacity != capacity {
+                reallocations += 1
+                capacity = buffer.samples.capacity
+            }
+        }
+
+        XCTAssertEqual(buffer.count, 1_600_000)
+        XCTAssertLessThan(reallocations, 50)
+    }
+
     func testEmptyChunkDoesNotChangeBuffer() {
         var buffer = PCMRetryBuffer()
 

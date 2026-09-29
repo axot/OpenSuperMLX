@@ -32,15 +32,15 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 
 | Command | Purpose | Main arguments and subcommands |
 |---|---|---|
-| `transcribe <file>` | Transcribe one audio file | `--language`, `--model`, `--no-correction`, `--temperature` |
-| `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--model`, `--chunk-duration`, `--disable-repetition-recovery` |
+| `transcribe <file>` | Transcribe one audio file | `--language`, `--no-correction`, `--temperature` |
+| `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--chunk-duration`, `--disable-repetition-recovery` |
 | `correct <text>` | Apply configured LLM correction (pass `""` as `<text>` with `--file`) | `--file`, `--provider`, `--prompt` |
 | `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
 | `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
 | `queue` | Manage imported-file transcription | `add <files>...`, `status`, `process` |
 | `mic` | Inspect or select input devices | `list`, `select <device>` |
-| `model` | Manage the model catalog and selection | `list`, `select <name>`, `add <repo-id>`, `remove <name>`; `download <name>` is a stub and does not fetch files yet |
-| `benchmark <file>` | Measure accuracy, speed, and memory | `--language`, `--model`, `--runs`, `--wer-threshold`, `--reference-text`, `--suite` |
+| `model` | Show the built-in model | `list` |
+| `benchmark <file>` | Measure accuracy, speed, and memory | `--language`, `--runs`, `--wer-threshold`, `--reference-text`, `--suite` |
 | `diagnose` | Print an environment snapshot | No command-specific arguments |
 
 Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for generated usage and defaults.
@@ -99,8 +99,8 @@ Successful recovery does not guarantee correct words at the boundary or remove
 misrecognitions already present in the checkpoint.
 
 ```bash
-$BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --json --verbose
-$BINARY stream-simulate audio.wav --model mlx-community/Qwen3-ASR-0.6B-4bit --disable-repetition-recovery --json --verbose
+$BINARY stream-simulate audio.wav --json --verbose
+$BINARY stream-simulate audio.wav --disable-repetition-recovery --json --verbose
 ```
 
 `--chunk-duration` controls file feeding, not the 2-second decode cadence.
@@ -109,6 +109,18 @@ Failure reports additionally include recording positions that account for
 capture backpressure drops and inference resets. The existing capture
 backpressure policy is unchanged. This path does not alter the separate
 `transcribe` command.
+
+## Neural Engine Audio Encoder
+
+The audio encoder runs on the Neural Engine by default; the text decoder stays on the GPU. Turn the setting off to run the encoder on the GPU instead:
+
+```bash
+$BINARY stream-simulate audio.wav --json    # data.audio_encoder is "neural_engine"
+$BINARY config set useNeuralEngineAudioTower false
+$BINARY stream-simulate audio.wav --json    # data.audio_encoder is "gpu"
+```
+
+The app looks for the compiled encoder at `mlx-models/coreml/qwen3_asr_audio_tower_int8.mlmodelc` and otherwise downloads it from [`ax0t/Qwen3-ASR-1.7B-CoreML-INT8`](https://huggingface.co/ax0t/Qwen3-ASR-1.7B-CoreML-INT8). If it cannot be loaded, the app falls back to the GPU encoder, shows a toast, and `audio_encoder` reports `"gpu"`. `Scripts/qwen3_audio_tower_coreml.py` builds the encoder; `Scripts/qwen3_ane_audio_tower_eval.py` compares GPU utilization, memory, and speed against a pre-change build.
 
 ## Transcript MCP Bridge
 
@@ -190,7 +202,7 @@ For bug fixes: reproduce via CLI first → fix → verify via CLI → include re
 
 Automated XCTest suite that exercises the full streaming pipeline with a real model and real audio. Requires:
 
-1. Model downloaded locally (`mlx-community/Qwen3-ASR-1.7B-8bit`)
+1. Model downloaded locally (`mlx-community/Qwen3-ASR-1.7B-5bit`)
 2. Audio file path provided via `OPENSUPERMLX_E2E_AUDIO` environment variable
 
 Tests skip automatically if either prerequisite is missing.

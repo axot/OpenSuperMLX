@@ -54,7 +54,7 @@ struct ConfigKeyInfo {
 enum ConfigRegistry {
 
     static let allKeys: [ConfigKeyInfo] = [
-        ConfigKeyInfo("selectedMLXModel", .string, "mlx-community/Qwen3-ASR-1.7B-8bit"),
+        ConfigKeyInfo("useNeuralEngineAudioTower", .bool, "true"),
         ConfigKeyInfo("mlxLanguage", .string, "auto"),
         ConfigKeyInfo("translateToEnglish", .bool, "false"),
         ConfigKeyInfo("temperature", .double, "0.0"),

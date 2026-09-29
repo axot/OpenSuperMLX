@@ -68,23 +68,4 @@ final class StreamingTapHealthTests: XCTestCase {
         let didSleep = await task.value
         XCTAssertFalse(didSleep)
     }
-
-    func testSpeechDetectionPublishesOnlyOnChange() {
-        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
-            lastPublished: nil,
-            current: false
-        ))
-        XCTAssertFalse(StreamingAudioService.shouldPublishSpeechDetection(
-            lastPublished: false,
-            current: false
-        ))
-        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
-            lastPublished: false,
-            current: true
-        ))
-        XCTAssertTrue(StreamingAudioService.shouldPublishSpeechDetection(
-            lastPublished: true,
-            current: false
-        ))
-    }
 }

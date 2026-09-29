@@ -78,6 +78,12 @@ final class AppPreferencesTests: XCTestCase {
 
         XCTAssertEqual(prefs.effectiveCorrectionPrompt, LLMCorrectionService.defaultCorrectionPrompt)
     }
+
+    // MARK: - Neural Engine Audio Tower
+
+    func testNeuralEngineAudioTowerIsOnByDefault() {
+        XCTAssertTrue(AppPreferences.shared.useNeuralEngineAudioTower)
+    }
 }
 
 // MARK: - LLM Request Settings

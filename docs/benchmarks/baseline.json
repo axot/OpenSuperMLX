@@ -1,10 +1,10 @@
 {
-  "model": "Qwen3-ASR-1.7B-8bit",
-  "device": "placeholder — run benchmarks locally to establish baseline",
-  "date": "2026-03-26",
+  "model": "Qwen3-ASR-1.7B-5bit",
+  "device": "Apple M1 Max, 64 GB (Debug test build)",
+  "date": "2026-09-28",
   "audio_fixture": "jfk.wav (11s, 16kHz, mono)",
-  "latency_median_sec": 0.0,
-  "memory_peak_delta_mb": 0.0,
+  "latency_median_sec": 0.718,
+  "memory_peak_delta_mb": 2696.9,
   "wer_english_jfk": 0.0,
   "thresholds": {
     "latency_tolerance": 1.3,

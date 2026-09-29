@@ -15,20 +15,28 @@ Memory.cacheMemory    // MLX's internal buffer cache
 
 Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory — Metal buffers are mmap'd into the process address space, so unified memory appears in both the GPU allocation and the process RSS. Use MLX's `Memory.activeMemory` for the true GPU figure.
 
-## Memory Budget (Qwen3-ASR-1.7B-8bit)
+## Memory Budget (Qwen3-ASR-1.7B-5bit)
 
 | Component | Size | Where |
 |---|---|---|
-| Model weights | ~2,470 MB | GPU (MLX), fixed after load |
+| Model weights | ~1,820 MB (5-bit decoder ~1,190 MB + BF16 audio encoder ~635 MB) | GPU (MLX), fixed after load |
+| Neural Engine audio encoder (when enabled) | ~300 MB INT8, replaces the ~635 MB MLX encoder | Core ML, mapped outside the app's footprint |
 | Encoder cache (4 windows) | ~60 MB | GPU, bounded by `maxEncoderWindows` |
 | KV cache (decoder) | ~100-200 MB | GPU, bounded by sliding window + prefix cap |
+| Decoder prefill transient | ~1.2 MB per row, ≤ ~350 MB per 256-row pass | GPU, freed after each prefill pass |
 | Encoder transient (per window) | ~95 MB | GPU, freed after each encoder forward pass |
 | Audio samples (`[Float]`) | ~5 MB/min | CPU, proportional to input duration |
 | Mel spectrogram tail | <0.4 MB | GPU, truncated each reset cycle |
 | Metal driver overhead | ~300 MB | Kernel, unavoidable framework cost |
 | Swift runtime + dylibs | ~200 MB | CPU |
 
-Expected steady-state: **~2,500 MB active**, **~2,700 MB peak**.
+Measured peak process footprint (`stream-simulate`, seven 11–43 s clips, Debug build, M1 Max): **~2,230 MB median / 2,720 MB max** with the GPU encoder and **~1,620 MB median / 2,110 MB max** with the Neural Engine encoder. The previous Qwen3-ASR-1.7B-8bit build measured ~2,840 MB median / 3,240 MB max.
+
+Capping prefill passes at 256 rows and computing logits only for the rows that need them lowered the peak on a 43 s clip (Release build, Neural Engine encoder) from ~2,120 MB to ~1,720 MB, and on a 5-minute file transcription from ~3,560 MB to ~2,370 MB.
+
+A multi-pass prefill grows each KV cache once for the whole prompt. Growing it by the default 256-row step instead reallocates and copies the whole cache on every pass. Measured on prefill alone (Debug test build, M1 Max), sizing it up front lowered the peak for a 3,900-row prompt (5 minutes of audio) from ~2,710 MB to ~2,540 MB. For a 15,600-row prompt (a 20-minute chunk) the peak fell from ~4,080 MB to ~3,680 MB, and the time from 19–27 s to ~16 s.
+
+In Neural Engine mode, whole-file encoding converts each window's Core ML output to bfloat16 as soon as it is read, instead of holding every window's float32 copy until the windows are concatenated. For 10 minutes of audio this lowered the encoder's transient MLX memory from ~122 MB to ~61 MB.
 
 ### Encoder dtype
 
@@ -78,6 +86,7 @@ The streaming pipeline (`ContinuousChunkProcessor`) must maintain O(1) memory re
 2. **Encoder cache**: sliding window, max `maxEncoderWindows` (default 4)
 3. **KV cache**: rebuilt from bounded context after each reset — prefix capped at `maxPrefixTokens` (150)
 4. **MLX cache**: cleared via `Memory.clearCache()` in `reset()` and after each decode pass
+5. **Prefill**: `Qwen3ASRModel.prefill` runs at most `prefillRowsPerPass` (256) rows per pass and projects only the last rows onto the vocabulary, so rebuilding the prompt after a window eviction stays bounded. Smaller passes cost GPU efficiency: matmuls run in 32-row tiles, and passes under 8 tiles are slower per tile.
 
 Periodic reset fires every `resetIntervalChunks` chunks (default 45 × 2s = 90s). Between resets, mel grows to ~9,000 frames (~4.6 MB) which is acceptable.
 

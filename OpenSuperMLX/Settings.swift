@@ -5,9 +5,9 @@ import SwiftUI
 import KeyboardShortcuts
 
 class SettingsViewModel: ObservableObject {
-    @Published var selectedMLXModel: String {
+    @Published var useNeuralEngineAudioTower: Bool {
         didSet {
-            AppPreferences.shared.selectedMLXModel = selectedMLXModel
+            AppPreferences.shared.useNeuralEngineAudioTower = useNeuralEngineAudioTower
             Task { @MainActor in
                 TranscriptionService.shared.reloadEngine()
             }
@@ -166,7 +166,7 @@ class SettingsViewModel: ObservableObject {
     
     init() {
         let prefs = AppPreferences.shared
-        self.selectedMLXModel = prefs.selectedMLXModel
+        self.useNeuralEngineAudioTower = prefs.useNeuralEngineAudioTower
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
         self.temperature = prefs.temperature
@@ -248,15 +248,13 @@ struct SettingsView: View {
     var embedded = false
 
     @StateObject private var viewModel = SettingsViewModel()
-    @StateObject private var modelManager = MLXModelManager.shared
     @Environment(\.dismiss) var dismiss
     @State private var isRecordingNewShortcut = false
     @State private var selectedTab = 0
-    @State private var customModelInput = ""
 
     var body: some View {
         if embedded {
-            SettingsRedesignView(viewModel: viewModel, modelManager: modelManager)
+            SettingsRedesignView(viewModel: viewModel)
         } else {
             modalBody
         }
@@ -330,60 +328,28 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("MLX Speech Recognition Model")
+                    Text("Speech Recognition Model")
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("Select the model to use for transcription. Larger models are more accurate but use more memory.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    VStack(spacing: 12) {
-                        ForEach(modelManager.availableModels) { model in
-                            MLXModelPickerItemView(
-                                model: model,
-                                isSelected: viewModel.selectedMLXModel == model.repoID,
-                                onSelect: {
-                                    viewModel.selectedMLXModel = model.repoID
-                                },
-                                onDelete: model.isCustom ? {
-                                    if viewModel.selectedMLXModel == model.repoID {
-                                        viewModel.selectedMLXModel = MLXModelManager.builtInModels[1].repoID
-                                    }
-                                    modelManager.removeCustomModel(model)
-                                } : nil
-                            )
-                        }
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.controlBackgroundColor).opacity(0.3))
-                .cornerRadius(12)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Custom Model")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Add a model from HuggingFace by entering its repository ID or URL.")
+                    HStack(spacing: 8) {
+                        Text(MLXModelManager.model.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text(MLXModelManager.model.size)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 8) {
-                            TextField("e.g. mlx-community/Qwen3-ASR-1.7B-4bit", text: $customModelInput)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { addCustomModel() }
-                            
-                            Button(action: { addCustomModel() }) {
-                                Text("Add")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(customModelInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    
+                    Toggle(isOn: $viewModel.useNeuralEngineAudioTower) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Neural Engine audio encoder")
+                            Text("Runs the audio encoder on the Neural Engine to free the GPU.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
+                    .toggleStyle(.switch)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -428,11 +394,6 @@ struct SettingsView: View {
             }
             .padding()
         }
-    }
-    
-    private func addCustomModel() {
-        modelManager.addCustomModel(repoID: customModelInput)
-        customModelInput = ""
     }
     
     private var transcriptionSettings: some View {
@@ -902,70 +863,6 @@ struct SettingsView: View {
                 .cornerRadius(12)
             }
             .padding()
-        }
-    }
-}
-
-struct MLXModelPickerItemView: View {
-    let model: MLXModel
-    let isSelected: Bool
-    let onSelect: () -> Void
-    var onDelete: (() -> Void)?
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(model.name)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Text(model.size)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(.controlBackgroundColor))
-                        .cornerRadius(4)
-                }
-                
-                Text(model.description)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            if let onDelete = onDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .foregroundColor(.red.opacity(0.7))
-                        .imageScale(.small)
-                }
-                .buttonStyle(.borderless)
-                .help("Remove custom model")
-            }
-            
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                    .imageScale(.large)
-            } else {
-                Button(action: onSelect) {
-                    Text("Select")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-        .padding(12)
-        .background(isSelected ? Color(.controlBackgroundColor).opacity(0.7) : Color(.controlBackgroundColor).opacity(0.5))
-        .cornerRadius(8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !isSelected {
-                onSelect()
-            }
         }
     }
 }

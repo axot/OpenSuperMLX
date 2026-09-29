@@ -4,6 +4,7 @@
 import XCTest
 
 import MLX
+import Tokenizers
 @testable import MLXAudioSTT
 
 final class ContinuousChunkProcessorTests: XCTestCase {
@@ -292,4 +293,128 @@ final class ContinuousChunkProcessorFinalizationTests: XCTestCase {
         XCTAssertEqual(committer.stableTokens, expectedTokens, file: file, line: line)
         XCTAssertEqual(committer.emittedTokens, expectedTokens, file: file, line: line)
     }
+}
+
+// MARK: - Draft Verification Across Chunks
+
+final class ContinuousChunkProcessorDraftTests: XCTestCase {
+    func testChunksWithDraftsDecodeLikeAFreshSequentialPass() throws {
+        let tokenizer = TinyTokenizer()
+        let model = TinyQwen3ASR.make(seed: 5, tiedEmbeddings: false, audioTokenId: TinyTokenizer.audioPadId)
+        model.tokenizer = tokenizer
+        let config = Self.configWithoutGuards()
+        let processor = ContinuousChunkProcessor(model: model, tokenizer: tokenizer, config: config)
+
+        var mel: MLXArray?
+        var partlyAcceptedDrafts = 0
+        for chunk in 0..<6 {
+            let chunkMel = MLXRandom.normal(
+                [200, model.config.audioConfig.numMelBins], key: MLXRandom.key(UInt64(chunk))
+            )
+            mel = mel.map { MLX.concatenated([$0, chunkMel], axis: 0) } ?? chunkMel
+            let history = processor.allDecodedTokens
+            let expected = try freshSequentialDecode(model: model, config: config, mel: mel!, history: history)
+            let draft = history.suffix(config.rollbackTokens)
+            let accepted = zip(draft, expected).prefix { $0 == $1 }.count
+            if accepted > 0 && accepted < draft.count { partlyAcceptedDrafts += 1 }
+
+            _ = try processor.processChunk(melFrames: chunkMel, language: config.language, isFinal: false)
+
+            XCTAssertEqual(processor.allDecodedTokens, Array(history.dropLast(draft.count)) + expected, "chunk \(chunk)")
+        }
+        XCTAssertGreaterThan(partlyAcceptedDrafts, 0, "the fixture must reject part of some draft")
+    }
+
+    // MARK: - Helpers
+
+    /// The tiny model never emits EOS, so every chunk runs to the token limit, and the guards
+    /// would treat its random tokens as degenerate and reset the processor.
+    private static func configWithoutGuards() -> StreamingConfig {
+        var config = StreamingConfig(language: "English", maxNewTokensPerChunk: 8)
+        config.repetitionRecoveryEnabled = false
+        config.singleTokenRunThreshold = 1_000
+        config.blockPatternMinReps = 1_000
+        config.prefixDiversityThreshold = 0
+        config.resetIntervalChunks = 1_000
+        return config
+    }
+
+    /// Conditions the chunk as `ContinuousChunkProcessor` does, but prefills an empty cache and
+    /// decodes one token at a time, with no reused KV rows and no draft.
+    private func freshSequentialDecode(
+        model: Qwen3ASRModel, config: StreamingConfig, mel: MLXArray, history: [Int]
+    ) throws -> [Int] {
+        let windowSize = config.encoderWindowSizeMelFrames
+        let windows = stride(from: 0, to: mel.dim(0), by: windowSize).map {
+            mel[$0..<min($0 + windowSize, mel.dim(0))]
+        }
+        let features = MLX.concatenated(try windows.map { try model.audioTower.encodeSingleWindow($0) }, axis: 0)
+        let inputIds = model.buildPrompt(numAudioTokens: features.dim(0), language: config.language)
+        let embeds = model.model.embedTokens(inputIds)
+        var inputs = model.mergeAudioFeatures(
+            inputsEmbeds: embeds, audioFeatures: features.asType(embeds.dtype), inputIds: inputIds
+        )
+        let prefixRange = ContinuousChunkProcessor.computePrefixTokenRange(
+            totalTokens: history.count, maxPrefix: config.maxPrefixTokens, rollback: config.rollbackTokens
+        )
+        if !prefixRange.isEmpty {
+            let prefixIds = MLXArray(history[prefixRange].map { Int32($0) }).expandedDimensions(axis: 0)
+            inputs = MLX.concatenated([inputs, model.model.embedTokens(prefixIds)], axis: 1)
+        }
+        let cache = model.makeCache()
+        let logits = model.prefill(inputEmbeddings: inputs, cache: cache)
+        return model.greedyDecode(
+            logits: logits, cache: cache, maxTokens: config.maxNewTokensPerChunk, isEndToken: { _ in false }
+        ).tokens
+    }
+}
+
+/// Maps the Qwen3-ASR prompt into the tiny model's 97-token vocabulary.
+private struct TinyTokenizer: Tokenizer {
+    static let audioPadId = 96
+    private static let audioPad = "<|audio_pad|>"
+
+    func encode(text: String) -> [Int] {
+        var ids: [Int] = []
+        var rest = Substring(text)
+        while let scalar = rest.unicodeScalars.first {
+            if rest.hasPrefix(Self.audioPad) {
+                ids.append(Self.audioPadId)
+                rest = rest.dropFirst(Self.audioPad.count)
+            } else {
+                ids.append(Int(scalar.value) % Self.audioPadId)
+                rest = rest.dropFirst()
+            }
+        }
+        return ids
+    }
+
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] { encode(text: text) }
+    func tokenize(text: String) -> [String] { text.map(String.init) }
+    func decode(tokens: [Int], skipSpecialTokens: Bool) -> String { tokens.map(String.init).joined(separator: " ") }
+    func convertTokenToId(_ token: String) -> Int? { nil }
+    func convertIdToToken(_ id: Int) -> String? { String(id) }
+
+    var bosToken: String? { nil }
+    var bosTokenId: Int? { nil }
+    var eosToken: String? { nil }
+    var eosTokenId: Int? { nil }
+    var unknownToken: String? { nil }
+    var unknownTokenId: Int? { nil }
+
+    func applyChatTemplate(messages: [Message]) throws -> [Int] { [] }
+    func applyChatTemplate(messages: [Message], tools: [ToolSpec]?) throws -> [Int] { [] }
+    func applyChatTemplate(
+        messages: [Message], tools: [ToolSpec]?, additionalContext: [String: any Sendable]?
+    ) throws -> [Int] { [] }
+    func applyChatTemplate(messages: [Message], chatTemplate: ChatTemplateArgument) throws -> [Int] { [] }
+    func applyChatTemplate(messages: [Message], chatTemplate: String) throws -> [Int] { [] }
+    func applyChatTemplate(
+        messages: [Message], chatTemplate: ChatTemplateArgument?, addGenerationPrompt: Bool,
+        truncation: Bool, maxLength: Int?, tools: [ToolSpec]?
+    ) throws -> [Int] { [] }
+    func applyChatTemplate(
+        messages: [Message], chatTemplate: ChatTemplateArgument?, addGenerationPrompt: Bool,
+        truncation: Bool, maxLength: Int?, tools: [ToolSpec]?, additionalContext: [String: any Sendable]?
+    ) throws -> [Int] { [] }
 }
