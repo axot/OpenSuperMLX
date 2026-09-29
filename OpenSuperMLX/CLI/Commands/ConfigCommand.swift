@@ -34,12 +34,20 @@ struct ConfigKeyInfo {
     let type: ConfigKeyType
     let defaultDescription: String
     let sensitive: Bool
+    let range: ClosedRange<Int>?
 
-    init(_ key: String, _ type: ConfigKeyType, _ defaultDescription: String, sensitive: Bool = false) {
+    init(
+        _ key: String,
+        _ type: ConfigKeyType,
+        _ defaultDescription: String,
+        sensitive: Bool = false,
+        range: ClosedRange<Int>? = nil
+    ) {
         self.key = key
         self.type = type
         self.defaultDescription = defaultDescription
         self.sensitive = sensitive
+        self.range = range
     }
 }
 
@@ -72,6 +80,15 @@ enum ConfigRegistry {
         ConfigKeyInfo("openAIModel", .string, "gpt-4o-mini"),
         ConfigKeyInfo("openAIAPIProtocol", .string, "chat_completions"),
         ConfigKeyInfo("openAICustomHeaders", .string, ""),
+        ConfigKeyInfo("openAIExtraBody", .string, ""),
+        ConfigKeyInfo("openAIThinkingEnabled", .bool, "true"),
+        ConfigKeyInfo("openAIThinkingEffort", .string, "medium"),
+        ConfigKeyInfo("openAIContextTokens", .integer, "131072", range: LLMRequestOptions.tokenRange),
+        ConfigKeyInfo("openAIMaxOutputTokens", .integer, "16384", range: LLMRequestOptions.tokenRange),
+        ConfigKeyInfo("bedrockThinkingEnabled", .bool, "false"),
+        ConfigKeyInfo("bedrockThinkingEffort", .string, "medium"),
+        ConfigKeyInfo("bedrockContextTokens", .integer, "200000", range: LLMRequestOptions.tokenRange),
+        ConfigKeyInfo("bedrockMaxOutputTokens", .integer, "4096", range: LLMRequestOptions.tokenRange),
     ]
 
     static func find(_ key: String) -> ConfigKeyInfo? {
@@ -127,6 +144,9 @@ enum ConfigRegistry {
             return nil
         case .integer:
             guard let intVal = Int(rawValue) else {
+                return .invalidConfigValue
+            }
+            if let range = info.range, !range.contains(intVal) {
                 return .invalidConfigValue
             }
             AppPreferences.store.set(intVal, forKey: info.key)

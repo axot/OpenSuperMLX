@@ -102,6 +102,42 @@ class SettingsViewModel: ObservableObject {
     @Published var openAICustomHeaders: String {
         didSet { AppPreferences.shared.openAICustomHeaders = openAICustomHeaders }
     }
+
+    @Published var openAIExtraBody: String {
+        didSet { AppPreferences.shared.openAIExtraBody = openAIExtraBody }
+    }
+
+    @Published var openAIThinkingEnabled: Bool {
+        didSet { AppPreferences.shared.openAIThinkingEnabled = openAIThinkingEnabled }
+    }
+
+    @Published var openAIThinkingEffort: String {
+        didSet { AppPreferences.shared.openAIThinkingEffort = openAIThinkingEffort }
+    }
+
+    @Published var openAIContextTokens: Int {
+        didSet { AppPreferences.shared.openAIContextTokens = LLMRequestOptions.clampedTokens(openAIContextTokens) }
+    }
+
+    @Published var openAIMaxOutputTokens: Int {
+        didSet { AppPreferences.shared.openAIMaxOutputTokens = LLMRequestOptions.clampedTokens(openAIMaxOutputTokens) }
+    }
+
+    @Published var bedrockThinkingEnabled: Bool {
+        didSet { AppPreferences.shared.bedrockThinkingEnabled = bedrockThinkingEnabled }
+    }
+
+    @Published var bedrockThinkingEffort: String {
+        didSet { AppPreferences.shared.bedrockThinkingEffort = bedrockThinkingEffort }
+    }
+
+    @Published var bedrockContextTokens: Int {
+        didSet { AppPreferences.shared.bedrockContextTokens = LLMRequestOptions.clampedTokens(bedrockContextTokens) }
+    }
+
+    @Published var bedrockMaxOutputTokens: Int {
+        didSet { AppPreferences.shared.bedrockMaxOutputTokens = LLMRequestOptions.clampedTokens(bedrockMaxOutputTokens) }
+    }
     
     @Published var useCustomPrompt: Bool {
         didSet {
@@ -150,6 +186,15 @@ class SettingsViewModel: ObservableObject {
         self.openAIModel = prefs.openAIModel
         self.openAIAPIProtocol = prefs.openAIAPIProtocol
         self.openAICustomHeaders = prefs.openAICustomHeaders
+        self.openAIExtraBody = prefs.openAIExtraBody
+        self.openAIThinkingEnabled = prefs.openAIThinkingEnabled
+        self.openAIThinkingEffort = prefs.openAIThinkingEffort
+        self.openAIContextTokens = prefs.openAIContextTokens
+        self.openAIMaxOutputTokens = prefs.openAIMaxOutputTokens
+        self.bedrockThinkingEnabled = prefs.bedrockThinkingEnabled
+        self.bedrockThinkingEffort = prefs.bedrockThinkingEffort
+        self.bedrockContextTokens = prefs.bedrockContextTokens
+        self.bedrockMaxOutputTokens = prefs.bedrockMaxOutputTokens
         self.useCustomPrompt = prefs.useCustomCorrectionPrompt
         self.customPromptText = prefs.customCorrectionPrompt ?? LLMCorrectionService.defaultCorrectionPrompt
         self.useStreamingTranscription = prefs.useStreamingTranscription

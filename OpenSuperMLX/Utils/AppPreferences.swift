@@ -46,6 +46,7 @@ final class AppPreferences {
         }
         
         migrateCorrectionPrompt(defaults: defaults)
+        migrateLLMOutputLimit(defaults: defaults)
         
         if !defaults.bool(forKey: "llmMigrationCompleted") {
             if defaults.object(forKey: "bedrockEnabled") != nil {
@@ -74,6 +75,14 @@ final class AppPreferences {
         defaults.removeObject(forKey: "useEnglishITN")
     }
     
+    // Existing OpenAI-compatible setups ran with a 4096-token output cap; keep it so models with
+    // smaller limits don't start rejecting requests after the new 16k default.
+    static func migrateLLMOutputLimit(defaults: UserDefaults) {
+        guard defaults.object(forKey: "openAIModel") != nil,
+              defaults.object(forKey: "openAIMaxOutputTokens") == nil else { return }
+        defaults.set(4096, forKey: "openAIMaxOutputTokens")
+    }
+
     static func migrateCorrectionPrompt(defaults: UserDefaults) {
         if let oldPrompt = defaults.string(forKey: "bedrockCorrectionPrompt") {
             if oldPrompt != LLMCorrectionService.defaultCorrectionPrompt {
@@ -134,6 +143,18 @@ final class AppPreferences {
     
     @UserDefault(key: "bedrockModelId", defaultValue: "anthropic.claude-3-haiku-20240307-v1:0")
     var bedrockModelId: String
+
+    @UserDefault(key: "bedrockThinkingEnabled", defaultValue: false)
+    var bedrockThinkingEnabled: Bool
+
+    @UserDefault(key: "bedrockThinkingEffort", defaultValue: LLMThinkingEffort.medium.rawValue)
+    var bedrockThinkingEffort: String
+
+    @UserDefault(key: "bedrockContextTokens", defaultValue: 200_000)
+    var bedrockContextTokens: Int
+
+    @UserDefault(key: "bedrockMaxOutputTokens", defaultValue: 4096)
+    var bedrockMaxOutputTokens: Int
     
     // MARK: - Correction Prompt
     
@@ -177,6 +198,31 @@ final class AppPreferences {
 
     @UserDefault(key: "openAICustomHeaders", defaultValue: "")
     var openAICustomHeaders: String
+
+    @UserDefault(key: "openAIExtraBody", defaultValue: "")
+    var openAIExtraBody: String
+
+    @UserDefault(key: "openAIThinkingEnabled", defaultValue: true)
+    var openAIThinkingEnabled: Bool
+
+    @UserDefault(key: "openAIThinkingEffort", defaultValue: LLMThinkingEffort.medium.rawValue)
+    var openAIThinkingEffort: String
+
+    @UserDefault(key: "openAIContextTokens", defaultValue: 131_072)
+    var openAIContextTokens: Int
+
+    @UserDefault(key: "openAIMaxOutputTokens", defaultValue: 16_384)
+    var openAIMaxOutputTokens: Int
+
+    func llmRequestOptions(for provider: LLMProviderType) -> LLMRequestOptions {
+        let isOpenAI = provider == .openai
+        return LLMRequestOptions(
+            contextTokens: LLMRequestOptions.clampedTokens(isOpenAI ? openAIContextTokens : bedrockContextTokens),
+            maxOutputTokens: LLMRequestOptions.clampedTokens(isOpenAI ? openAIMaxOutputTokens : bedrockMaxOutputTokens),
+            thinkingEnabled: isOpenAI ? openAIThinkingEnabled : bedrockThinkingEnabled,
+            thinkingEffort: LLMThinkingEffort(rawValue: isOpenAI ? openAIThinkingEffort : bedrockThinkingEffort) ?? .medium
+        )
+    }
 
     // MARK: - Audio Source
 

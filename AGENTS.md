@@ -250,6 +250,7 @@ OpenSuperMLX/                    # Main app target
 │   ├── OutputDeviceClassifier.swift # Speaker/headphone routing policy
 │   ├── SystemAudioService.swift   # System audio capture
 │   ├── TranscriptMCPHandler.swift # Transcript MCP tool dispatch
+│   ├── TranscriptChunker.swift    # Token estimates, request capacity, sentence chunking for LLM correction
 │   ├── TranscriptMCPHTTPServer.swift # Loopback MCP HTTP transport
 │   └── TranscriptSessionStore.swift # Bounded live transcript sessions
 ├── Models/

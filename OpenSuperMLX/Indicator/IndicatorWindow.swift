@@ -189,7 +189,8 @@ class IndicatorViewModel: ObservableObject {
 
                 guard let result = await self.streamingService.finalizeRecording(
                     applyCorrection: true,
-                    forceLLM: self.forceLLMCorrection
+                    forceLLM: self.forceLLMCorrection,
+                    onCorrectionStarted: { self.state = .correcting }
                 ) else {
                     self.state = .idle
                     self.isStreamingMode = false
@@ -202,7 +203,7 @@ class IndicatorViewModel: ObservableObject {
                     self.recoveryPresenter()
                 }
 
-                if let error = LLMCorrectionService.shared.lastErrorMessage {
+                if let error = result.llmErrorMessage {
                     ErrorToastManager.shared.show(error)
                 }
 

@@ -145,6 +145,13 @@ final class ConfigCommandTests: XCTestCase {
             XCTFail("Expected failure"); return
         }
         XCTAssertEqual(error, .invalidConfigValue)
+
+        for value in ["0", "-5", "3000000"] {
+            guard case .failure(let error) = ConfigSetCommand.executeSet(key: "openAIMaxOutputTokens", value: value) else {
+                XCTFail("Expected out-of-range token limit \(value) to fail"); continue
+            }
+            XCTAssertEqual(error, .invalidConfigValue)
+        }
     }
 
     func testConfigSetOptionalToNull() throws {
