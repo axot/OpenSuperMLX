@@ -198,13 +198,11 @@ create_fixture() {
     git -C "$FIXTURE_REPO" checkout --quiet -b master
     git -C "$FIXTURE_REPO" remote add origin "$FIXTURE_ORIGIN"
     set_project_versions "0.0.17"
+    set_build_numbers 10
     printf 'fixture\n' > "$FIXTURE_REPO/README.md"
     git -C "$FIXTURE_REPO" add OpenSuperMLX.xcodeproj/project.pbxproj README.md
     git -C "$FIXTURE_REPO" commit --quiet -m "Fixture release"
-    git -C "$FIXTURE_REPO" tag -a 0.0.17 -m "Release 0.0.17"
-    git -C "$FIXTURE_REPO" push --quiet origin master
-    git -C "$FIXTURE_REPO" push --quiet origin refs/tags/0.0.17
-    FIXTURE_SHA="$(git -C "$FIXTURE_REPO" rev-parse HEAD)"
+    tag_and_push_release 0.0.17
     : > "$FIXTURE_GH_CALL_LOG"
     create_gh_stub "$FIXTURE_BIN"
 }
@@ -217,6 +215,34 @@ set_project_versions() {
         printf 'MARKETING_VERSION = %s;\n' "$version" \
             >> "$FIXTURE_REPO/OpenSuperMLX.xcodeproj/project.pbxproj"
     done
+}
+
+set_build_numbers() {
+    local build
+
+    for build in "$@"; do
+        printf 'CURRENT_PROJECT_VERSION = %s;\n' "$build" \
+            >> "$FIXTURE_REPO/OpenSuperMLX.xcodeproj/project.pbxproj"
+    done
+}
+
+tag_and_push_release() {
+    local version="$1"
+
+    git -C "$FIXTURE_REPO" tag -a "$version" -m "Release $version"
+    git -C "$FIXTURE_REPO" push --quiet origin master
+    git -C "$FIXTURE_REPO" push --quiet origin "refs/tags/$version"
+    FIXTURE_SHA="$(git -C "$FIXTURE_REPO" rev-parse HEAD)"
+}
+
+commit_next_release() {
+    local version="$1"
+    shift
+
+    set_project_versions "$version"
+    set_build_numbers "$@"
+    git -C "$FIXTURE_REPO" commit --quiet -am "Release $version"
+    tag_and_push_release "$version"
 }
 
 run_preflight() {
@@ -354,6 +380,30 @@ test_version_mismatch() {
     expect_reject
 }
 
+test_missing_build_number() {
+    create_fixture
+    set_project_versions 0.0.17
+    expect_reject
+}
+
+test_multiple_build_numbers() {
+    create_fixture
+    set_build_numbers 11
+    expect_reject
+}
+
+test_build_number_increase() {
+    create_fixture
+    commit_next_release 0.0.18 11
+    expect_accept push 0.0.18 "$FIXTURE_SHA" success
+}
+
+test_build_number_not_increased() {
+    create_fixture
+    commit_next_release 0.0.18 10
+    expect_reject push 0.0.18 "$FIXTURE_SHA" success
+}
+
 test_tag_sha_mismatch() {
     create_fixture
     printf 'later\n' >> "$FIXTURE_REPO/README.md"
@@ -419,6 +469,10 @@ run_case "reject tag 0.0.17foo" test_malformed_tag 0.0.17foo
 run_case "reject missing MARKETING_VERSION" test_missing_version
 run_case "reject multiple MARKETING_VERSION values" test_multiple_versions
 run_case "reject tag and version mismatch" test_version_mismatch
+run_case "reject missing CURRENT_PROJECT_VERSION" test_missing_build_number
+run_case "reject multiple CURRENT_PROJECT_VERSION values" test_multiple_build_numbers
+run_case "accept build number above previous release" test_build_number_increase
+run_case "reject build number not above previous release" test_build_number_not_increased
 run_case "reject tag and GITHUB_SHA mismatch" test_tag_sha_mismatch
 run_case "reject SHA outside origin master" test_sha_not_on_master
 run_case "reject inactive Build Check workflow" test_build_check_result inactive-workflow

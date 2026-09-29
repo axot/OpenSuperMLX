@@ -72,6 +72,11 @@ enum RecordingSaveState {
     case awaitingUser(PendingRecordingSave, RecordingStorageError)
     case retrying(PendingRecordingSave)
     case cancelling(PendingRecordingSave)
+
+    var isIdle: Bool {
+        if case .idle = self { return true }
+        return false
+    }
 }
 
 struct RecordingSaveDependencies {
@@ -145,10 +150,7 @@ final class RecordingSaveCoordinator: ObservableObject {
     private let dependencies: RecordingSaveDependencies
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "RecordingSaveCoordinator")
 
-    var isIdle: Bool {
-        if case .idle = state { return true }
-        return false
-    }
+    var isIdle: Bool { state.isIdle }
 
     var hasPendingSave: Bool {
         switch state {

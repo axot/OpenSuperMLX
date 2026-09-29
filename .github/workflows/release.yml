@@ -45,6 +45,7 @@ jobs:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -55,7 +56,8 @@ jobs:
             APPLE_TEAM_ID \
             APP_STORE_CONNECT_API_KEY_BASE64 \
             APP_STORE_CONNECT_API_KEY_ID \
-            APP_STORE_CONNECT_API_ISSUER_ID; do
+            APP_STORE_CONNECT_API_ISSUER_ID \
+            SPARKLE_ED_PRIVATE_KEY; do
             if [[ -z "${!secret_name:-}" ]]; then
               echo "Missing required secret: $secret_name" >&2
               missing_secret=1
@@ -210,6 +212,21 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH --timestamp" \
             build
 
+      - name: Sign Sparkle helpers with Developer ID
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release/OpenSuperMLX.app"
+          SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+          SIGN=(codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" --timestamp --options runtime)
+
+          # Sparkle ships these ad-hoc signed; sign inside-out, then reseal the app over them.
+          "${SIGN[@]}" "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+          "${SIGN[@]}" --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+          "${SIGN[@]}" "$SPARKLE/Versions/B/Autoupdate"
+          "${SIGN[@]}" "$SPARKLE/Versions/B/Updater.app"
+          "${SIGN[@]}" "$SPARKLE"
+          "${SIGN[@]}" --preserve-metadata=entitlements,requirements,flags "$APP_PATH"
+
       - name: Verify signed app bundle
         run: |
           set -euo pipefail
@@ -228,6 +245,8 @@ jobs:
             "$APP_PATH/Contents/Frameworks/libtext_processing_rs.dylib"
           codesign --verify --strict --verbose=2 \
             "$APP_PATH/Contents/MacOS/processor_main"
+          codesign --verify --deep --strict --verbose=2 \
+            "$APP_PATH/Contents/Frameworks/Sparkle.framework"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Notarize and staple app bundle
@@ -310,6 +329,28 @@ jobs:
             --verbose=4 OpenSuperMLX.dmg
           shasum -a 256 OpenSuperMLX.dmg > OpenSuperMLX.dmg.sha256
 
+      - name: Sign update and write appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          INFO_PLIST="build/Build/Products/Release/OpenSuperMLX.app/Contents/Info.plist"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
+          MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST")"
+          ED_SIGNATURE="$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" \
+            | SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p OpenSuperMLX.dmg)"
+          PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
+          swift .github/scripts/verify-ed-signature.swift "$PUBLIC_KEY" "$ED_SIGNATURE" OpenSuperMLX.dmg
+          LENGTH="$(stat -f %z OpenSuperMLX.dmg)"
+          git tag -l --format='%(contents:body)' "$VERSION" > "$RUNNER_TEMP/release-notes.txt"
+
+          bash .github/scripts/make-appcast.sh "$VERSION" "$BUILD" "$MINIMUM_SYSTEM" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/OpenSuperMLX.dmg" \
+            "$ED_SIGNATURE" "$LENGTH" "$RUNNER_TEMP/release-notes.txt" > appcast.xml
+          xmllint --noout appcast.xml
+          cat appcast.xml
+
       - name: Clean up signing credentials
         if: always()
         run: |
@@ -373,7 +414,8 @@ jobs:
             --title "Release $VERSION" \
             --notes "$NOTES" \
             OpenSuperMLX.dmg \
-            OpenSuperMLX.dmg.sha256
+            OpenSuperMLX.dmg.sha256 \
+            appcast.xml
 
       - name: Update Homebrew tap
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && env.HOMEBREW_TAP_TOKEN != '' }}

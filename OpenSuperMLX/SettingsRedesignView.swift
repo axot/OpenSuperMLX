@@ -237,6 +237,13 @@ struct SettingsRedesignView: View {
                     }
                 }
             }
+            if AppUpdater.isEnabled {
+                SettingsGroup(title: "Updates") {
+                    SettingsField(label: "Check for updates automatically", detail: "Once a day from GitHub") {
+                        DesignToggle(isOn: $viewModel.automaticallyChecksForUpdates)
+                    }
+                }
+            }
             SettingsGroup(title: "Debug") {
                 SettingsField(label: "Debug mode", detail: "Extra logging") {
                     DesignToggle(isOn: $viewModel.debugMode)

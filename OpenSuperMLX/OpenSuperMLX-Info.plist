@@ -25,5 +25,11 @@
 	<string>OpenSuperMLX needs accessibility access to provide system-wide functionality.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>OpenSuperMLX needs accessibility access to provide system-wide functionality.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/axot/OpenSuperMLX/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>cZE9Qefy7INtbmOR/xL2nWHuJkrN8+ItcEu/lmxaic8=</string>
 </dict>
 </plist>

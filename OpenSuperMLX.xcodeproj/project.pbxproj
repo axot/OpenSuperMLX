@@ -27,6 +27,7 @@
 		CE84DF722D55778000C54EA6 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE84DF702D55778000C54EA6 /* MetalKit.framework */; };
 		CE84DF762D5577D200C54EA6 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE84DF752D5577D200C54EA6 /* Accelerate.framework */; };
 		CE84E17D2D56550B00C54EA6 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = CE84E17C2D56550B00C54EA6 /* KeyboardShortcuts */; };
+		BB5A00012DA0D00000000003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = BB5A00012DA0D00000000002 /* Sparkle */; };
 		CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; };
 		CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00072D82F40000000000 /* libomp.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -165,6 +166,7 @@
 				CE84DF722D55778000C54EA6 /* MetalKit.framework in Frameworks */,
 				CE84DF6E2D55777800C54EA6 /* libc++.tbd in Frameworks */,
 				CE84E17D2D56550B00C54EA6 /* KeyboardShortcuts in Frameworks */,
+				BB5A00012DA0D00000000003 /* Sparkle in Frameworks */,
 				CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */,
 				937017DE84013867E255B023 /* libtext_processing_rs.dylib in Frameworks */,
 			);
@@ -277,6 +279,7 @@
 				AADD00012DA0B00000000002 /* DTLNAecCoreML */,
 				AADD00012DA0B00000000003 /* DTLNAec256 */,
 				AA0AP0012DA0C00000000002 /* ArgumentParser */,
+				BB5A00012DA0D00000000002 /* Sparkle */,
 			);
 			productName = OpenSuperMLX;
 			productReference = CE57B0282D52C7BB00929AF3 /* OpenSuperMLX.app */;
@@ -389,6 +392,7 @@
 				9550D0CED7CEC53CC8DF8381 /* XCRemoteSwiftPackageReference "aws-sdk-swift" */,
 				AADD00012DA0B00000000001 /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */,
 				AA0AP0012DA0C00000000001 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+				BB5A00012DA0D00000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE57B0292D52C7BB00929AF3 /* Products */;
@@ -933,6 +937,14 @@
 				minimumVersion = 1.5.0;
 			};
 		};
+		BB5A00012DA0D00000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.10.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -982,6 +994,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA0AP0012DA0C00000000001 /* XCRemoteSwiftPackageReference "swift-argument-parser" */;
 			productName = ArgumentParser;
+		};
+		BB5A00012DA0D00000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB5A00012DA0D00000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

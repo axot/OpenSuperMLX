@@ -23,23 +23,28 @@ if [[ "$ref_type" != "tag" && "$ref" != "refs/tags/$ref_name" ]]; then
     fail "release ref must be a tag"
 fi
 
-if [[ ! "$ref_name" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+release_tag_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+if [[ ! "$ref_name" =~ $release_tag_pattern ]]; then
     fail "tag must use X.Y.Z format"
 fi
 
 project_file="OpenSuperMLX.xcodeproj/project.pbxproj"
 [[ -f "$project_file" ]] || fail "project file is missing"
 
-project_versions="$({
-    awk '
-        /MARKETING_VERSION[[:space:]]*=/ {
+# Prints the distinct values of one build setting read from a project file on stdin.
+read_project_setting() {
+    awk -v key="$1" '
+        $0 ~ key "[[:space:]]*=" {
             value = $0
-            sub(/^.*MARKETING_VERSION[[:space:]]*=[[:space:]]*/, "", value)
+            sub("^.*" key "[[:space:]]*=[[:space:]]*", "", value)
             sub(/[[:space:]]*;.*$/, "", value)
             if (value != "") print value
         }
-    ' "$project_file" | sort -u
-} 2>/dev/null)" || fail "could not parse MARKETING_VERSION"
+    ' | sort -u
+}
+
+project_versions="$(read_project_setting MARKETING_VERSION < "$project_file" 2>/dev/null)" \
+    || fail "could not parse MARKETING_VERSION"
 
 version_count="$(printf '%s\n' "$project_versions" | awk 'NF { count++ } END { print count + 0 }')"
 [[ "$version_count" -gt 0 ]] || fail "MARKETING_VERSION is missing"
@@ -62,6 +67,23 @@ tag_sha="$(git rev-parse --verify "refs/tags/${ref_name}^{commit}" 2>/dev/null)"
 
 if ! git merge-base --is-ancestor "$release_sha" refs/remotes/origin/master >/dev/null 2>&1; then
     fail "release commit is not on origin/master"
+fi
+
+build_number="$(read_project_setting CURRENT_PROJECT_VERSION < "$project_file")" \
+    || fail "could not parse CURRENT_PROJECT_VERSION"
+[[ -n "$build_number" ]] || fail "CURRENT_PROJECT_VERSION is missing"
+[[ "$build_number" =~ ^[1-9][0-9]*$ ]] || fail "CURRENT_PROJECT_VERSION values must be one positive integer"
+
+# Sparkle compares build numbers, so every release must raise CURRENT_PROJECT_VERSION.
+previous_tag="$(git tag --merged "$release_sha" --sort=-v:refname \
+    | grep -E "$release_tag_pattern" \
+    | grep -vxF "$ref_name" | head -n 1 || true)"
+if [[ -n "$previous_tag" ]]; then
+    previous_build="$(git show "refs/tags/${previous_tag}:${project_file}" 2>/dev/null \
+        | read_project_setting CURRENT_PROJECT_VERSION || true)"
+    [[ "$previous_build" =~ ^[1-9][0-9]*$ ]] || fail "could not read CURRENT_PROJECT_VERSION for $previous_tag"
+    (( build_number > previous_build )) \
+        || fail "CURRENT_PROJECT_VERSION $build_number must be greater than $previous_build in $previous_tag"
 fi
 
 workflow_metadata="$(

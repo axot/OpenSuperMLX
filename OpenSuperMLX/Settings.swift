@@ -4,6 +4,7 @@ import SwiftUI
 
 import KeyboardShortcuts
 
+@MainActor
 class SettingsViewModel: ObservableObject {
     @Published var useNeuralEngineAudioTower: Bool {
         didSet {
@@ -36,6 +37,13 @@ class SettingsViewModel: ObservableObject {
     @Published var debugMode: Bool {
         didSet {
             AppPreferences.shared.debugMode = debugMode
+        }
+    }
+
+    @Published var automaticallyChecksForUpdates: Bool {
+        didSet {
+            guard AppUpdater.isEnabled else { return }
+            AppUpdater.shared.automaticallyChecksForUpdates = automaticallyChecksForUpdates
         }
     }
     
@@ -135,6 +143,7 @@ class SettingsViewModel: ObservableObject {
         self.translateToEnglish = prefs.translateToEnglish
         self.temperature = prefs.temperature
         self.debugMode = prefs.debugMode
+        self.automaticallyChecksForUpdates = AppUpdater.isEnabled && AppUpdater.shared.automaticallyChecksForUpdates
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.bedrockAuthMode = prefs.bedrockAuthMode

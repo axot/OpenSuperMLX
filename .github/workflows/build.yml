@@ -20,6 +20,10 @@ jobs:
         run: bash .github/scripts/release-preflight.test.sh
       - name: Test build safety
         run: bash .github/scripts/build-safety.test.sh
+      - name: Test appcast generation
+        run: bash .github/scripts/make-appcast.test.sh
+      - name: Test update signature verification
+        run: bash .github/scripts/verify-ed-signature.test.sh
       - name: Select latest Xcode (Swift 6.2+)
         id: select_xcode
         run: |

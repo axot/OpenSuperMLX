@@ -12,6 +12,8 @@ import os.log
 import SwiftUI
 import UniformTypeIdentifiers
 
+import Sparkle
+
 private let appLogger = Logger(subsystem: "OpenSuperMLX", category: "App")
 
 struct OpenSuperMLXApp: App {
@@ -118,6 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         OpenSuperMLXApp.startTranscriptionQueue()
         startTranscriptMCPServerIfEnabled()
         observeMicrophoneChanges()
+        startAppUpdaterIfEnabled()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -126,6 +129,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if AppUpdater.isEnabled, AppUpdater.shared.holdsTerminationForUpdate() {
+            return .terminateCancel
+        }
         guard saveCoordinator.blocksNewRecording else { return .terminateNow }
         recoveryPresenter()
         return .terminateCancel
@@ -179,6 +185,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .sink { [weak self] _ in
                 self?.updateStatusBarMenu()
             }
+    }
+
+    private func startAppUpdaterIfEnabled() {
+        guard AppUpdater.isEnabled else { return }
+        let busy = Publishers.CombineLatest3(
+            RecordingActivity.shared.$isActive,
+            TranscriptionQueue.shared.$isProcessing,
+            saveCoordinator.$state.map { !$0.isIdle }
+        )
+        .map { $0 || $1 || $2 }
+        .removeDuplicates()
+        .eraseToAnyPublisher()
+        AppUpdater.shared.start(busy: busy)
     }
 
     private func startTranscriptMCPServerIfEnabled() {
@@ -301,6 +320,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         menu.addItem(microphoneMenu)
         
         menu.addItem(NSMenuItem.separator())
+        if AppUpdater.isEnabled {
+            let updateItem = NSMenuItem(
+                title: "Check for Updates…",
+                action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+                keyEquivalent: ""
+            )
+            updateItem.target = AppUpdater.shared.controller
+            menu.addItem(updateItem)
+        }
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         
         statusItem?.menu = menu
