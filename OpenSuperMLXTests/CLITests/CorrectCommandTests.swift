@@ -69,6 +69,9 @@ final class CorrectCommandTests: XCTestCase {
             }
             XCTAssertEqual(data.correctedText, output)
             XCTAssertEqual(data.originalText, "um hello world")
+            XCTAssertEqual(data.mode, "single")
+            XCTAssertEqual(data.chunkCount, 1)
+            XCTAssertNil(data.warning)
         }
         XCTAssertEqual(mockProvider.correctCallCount, 2)
     }
@@ -149,5 +152,27 @@ final class CorrectCommandTests: XCTestCase {
         }
         XCTAssertTrue(AppPreferences.shared.useCustomCorrectionPrompt)
         XCTAssertEqual(AppPreferences.shared.customCorrectionPrompt, "Fix grammar only")
+    }
+
+    func testCorrectLongText_PartialChunkFailure_SucceedsWithWarning() async throws {
+        let mockProvider = MockLLMProvider()
+        mockProvider.requestOptions.maxOutputTokens = 1024
+        mockProvider.handler = { text, _, index in
+            if index == 1 { throw LLMProviderError.httpError(statusCode: 400, message: "content_filter") }
+            return text
+        }
+        let service = LLMCorrectionService(providerFactory: { mockProvider })
+        let longText = String(repeating: "あいうえおかきくけこさしすせそたちつてと。", count: 100)
+
+        let command = try OpenSuperMLXCLI.parseAsRoot(["correct", longText]) as! CorrectCommand
+        let result = await command.executeCorrection(service: service)
+
+        guard case .success(let data) = result else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertEqual(data.mode, "chunked")
+        XCTAssertEqual(data.chunkCount, 3)
+        XCTAssertEqual(data.failedChunkCount, 1)
+        XCTAssertNotNil(data.warning)
     }
 }

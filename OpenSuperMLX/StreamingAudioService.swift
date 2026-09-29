@@ -1483,9 +1483,15 @@ class StreamingAudioService: ObservableObject {
     struct StreamingResult {
         let text: String
         let recording: Recording?
+        var llmErrorMessage: String?
     }
 
-    func finalizeRecording(duration: TimeInterval = 0, applyCorrection: Bool = true, forceLLM: Bool = false) async -> StreamingResult? {
+    func finalizeRecording(
+        duration: TimeInterval = 0,
+        applyCorrection: Bool = true,
+        forceLLM: Bool = false,
+        onCorrectionStarted: () -> Void = {}
+    ) async -> StreamingResult? {
         let saveCoordinator = RecordingSaveCoordinator.shared
         guard saveCoordinator.reserveSave() else { return nil }
         guard let result = await stopStreaming() else {
@@ -1520,8 +1526,12 @@ class StreamingAudioService: ObservableObject {
             }.value
         }
 
-        if applyCorrection {
-            text = await LLMCorrectionService.shared.correctTranscription(text, forceEnabled: forceLLM)
+        var llmErrorMessage: String?
+        if applyCorrection && LLMCorrectionService.willCorrect(forceEnabled: forceLLM) {
+            onCorrectionStarted()
+            let outcome = await LLMCorrectionService.shared.correct(text, forceEnabled: forceLLM)
+            text = outcome.text
+            llmErrorMessage = outcome.errorMessage
         }
 
         let captureOutcome = StreamingCaptureOutcome(
@@ -1539,7 +1549,8 @@ class StreamingAudioService: ObservableObject {
 
         return StreamingResult(
             text: text,
-            recording: recording
+            recording: recording,
+            llmErrorMessage: llmErrorMessage
         )
     }
 

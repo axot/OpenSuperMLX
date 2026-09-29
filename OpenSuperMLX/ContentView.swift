@@ -319,7 +319,7 @@ class ContentViewModel: ObservableObject {
                     self.recoveryPresenter()
                 }
 
-                if let error = LLMCorrectionService.shared.lastErrorMessage {
+                if let error = result.llmErrorMessage {
                     ErrorToastManager.shared.show(error)
                 }
 

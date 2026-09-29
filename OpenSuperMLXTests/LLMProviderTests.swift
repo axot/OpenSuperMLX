@@ -40,16 +40,19 @@ final class LLMProviderTests: XCTestCase {
     func testOpenAIAPIProtocol_DisplayNames() {
         XCTAssertEqual(OpenAIAPIProtocol.chatCompletions.displayName, "Chat Completions")
         XCTAssertEqual(OpenAIAPIProtocol.responses.displayName, "Responses")
+        XCTAssertEqual(OpenAIAPIProtocol.anthropicMessages.displayName, "Anthropic Messages")
     }
 
     func testOpenAIAPIProtocol_EndpointPaths() {
         XCTAssertEqual(OpenAIAPIProtocol.chatCompletions.endpointPath, "chat/completions")
         XCTAssertEqual(OpenAIAPIProtocol.responses.endpointPath, "responses")
+        XCTAssertEqual(OpenAIAPIProtocol.anthropicMessages.endpointPath, "messages")
     }
 
     func testOpenAIAPIProtocol_RawValueRoundTrips() {
         XCTAssertEqual(OpenAIAPIProtocol(rawValue: "chat_completions"), .chatCompletions)
         XCTAssertEqual(OpenAIAPIProtocol(rawValue: "responses"), .responses)
+        XCTAssertEqual(OpenAIAPIProtocol(rawValue: "anthropic_messages"), .anthropicMessages)
         XCTAssertNil(OpenAIAPIProtocol(rawValue: "unknown"))
     }
 
@@ -75,10 +78,6 @@ final class LLMProviderTests: XCTestCase {
         XCTAssertEqual(
             LLMProviderError.httpError(statusCode: 500, message: "Internal Error").errorDescription,
             "HTTP 500: Internal Error"
-        )
-        XCTAssertEqual(
-            LLMProviderError.apiError(provider: "Test", message: "Bad request", code: "400").errorDescription,
-            "Bad request"
         )
         XCTAssertEqual(
             LLMProviderError.authenticationFailed(provider: "Test", detail: "Invalid key").errorDescription,
@@ -122,13 +121,13 @@ final class LLMProviderTests: XCTestCase {
         XCTAssertEqual(error.userFacingMessage, "Rate limit reached. Please wait and try again.")
     }
 
-    func testUserFacingMessage_ApiError_ModelNotFound() {
-        let error = LLMProviderError.apiError(provider: "Test", message: "The model 'xyz' does not exist", code: nil)
+    func testUserFacingMessage_HttpError_ModelDoesNotExist() {
+        let error = LLMProviderError.httpError(statusCode: 400, message: "The model 'xyz' does not exist")
         XCTAssertEqual(error.userFacingMessage, "Model not found. Check the model name in Settings → LLM.")
     }
 
-    func testUserFacingMessage_ApiError_Generic() {
-        let error = LLMProviderError.apiError(provider: "Test", message: "Bad request", code: "400")
+    func testUserFacingMessage_HttpError_Generic() {
+        let error = LLMProviderError.httpError(statusCode: 400, message: "Bad request")
         XCTAssertEqual(error.userFacingMessage, "LLM correction failed. Check Settings → LLM.")
     }
 
@@ -167,5 +166,114 @@ final class LLMProviderTests: XCTestCase {
     func testProviderName_NetworkError_ReturnsNil() {
         let error = LLMProviderError.networkError(underlying: URLError(.timedOut))
         XCTAssertNil(error.providerName)
+    }
+}
+
+// MARK: - Failure Kind & Request Options
+
+final class LLMProviderFailureKindTests: XCTestCase {
+
+    func testFailureKind_NetworkTimeoutRateLimitAndServerErrorsAreTransient() {
+        let transient: [LLMProviderError] = [
+            .networkError(underlying: URLError(.notConnectedToInternet)),
+            .timeout(seconds: 30),
+            .rateLimited(provider: "Test", retryAfter: nil),
+            .httpError(statusCode: 503, message: "Service Unavailable"),
+            .httpError(statusCode: 408, message: "Request Timeout"),
+            .httpError(statusCode: 429, message: "Too Many Requests"),
+        ]
+        for error in transient {
+            XCTAssertEqual(error.failureKind, .transient, "\(error)")
+        }
+    }
+
+    func testFailureKind_ConfigurationAndAuthErrorsArePermanent() {
+        let permanent: [LLMProviderError] = [
+            .notConfigured(provider: "Test"),
+            .authenticationFailed(provider: "Test", detail: "bad key"),
+            .httpError(statusCode: 401, message: ""),
+            .httpError(statusCode: 403, message: ""),
+            .httpError(statusCode: 404, message: ""),
+        ]
+        for error in permanent {
+            XCTAssertEqual(error.failureKind, .permanent, "\(error)")
+        }
+    }
+
+    func testFailureKind_TruncationEmptyAndBadRequestArePerRequest() {
+        let perRequest: [LLMProviderError] = [
+            .outputTruncated(provider: "Test"),
+            .outputRejected(provider: "Test", reason: "content_filter"),
+            .emptyResponse,
+            .httpError(statusCode: 400, message: "context too long"),
+            .httpError(statusCode: 413, message: ""),
+            .requestTooLarge(provider: "Test", detail: "maximum context length exceeded"),
+        ]
+        for error in perRequest {
+            XCTAssertEqual(error.failureKind, .perRequest, "\(error)")
+        }
+    }
+
+    func testOutputTruncated_UserFacingMessageExplainsCutOff() {
+        let error = LLMProviderError.outputTruncated(provider: "Test")
+        XCTAssertEqual(error.errorDescription, "Test stopped before finishing the output.")
+        XCTAssertEqual(error.userFacingMessage, "LLM output was cut off. Original text kept.")
+    }
+
+    func testFromHTTP_ClassifiesTokenLimitsOnceAndDetectsThinkingRejections() {
+        func classify(_ status: Int, _ message: String) -> LLMProviderError {
+            LLMProviderError.fromHTTP(statusCode: status, message: message, provider: "Test")
+        }
+        guard case .requestTooLarge = classify(400, "max_tokens is too large: 200000"),
+              case .requestTooLarge = classify(400, "This model's maximum context length is 32768 tokens"),
+              case .requestTooLarge = classify(400, "Input is too long for requested model."),
+              case .httpError(400, _) = classify(400, "content_filter triggered"),
+              case .authenticationFailed = classify(401, "bad key"),
+              case .rateLimited = classify(429, "slow down")
+        else {
+            return XCTFail("Unexpected classification")
+        }
+
+        XCTAssertTrue(classify(400, "Unrecognized request argument supplied: reasoning_effort").rejectsThinkingParameters)
+        XCTAssertTrue(classify(400, "thinking.budget_tokens must be less than max_tokens").rejectsThinkingParameters)
+        XCTAssertFalse(classify(400, "content_filter triggered").rejectsThinkingParameters)
+        XCTAssertFalse(classify(429, "reasoning quota").rejectsThinkingParameters)
+    }
+
+    func testVariantCache_RemembersDowngradeAndClampsToShorterVariantLists() async throws {
+        let cache = LLMThinkingVariantCache()
+        let first = try await cache.firstAccepted(key: "k", variants: [.primary, .omitted]) { variant in
+            if variant == .primary { throw LLMProviderError.httpError(statusCode: 400, message: "reasoning unsupported") }
+            return variant
+        }
+        let remembered = try await cache.firstAccepted(key: "k", variants: [.primary, .omitted]) { $0 }
+        let shorterList = try await cache.firstAccepted(key: "k", variants: [.primary]) { $0 }
+
+        XCTAssertEqual(first, .omitted)
+        XCTAssertEqual(remembered, .omitted)
+        XCTAssertEqual(shorterList, .primary)
+    }
+
+    func testThinkingBudget_ScalesWithEffortAndStaysBelowHalfTheOutputLimit() {
+        var options = LLMRequestOptions(
+            contextTokens: 131_072, maxOutputTokens: 32_768, thinkingEnabled: true, thinkingEffort: .low
+        )
+        XCTAssertEqual(options.thinkingBudgetTokens, 2048)
+        options.thinkingEffort = .medium
+        XCTAssertEqual(options.thinkingBudgetTokens, 8192)
+        options.thinkingEffort = .high
+        XCTAssertEqual(options.thinkingBudgetTokens, 16_384)
+        options.maxOutputTokens = 4096
+        XCTAssertEqual(options.thinkingBudgetTokens, 2048)
+    }
+
+    func testReservedThinkingTokens_ZeroWhenThinkingDisabled() {
+        let enabled = LLMRequestOptions(
+            contextTokens: 200_000, maxOutputTokens: 32_768, thinkingEnabled: true, thinkingEffort: .medium
+        )
+        var disabled = enabled
+        disabled.thinkingEnabled = false
+        XCTAssertEqual(enabled.reservedThinkingTokens, 8192)
+        XCTAssertEqual(disabled.reservedThinkingTokens, 0)
     }
 }
