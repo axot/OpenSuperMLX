@@ -30,9 +30,9 @@ final class OpenAICompatibleLLMProviderTests: XCTestCase {
 
     // MARK: - Display Name
 
-    func testDisplayName_ReturnsOpenAICompatible() {
+    func testDisplayName_ReturnsCustomAPI() {
         let provider = OpenAICompatibleLLMProvider()
-        XCTAssertEqual(provider.displayName, "OpenAI Compatible")
+        XCTAssertEqual(provider.displayName, "Custom API")
     }
 
     // MARK: - isConfigured

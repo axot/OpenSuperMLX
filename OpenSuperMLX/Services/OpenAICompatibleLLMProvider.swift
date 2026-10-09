@@ -25,7 +25,7 @@ final class OpenAICompatibleLLMProvider: LLMProvider, @unchecked Sendable {
     // Learned once per provider instance (one correction run) so later chunks skip the rejected field.
     private var prefersMaxCompletionTokens = false
 
-    let displayName = "OpenAI Compatible"
+    let displayName = LLMProviderType.openai.displayName
 
     init(session: URLSession = OpenAICompatibleLLMProvider.sharedSession, variantCache: LLMThinkingVariantCache = .shared) {
         self.session = session

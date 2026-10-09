@@ -26,7 +26,7 @@ final class LLMProviderTests: XCTestCase {
 
     func testProviderType_DisplayNames() {
         XCTAssertEqual(LLMProviderType.bedrock.displayName, "AWS Bedrock")
-        XCTAssertEqual(LLMProviderType.openai.displayName, "OpenAI Compatible")
+        XCTAssertEqual(LLMProviderType.openai.displayName, "Custom API")
     }
 
     func testProviderType_RawValueRoundTrips() {
