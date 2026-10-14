@@ -81,6 +81,7 @@ class StreamingAudioService: ObservableObject {
 
     @Published private(set) var confirmedText = ""
     @Published private(set) var provisionalText = ""
+    @Published private(set) var transcriptDisplayUpdate: LiveTranscriptSnapshot?
     @Published private(set) var isStreaming = false
     @Published private(set) var currentRMSLevel: Float = 0
 
@@ -1059,6 +1060,7 @@ class StreamingAudioService: ObservableObject {
         resetHealthForNewRecording()
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
 
         let startTime = Date()
         let recordingID = UUID()
@@ -1406,6 +1408,7 @@ class StreamingAudioService: ObservableObject {
         endCurrentTranscriptSession(finalText: finalText, elapsedMs: currentTranscriptElapsedMs())
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
         streamingSession = nil
         recordingStartTime = nil
         currentRecordingID = nil
@@ -1560,13 +1563,16 @@ class StreamingAudioService: ObservableObject {
         switch event {
         case .provisional(let text):
             provisionalText = text
+            publishTranscriptDisplayUpdate()
 
         case .confirmed(let text):
             confirmedText = text
+            publishTranscriptDisplayUpdate()
 
         case .displayUpdate(let confirmed, let provisional):
             confirmedText = confirmed
             provisionalText = provisional
+            publishTranscriptDisplayUpdate()
 
         case .stats(let stats):
             if let gap = stats.recoveryGap {
@@ -1591,10 +1597,17 @@ class StreamingAudioService: ObservableObject {
             let cleaned = Self.finalizedText(fullText, hasGaps: hasTranscriptionGaps)
             confirmedText = cleaned
             provisionalText = ""
+            publishTranscriptDisplayUpdate()
             logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public) → cleaned: \(cleaned.count, privacy: .public)")
         }
 
         recordTranscriptEvent(event, elapsedMs: currentTranscriptElapsedMs())
+    }
+
+    private func publishTranscriptDisplayUpdate() {
+        var snapshot = LiveTranscriptSnapshot()
+        snapshot.capture(confirmed: confirmedText, provisional: provisionalText)
+        transcriptDisplayUpdate = snapshot
     }
 
     @discardableResult
@@ -1694,6 +1707,7 @@ class StreamingAudioService: ObservableObject {
         hasReportedUnavailableEncoder = false
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
         recordingStartTime = nil
         currentRecordingID = nil
         currentRecordingFileName = nil

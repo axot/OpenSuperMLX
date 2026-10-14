@@ -11,6 +11,10 @@ enum RecordingState: Equatable {
     case decoding
     case correcting
     case busy
+
+    var isCapturing: Bool { self == .connecting || self == .recording }
+    var isProcessing: Bool { self == .decoding || self == .correcting }
+    var hasRecordingSession: Bool { isCapturing || isProcessing }
 }
 
 @MainActor
@@ -26,6 +30,7 @@ class IndicatorViewModel: ObservableObject {
     let recorder: AudioRecorder = .shared
     @Published var isVisible = false
     @Published private(set) var isStreamingMode = false
+    @Published private(set) var completedRecording: Recording?
     var forceLLMCorrection: Bool = false
     
     var delegate: IndicatorViewDelegate?
@@ -199,6 +204,7 @@ class IndicatorViewModel: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
 
+                self.completedRecording = result.recording
                 if result.recording == nil {
                     self.recoveryPresenter()
                 }
@@ -287,6 +293,7 @@ class IndicatorViewModel: ObservableObject {
     ) async {
         let recording = await saveCoordinator.saveReservedEncodedRecording(request)
         guard !Task.isCancelled else { return }
+        completedRecording = recording
         if recording == nil {
             recoveryPresenter()
         }

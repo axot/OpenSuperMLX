@@ -32,8 +32,23 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         return lhs.id == rhs.id &&
                lhs.status == rhs.status &&
                lhs.progress == rhs.progress &&
-               lhs.transcription == rhs.transcription &&
+               lhs.transcription.utf16.elementsEqual(rhs.transcription.utf16) &&
                lhs.isRegeneration == rhs.isRegeneration
+    }
+
+    mutating func applyProgressUpdate(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let id = info["id"] as? UUID, id == self.id,
+              let progress = info["progress"] as? Float,
+              let status = info["status"] as? RecordingStatus else { return }
+        if let transcription = info["transcription"] as? String {
+            self.transcription = transcription
+        }
+        self.progress = progress
+        self.status = status
+        if let isRegeneration = info["isRegeneration"] as? Bool {
+            self.isRegeneration = isRegeneration
+        }
     }
 
     static var recordingsDirectory: URL {

@@ -83,6 +83,9 @@ struct RecordingDock<Tools: View>: View {
     let text: String
     let onRecord: () -> Void
     let onStop: () -> Void
+    var detailsOpen = false
+    var canShowDetails = false
+    var onShowDetails: () -> Void = {}
     @ViewBuilder var tools: () -> Tools
 
     @State private var hovering = false
@@ -92,7 +95,14 @@ struct RecordingDock<Tools: View>: View {
     var body: some View {
         HStack(spacing: 15) {
             recordButton
-            middle
+            Button(action: onShowDetails) {
+                middle
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canShowDetails)
+            .help(detailsOpen ? "Close recording details" : "Show complete transcript")
             Spacer(minLength: 8)
             tools()
         }
@@ -158,6 +168,9 @@ struct RecordingDock<Tools: View>: View {
                     LogoWaveform(level: level)
                     Text(timeString)
                         .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(DesignTokens.txt3)
+                    Image(systemName: detailsOpen ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(DesignTokens.txt3)
                 }
                 TypewriterText(target: text, placeholder: "Listening…")
