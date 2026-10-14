@@ -36,8 +36,12 @@ class ContentViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var shouldClearSearch = false
     @Published var streamingConfirmedText = ""
+    @Published private(set) var liveTranscriptSnapshot = LiveTranscriptSnapshot()
+    @Published private(set) var completedRecording: Recording?
     @Published var currentRMSLevel: Float = 0
     @Published private(set) var isStreamingMode = false
+    @Published private(set) var externalRecordingState: RecordingState = .idle
+    @Published private(set) var externalIsStreaming = false
 
     private let recorder: AudioRecorder = .shared
     private let recordingStore = RecordingStore.shared
@@ -67,7 +71,7 @@ class ContentViewModel: ObservableObject {
         recorder.$isConnecting
             .receive(on: RunLoop.main)
             .sink { [weak self] isConnecting in
-                guard let self = self else { return }
+                guard let self = self, !self.externalRecordingState.hasRecordingSession else { return }
                 if isConnecting && !self.isProcessing {
                     self.state = .connecting
                     self.stopBlinking()
@@ -80,7 +84,8 @@ class ContentViewModel: ObservableObject {
         recorder.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
-                guard let self = self, !self.isStreamingMode else { return }
+                guard let self = self, !self.isStreamingMode,
+                      !self.externalRecordingState.hasRecordingSession else { return }
                 if isRecording && !self.isProcessing {
                     self.state = .recording
                     self.startBlinking()
@@ -101,6 +106,13 @@ class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        streamingService.$transcriptDisplayUpdate
+            .compactMap { $0 }
+            .sink { [weak self] snapshot in
+                self?.liveTranscriptSnapshot = snapshot
+            }
+            .store(in: &cancellables)
+
         streamingService.$currentRMSLevel
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -115,6 +127,49 @@ class ContentViewModel: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        IndicatorWindowManager.shared.$viewModel
+            .map { viewModel -> AnyPublisher<(RecordingState, Bool), Never> in
+                guard let viewModel else { return Just((.idle, false)).eraseToAnyPublisher() }
+                return viewModel.$state.combineLatest(viewModel.$isStreamingMode).eraseToAnyPublisher()
+            }
+            .switchToLatest()
+            .sink { [weak self] state, streaming in
+                self?.updateExternalRecording(state: state, streaming: streaming)
+            }
+            .store(in: &cancellables)
+
+        IndicatorWindowManager.shared.$viewModel
+            .map { viewModel -> AnyPublisher<Recording?, Never> in
+                guard let viewModel else { return Just(nil).eraseToAnyPublisher() }
+                return viewModel.$completedRecording.eraseToAnyPublisher()
+            }
+            .switchToLatest()
+            .sink { [weak self] recording in
+                if let recording { self?.completedRecording = recording }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateExternalRecording(state: RecordingState, streaming: Bool) {
+        guard !self.state.hasRecordingSession else { return }
+        let wasActive = externalRecordingState.hasRecordingSession
+        externalRecordingState = state
+        externalIsStreaming = streaming
+        if !wasActive && state.hasRecordingSession {
+            completedRecording = nil
+            liveTranscriptSnapshot = LiveTranscriptSnapshot()
+            if let snapshot = streamingService.transcriptDisplayUpdate {
+                liveTranscriptSnapshot = snapshot
+            }
+            recordingDuration = 0
+        }
+        guard wasActive || state.hasRecordingSession else { return }
+        if state == .recording {
+            startDurationTimerIfNeeded()
+        } else {
+            stopDurationTimer()
+        }
     }
     
     // MARK: - Data Loading
@@ -185,20 +240,15 @@ class ContentViewModel: ObservableObject {
         loadMore()
     }
     
-    func handleProgressUpdate(id: UUID, transcription: String?, progress: Float, status: RecordingStatus, isRegeneration: Bool?) {
-        if let index = recordings.firstIndex(where: { $0.id == id }) {
-            if let transcription = transcription {
-                recordings[index].transcription = transcription
-            }
-            recordings[index].progress = progress
-            recordings[index].status = status
-            if let isRegeneration = isRegeneration {
-                recordings[index].isRegeneration = isRegeneration
-            }
-        }
+    func handleProgressUpdate(_ notification: Notification) {
+        completedRecording?.applyProgressUpdate(notification)
+        guard let id = notification.userInfo?["id"] as? UUID,
+              let index = recordings.firstIndex(where: { $0.id == id }) else { return }
+        recordings[index].applyProgressUpdate(notification)
     }
     
     func deleteRecording(_ recording: Recording) {
+        if completedRecording?.id == recording.id { completedRecording = nil }
         recordingStore.deleteRecording(recording)
         if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
             recordings.remove(at: index)
@@ -207,6 +257,7 @@ class ContentViewModel: ObservableObject {
     }
 
     func deleteAllRecordings() {
+        completedRecording = nil
         recordingStore.deleteAllRecordings()
         recordings.removeAll()
         totalCount = 0
@@ -215,6 +266,9 @@ class ContentViewModel: ObservableObject {
     // MARK: - Recording Control
 
     var isRecording: Bool {
+        if externalRecordingState.isCapturing {
+            return externalRecordingState == .recording
+        }
         if isStreamingMode {
             return streamingService.isStreaming
         }
@@ -226,8 +280,10 @@ class ContentViewModel: ObservableObject {
     }
 
     var isProcessing: Bool {
-        state == .decoding || state == .correcting
+        state.isProcessing || externalRecordingState.isProcessing
     }
+
+    var isConnecting: Bool { state == .connecting || externalRecordingState == .connecting }
 
     func startRecording() {
         guard !saveCoordinator.blocksNewRecording else {
@@ -244,6 +300,8 @@ class ContentViewModel: ObservableObject {
             return
         }
 
+        completedRecording = nil
+        liveTranscriptSnapshot = LiveTranscriptSnapshot()
         if AppPreferences.shared.useStreamingTranscription {
             isStreamingMode = true
             state = .recording
@@ -296,6 +354,10 @@ class ContentViewModel: ObservableObject {
     }
 
     func startDecoding() {
+        if externalRecordingState.hasRecordingSession {
+            IndicatorWindowManager.shared.stopRecording()
+            return
+        }
         state = .decoding
         stopBlinking()
         stopDurationTimer()
@@ -315,6 +377,7 @@ class ContentViewModel: ObservableObject {
                 }
 
                 if let recording = result.recording {
+                    self.completedRecording = recording
                     if !self.currentSearchQuery.isEmpty {
                         self.shouldClearSearch = true
                         self.currentSearchQuery = ""
@@ -373,6 +436,7 @@ class ContentViewModel: ObservableObject {
                         fileName: fileName
                     )
                     if let recording = await self.saveCoordinator.saveReservedEncodedRecording(request) {
+                        self.completedRecording = recording
                         if !self.currentSearchQuery.isEmpty {
                             self.shouldClearSearch = true
                             self.currentSearchQuery = ""
@@ -514,21 +578,7 @@ struct ContentView: View {
             statsViewModel.loadIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingProgressDidUpdateNotification)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let id = userInfo["id"] as? UUID,
-                  let progress = userInfo["progress"] as? Float,
-                  let status = userInfo["status"] as? RecordingStatus else { return }
-
-            let transcription = userInfo["transcription"] as? String
-            let isRegeneration = userInfo["isRegeneration"] as? Bool
-
-            viewModel.handleProgressUpdate(
-                id: id,
-                transcription: transcription,
-                progress: progress,
-                status: status,
-                isRegeneration: isRegeneration
-            )
+            viewModel.handleProgressUpdate(notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
             viewModel.loadInitialData()
@@ -583,13 +633,17 @@ struct RecordingsPane: View {
     @State private var debouncedSearchText = ""
     @State private var searchTask: Task<Void, Never>? = nil
     @State private var searchHovered = false
+    @State private var detailsState = RecordingDetailsState()
+    @State private var selectedRecording: Recording?
+    @State private var liveDuration: TimeInterval = 0
+    @State private var transcriptCoordinator = TranscriptTextView.Coordinator()
 
     private var currentShortcutDescription: String {
         KeyboardShortcuts.getShortcut(for: .toggleRecord)?.description ?? ""
     }
 
     private var isRecordingState: Bool {
-        viewModel.isRecording || viewModel.state == .recording || viewModel.isProcessing || viewModel.state == .connecting
+        viewModel.isRecording || viewModel.state.hasRecordingSession || viewModel.externalRecordingState.hasRecordingSession
     }
 
     private func performSearch(_ query: String) {
@@ -610,18 +664,92 @@ struct RecordingsPane: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if viewModel.recordings.isEmpty && debouncedSearchText.isEmpty {
-                RecordingsEmptyState(shortcutDescription: currentShortcutDescription)
-            } else {
-                searchField
-                recordingsList
+        GeometryReader { container in
+            VStack(spacing: 0) {
+                HSplitView {
+                    GeometryReader { geometry in
+                        VStack(spacing: 0) {
+                            header
+                            if viewModel.recordings.isEmpty && debouncedSearchText.isEmpty {
+                                RecordingsEmptyState(shortcutDescription: currentShortcutDescription)
+                            } else {
+                                searchField
+                                recordingsList
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, container.safeAreaInsets.top)
+                        .environment(\.contentRegionWidth, geometry.size.width)
+                    }
+                    .frame(minWidth: 240, idealWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
+                    if let document = detailDocument {
+                        RecordingDetailsView(
+                            document: document,
+                            coordinator: transcriptCoordinator,
+                            canReturnToLive: isRecordingState,
+                            onReturnToLive: { showCurrentDetails() },
+                            onClose: { detailsState.close() }
+                        )
+                        .padding(.top, container.safeAreaInsets.top)
+                        .frame(minWidth: 260, idealWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: detailsState.selection != nil)
+                dock
             }
-            dock
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(DesignTokens.bg)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DesignTokens.bg)
+        .onAppear {
+            ShortcutManager.shared.transcriptInspectorVisible = detailsState.selection != nil
+            if let recording = viewModel.completedRecording {
+                detailsState.recordingCompleted(recording.id)
+            }
+            liveDuration = viewModel.recordingDuration
+        }
+        .onDisappear { ShortcutManager.shared.transcriptInspectorVisible = false }
+        .onChange(of: detailsState.selection) { _, selection in
+            ShortcutManager.shared.transcriptInspectorVisible = selection != nil
+        }
+        .onExitCommand {
+            if detailsState.selection != nil { detailsState.close() }
+        }
+        .onChange(of: isRecordingState) { old, new in
+            if !old && new {
+                detailsState.beginRecording()
+                liveDuration = 0
+            } else if old && !new {
+                if detailsState.selection == .live, let recording = viewModel.completedRecording {
+                    selectedRecording = recording
+                }
+                detailsState.recordingStopped(savedID: viewModel.completedRecording?.id)
+            }
+        }
+        .onChange(of: viewModel.recordingDuration) { _, duration in
+            if isRecordingState { liveDuration = duration }
+        }
+        .onChange(of: viewModel.completedRecording) { previous, recording in
+            guard let recording, previous?.id != recording.id else { return }
+            let wasLive = detailsState.selection == .live
+            detailsState.recordingCompleted(recording.id)
+            if wasLive { selectedRecording = recording }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingProgressDidUpdateNotification)) { notification in
+            selectedRecording?.applyProgressUpdate(notification)
+        }
+        .onChange(of: viewModel.recordings) { _, recordings in
+            if let selectedRecording,
+               let updated = recordings.first(where: { $0.id == selectedRecording.id }) {
+                self.selectedRecording = updated
+            }
+        }
+        .onChange(of: viewModel.totalCount) { _, count in
+            if count == 0 {
+                detailsState.clearRecordings()
+                self.selectedRecording = nil
+            }
+        }
         .onChange(of: viewModel.shouldClearSearch) { _, shouldClear in
             if shouldClear {
                 searchText = ""
@@ -630,6 +758,34 @@ struct RecordingsPane: View {
                 viewModel.shouldClearSearch = false
             }
         }
+    }
+
+    private var detailDocument: RecordingDetailDocument? {
+        switch detailsState.selection {
+        case .live:
+            return .live(
+                sessionID: detailsState.liveSessionID,
+                confirmed: viewModel.liveTranscriptSnapshot.confirmed,
+                provisional: viewModel.liveTranscriptSnapshot.provisional,
+                deviceName: viewModel.microphoneService.currentMicrophone?.displayName ?? "Microphone",
+                duration: liveDuration,
+                isProcessing: viewModel.isProcessing
+            )
+        case .recording(let id):
+            let recording = selectedRecording.flatMap { $0.id == id ? $0 : nil }
+                ?? viewModel.completedRecording.flatMap { $0.id == id ? $0 : nil }
+                ?? viewModel.recordings.first { $0.id == id }
+            return recording.map(RecordingDetailDocument.saved)
+        case nil:
+            return nil
+        }
+    }
+
+    private func showCurrentDetails() {
+        if !isRecordingState, let recording = viewModel.completedRecording {
+            selectedRecording = recording
+        }
+        detailsState.toggleCurrent(isRecording: isRecordingState)
     }
 
     private var header: some View {
@@ -650,7 +806,7 @@ struct RecordingsPane: View {
         .padding(.horizontal, 24)
         .padding(.top, 18)
         .padding(.bottom, 14)
-        .contentColumn()
+        .contentColumn(alignment: .leading)
         .overlay(alignment: .bottom) {
             Rectangle().fill(DesignTokens.line2).frame(height: 1)
         }
@@ -693,7 +849,7 @@ struct RecordingsPane: View {
         .onHover { searchHovered = $0 }
         .animation(.easeInOut(duration: 0.14), value: searchHovered)
         .padding(.horizontal, 22)
-        .contentColumn()
+        .contentColumn(alignment: .leading)
         .padding(.top, 16)
         .padding(.bottom, 4)
     }
@@ -721,7 +877,16 @@ struct RecordingsPane: View {
                             recording: recording,
                             searchQuery: debouncedSearchText,
                             isLast: recording.id == viewModel.recordings.last?.id,
-                            onDelete: { viewModel.deleteRecording(recording) },
+                            isSelected: detailsState.selection == .recording(recording.id),
+                            onSelect: {
+                                guard recording.status == .completed else { return }
+                                selectedRecording = recording
+                                detailsState.selectRecording(recording.id)
+                            },
+                            onDelete: {
+                                detailsState.removeRecording(recording.id)
+                                viewModel.deleteRecording(recording)
+                            },
                             onRegenerate: {
                                 Task { await TranscriptionQueue.shared.requeueRecording(recording) }
                             }
@@ -742,7 +907,7 @@ struct RecordingsPane: View {
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
-                .contentColumn()
+                .contentColumn(alignment: .leading)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.recordings.count)
@@ -751,13 +916,16 @@ struct RecordingsPane: View {
     private var dock: some View {
         RecordingDock(
             isRecording: isRecordingState,
-            isBusy: viewModel.isProcessing || viewModel.state == .connecting,
+            isBusy: viewModel.isProcessing || viewModel.isConnecting,
             shortcutDescription: currentShortcutDescription,
-            level: viewModel.isStreamingMode ? viewModel.currentRMSLevel : 0,
+            level: (viewModel.isStreamingMode || viewModel.externalIsStreaming) ? viewModel.currentRMSLevel : 0,
             elapsed: viewModel.recordingDuration,
             text: viewModel.streamingConfirmedText,
             onRecord: { viewModel.startRecording() },
-            onStop: { viewModel.startDecoding() }
+            onStop: { viewModel.startDecoding() },
+            detailsOpen: detailsState.selection == .live,
+            canShowDetails: isRecordingState || viewModel.completedRecording != nil,
+            onShowDetails: { showCurrentDetails() }
         ) {
             HStack(spacing: 8) {
                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
@@ -897,15 +1065,20 @@ struct RecordingRow: View {
     let onDelete: () -> Void
     let onRegenerate: () -> Void
     let isLast: Bool
+    let isSelected: Bool
+    let onSelect: () -> Void
     @StateObject private var audioRecorder = AudioRecorder.shared
     @State private var isHovered = false
     @State private var didCopy = false
 
     init(recording: Recording, searchQuery: String, isLast: Bool = false,
+         isSelected: Bool = false, onSelect: @escaping () -> Void = {},
          onDelete: @escaping () -> Void, onRegenerate: @escaping () -> Void) {
         self.recording = recording
         self.searchQuery = searchQuery
         self.isLast = isLast
+        self.isSelected = isSelected
+        self.onSelect = onSelect
         self.onDelete = onDelete
         self.onRegenerate = onRegenerate
     }
@@ -950,16 +1123,30 @@ struct RecordingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
             metadata
         }
         .padding(.vertical, 14)
         .padding(.horizontal, 12)
+        .overlay {
+            if recording.status == .completed {
+                RecordingRowClickView(
+                    label: displayText.isEmpty ? "No speech detected" : displayText,
+                    onSelect: onSelect
+                )
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            recordingActions
+                .padding(.trailing, 12)
+                .padding(.bottom, 14)
+        }
         .background(
             RoundedRectangle(cornerRadius: DesignTokens.radiusSearch, style: .continuous)
-                .fill(isHovered ? DesignTokens.surface3 : .clear)
+                .fill(rowBackground)
         )
         .overlay(alignment: .bottom) {
-            if !isLast && !isHovered {
+            if !isLast && !isHovered && !isSelected {
                 Rectangle().fill(DesignTokens.line2).frame(height: 1)
             }
         }
@@ -977,6 +1164,11 @@ struct RecordingRow: View {
     }
 
     // MARK: - Content
+
+    private var rowBackground: Color {
+        if isSelected { return DesignTokens.accSoft }
+        return isHovered ? DesignTokens.surface3 : .clear
+    }
 
     @ViewBuilder
     private var content: some View {
@@ -1069,46 +1261,49 @@ struct RecordingRow: View {
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
             }
             Spacer(minLength: 8)
-            // Fixed-size circular buttons fade in on hover so the row never reflows.
-            HStack(spacing: 6) {
-                Button(action: copyTranscription) {
-                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10, weight: didCopy ? .semibold : .regular))
-                        .foregroundStyle(didCopy ? DesignTokens.acc : DesignTokens.txt2)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(DesignTokens.accSoft))
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .buttonStyle(.plain)
-                .help("Copy text")
-                .opacity(copyButtonVisible ? 1 : 0)
-                .allowsHitTesting(copyButtonVisible)
-                .animation(.easeInOut(duration: 0.12), value: copyButtonVisible)
-
-                Button {
-                    if isPlaying {
-                        audioRecorder.stopPlaying()
-                    } else {
-                        audioRecorder.playRecording(url: recording.url)
-                    }
-                } label: {
-                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(isPlaying ? DesignTokens.red : DesignTokens.acc)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(DesignTokens.accSoft))
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .buttonStyle(.plain)
-                .help(isPlaying ? "Stop" : "Play")
-                .opacity(playButtonVisible ? 1 : 0)
-                .allowsHitTesting(playButtonVisible)
-                .animation(.easeInOut(duration: 0.12), value: playButtonVisible)
-            }
+            Color.clear.frame(width: 58)
         }
         .foregroundStyle(DesignTokens.txt3)
         .frame(height: 26)
         .padding(.top, 8)
+    }
+
+    private var recordingActions: some View {
+        HStack(spacing: 6) {
+            Button(action: copyTranscription) {
+                Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10, weight: didCopy ? .semibold : .regular))
+                    .foregroundStyle(didCopy ? DesignTokens.acc : DesignTokens.txt2)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(DesignTokens.accSoft))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            .help("Copy text")
+            .opacity(copyButtonVisible ? 1 : 0)
+            .allowsHitTesting(copyButtonVisible)
+            .animation(.easeInOut(duration: 0.12), value: copyButtonVisible)
+
+            Button {
+                if isPlaying {
+                    audioRecorder.stopPlaying()
+                } else {
+                    audioRecorder.playRecording(url: recording.url)
+                }
+            } label: {
+                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isPlaying ? DesignTokens.red : DesignTokens.acc)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(DesignTokens.accSoft))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            .help(isPlaying ? "Stop" : "Play")
+            .opacity(playButtonVisible ? 1 : 0)
+            .allowsHitTesting(playButtonVisible)
+            .animation(.easeInOut(duration: 0.12), value: playButtonVisible)
+        }
     }
 
     private var playButtonVisible: Bool {

@@ -43,20 +43,21 @@ extension EnvironmentValues {
 }
 
 private struct ContentColumnModifier: ViewModifier {
+    let alignment: Alignment
     @Environment(\.contentRegionWidth) private var regionWidth
 
     func body(content: Content) -> some View {
         content
             .frame(maxWidth: ContentColumnLayout.columnWidth(region: regionWidth))
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: alignment)
     }
 }
 
 extension View {
-    /// Cap this block to `min(contentRegionWidth, contentMaxWidth)` and center it.
+    /// Cap this block to `min(contentRegionWidth, contentMaxWidth)` with the chosen alignment.
     /// The cap is a definite width bounded by the real region, so the block never
     /// overflows the region (no clipping), at any window width or during resize.
-    func contentColumn() -> some View {
-        modifier(ContentColumnModifier())
+    func contentColumn(alignment: Alignment = .center) -> some View {
+        modifier(ContentColumnModifier(alignment: alignment))
     }
 }
