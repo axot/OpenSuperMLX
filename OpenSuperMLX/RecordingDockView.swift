@@ -116,7 +116,7 @@ struct RecordingDock<Tools: View>: View {
         }
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 78)
         .overlay(alignment: .top) {
             Rectangle().fill(DesignTokens.line2).frame(height: 1)
