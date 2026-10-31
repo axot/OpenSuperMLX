@@ -458,7 +458,7 @@ final class LLMCorrectionService {
 
     // MARK: - Provider Resolution
 
-    private nonisolated static func resolveProvider() -> LLMProvider {
+    nonisolated static func resolveProvider() -> LLMProvider {
         let providerType = LLMProviderType(rawValue: AppPreferences.shared.llmProvider) ?? .bedrock
         switch providerType {
         case .bedrock:

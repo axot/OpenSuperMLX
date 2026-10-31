@@ -565,6 +565,8 @@ struct ContentView: View {
                         }
                     case .stats:
                         StatsView(viewModel: statsViewModel)
+                    case .presets:
+                        PresetsPane()
                     case .settings:
                         SettingsView(embedded: true)
                     }
@@ -1014,7 +1016,7 @@ struct PermissionsView: View {
                 isGranted: permissionsManager.isAccessibilityPermissionGranted,
                 title: "Accessibility Access",
                 description: "Required for global keyboard shortcuts",
-                action: { permissionsManager.openSystemPreferences(for: .accessibility) }
+                action: { permissionsManager.requestAccessibilityPermissionOrOpenSystemPreferences() }
             )
 
             Spacer()

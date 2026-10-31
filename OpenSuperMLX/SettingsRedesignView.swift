@@ -121,11 +121,19 @@ struct SettingsRedesignView: View {
         VStack(spacing: 22) {
             SettingsGroup(title: "Recording Trigger") {
                 SettingsField(label: "Toggle record shortcut") {
-                    KeyboardShortcuts.Recorder("", name: .toggleRecord).frame(width: 150)
+                    KeyboardShortcuts.Recorder("", name: .toggleRecord)
+                        .shortcutValidation { shortcut in
+                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                        }
+                        .frame(width: 150)
                 }
                 SettingsFieldDivider()
                 SettingsField(label: "Record with LLM cleanup") {
-                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM).frame(width: 150)
+                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM)
+                        .shortcutValidation { shortcut in
+                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                        }
+                        .frame(width: 150)
                 }
             }
             SettingsGroup(title: "Recording Behavior") {
@@ -142,6 +150,17 @@ struct SettingsRedesignView: View {
                     .foregroundStyle(DesignTokens.green)
                 }
             }
+        }
+    }
+
+    private func presetConflict(for shortcut: KeyboardShortcuts.Shortcut) -> KeyboardShortcuts.ValidationResult {
+        MainActor.assumeIsolated {
+            if let preset = PromptPresetStore.shared.presets.first(where: {
+                $0.shortcutName.shortcut == shortcut
+            }) {
+                return .disallow(reason: "Already used by preset “\(preset.name)”.")
+            }
+            return .allow
         }
     }
 
@@ -673,9 +692,17 @@ private struct PermissionsCard: View {
 
     var body: some View {
         SettingsGroup(title: "Permissions") {
-            permRow("Microphone", granted: permissions.isMicrophonePermissionGranted, action: nil)
+            permRow(
+                "Microphone",
+                granted: permissions.isMicrophonePermissionGranted,
+                action: { permissions.requestMicrophonePermissionOrOpenSystemPreferences() }
+            )
             SettingsFieldDivider()
-            permRow("Accessibility", granted: permissions.isAccessibilityPermissionGranted, action: nil)
+            permRow(
+                "Accessibility",
+                granted: permissions.isAccessibilityPermissionGranted,
+                action: { permissions.requestAccessibilityPermissionOrOpenSystemPreferences() }
+            )
             SettingsFieldDivider()
             permRow("Screen Recording", granted: permissions.isScreenRecordingPermissionGranted) {
                 permissions.openSystemPreferences(for: .screenRecording)

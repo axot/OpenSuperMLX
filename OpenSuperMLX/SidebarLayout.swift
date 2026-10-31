@@ -13,6 +13,7 @@ import SwiftUI
 enum SidebarTab: Int, CaseIterable, Identifiable {
     case recordings
     case stats
+    case presets
     case settings
 
     var id: Int { rawValue }
@@ -21,6 +22,7 @@ enum SidebarTab: Int, CaseIterable, Identifiable {
         switch self {
         case .recordings: return "Recordings"
         case .stats: return "Stats"
+        case .presets: return "Presets"
         case .settings: return "Settings"
         }
     }
@@ -29,6 +31,7 @@ enum SidebarTab: Int, CaseIterable, Identifiable {
         switch self {
         case .recordings: return "mic"
         case .stats: return "chart.bar"
+        case .presets: return "wand.and.stars"
         case .settings: return "gearshape"
         }
     }
