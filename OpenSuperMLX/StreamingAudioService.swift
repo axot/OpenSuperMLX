@@ -282,6 +282,10 @@ class StreamingAudioService: ObservableObject {
     /// is still open restarts the metering timer the stop path tore down.
     private var popoverWantsMetering = false
 
+    /// Starts awaiting engine init own the engine before `isStreaming` flips, so idle
+    /// release must not cool it down underneath them.
+    private var pendingStreamStarts = 0
+
     /// Begin live mic metering for the picker popover. Warms the engine if needed
     /// (so the tap delivers buffers) and runs the RMS timer. No-op while streaming —
     /// streaming already drives `currentRMSLevel`.
@@ -304,13 +308,22 @@ class StreamingAudioService: ObservableObject {
     }
 
     /// An open input engine keeps Bluetooth headsets in the low-quality hands-free
-    /// profile, so the mic is held only while recording or while the popover meters it.
-    nonisolated static func shouldReleaseEngine(isStreaming: Bool, popoverWantsMetering: Bool) -> Bool {
-        !isStreaming && !popoverWantsMetering
+    /// profile, so the mic is held only while recording, starting to record, or while
+    /// the popover meters it.
+    nonisolated static func shouldReleaseEngine(
+        isStreaming: Bool,
+        hasPendingStart: Bool,
+        popoverWantsMetering: Bool
+    ) -> Bool {
+        !isStreaming && !hasPendingStart && !popoverWantsMetering
     }
 
     private func releaseEngineIfIdle() {
-        guard Self.shouldReleaseEngine(isStreaming: isStreaming, popoverWantsMetering: popoverWantsMetering) else { return }
+        guard Self.shouldReleaseEngine(
+            isStreaming: isStreaming,
+            hasPendingStart: pendingStreamStarts > 0,
+            popoverWantsMetering: popoverWantsMetering
+        ) else { return }
         coolDown()
     }
 
@@ -1037,6 +1050,11 @@ class StreamingAudioService: ObservableObject {
         }
 
         let generation = startGeneration
+        pendingStreamStarts += 1
+        defer {
+            pendingStreamStarts -= 1
+            releaseEngineIfIdle()
+        }
 
         guard let model = TranscriptionService.shared.streamingModel else {
             PipelineTrace.shared.log("STREAM", "no model available")
