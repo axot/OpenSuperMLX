@@ -19,7 +19,7 @@ enum PresetApplyOutcome: Equatable {
         case .applied, .ignored:
             return nil
         case .copiedToClipboard:
-            return "OpenSuperMLX can't confirm the selection in this app, so nothing was replaced. The result is on the clipboard. Press ⌘V to paste it."
+            return "Couldn't check that your text is still selected in this app, so it wasn't replaced. The rewrite is on the clipboard. Press ⌘V to paste it."
         case .failed(let message):
             return message
         }
@@ -76,6 +76,7 @@ final class PromptPresetService {
     private let readTarget: @MainActor (Selection) async -> Target?
     private let replaceSelection: @MainActor (Selection, String) async -> Void
     private let copyText: @MainActor (String) -> Void
+    private let alwaysReplace: @MainActor () -> Bool
     private let isAccessibilityGranted: @MainActor () -> Bool
     private var isRunning = false
 
@@ -88,6 +89,7 @@ final class PromptPresetService {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         },
+        alwaysReplace: @escaping @MainActor () -> Bool = { AppPreferences.shared.presetsAlwaysReplace },
         isAccessibilityGranted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
         self.providerFactory = providerFactory
@@ -95,6 +97,7 @@ final class PromptPresetService {
         self.readTarget = readTarget
         self.replaceSelection = replaceSelection
         self.copyText = copyText
+        self.alwaysReplace = alwaysReplace
         self.isAccessibilityGranted = isAccessibilityGranted
     }
 
@@ -139,7 +142,7 @@ final class PromptPresetService {
             guard !result.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
             }
-            guard selection.target.canVerifySelection else {
+            guard selection.target.canVerifySelection || alwaysReplace() else {
                 copyText(result)
                 logger.info("Preset \(preset.name, privacy: .public) result copied; the selection can't be verified")
                 return .copiedToClipboard

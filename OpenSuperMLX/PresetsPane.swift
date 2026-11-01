@@ -46,6 +46,7 @@ struct PresetsView: View {
     @State private var draftInstruction = ""
     @State private var editorError: String?
     @State private var pendingDeletion: PromptPreset?
+    @State private var alwaysReplace = AppPreferences.shared.presetsAlwaysReplace
 
     var body: some View {
         VStack(spacing: 22) {
@@ -53,7 +54,11 @@ struct PresetsView: View {
             if isCreating || editingID != nil {
                 editorGroup
             }
+            replacementGroup
             usageGroup
+        }
+        .onChange(of: alwaysReplace) { _, newValue in
+            AppPreferences.shared.presetsAlwaysReplace = newValue
         }
         .confirmationDialog(
             "Delete preset?",
@@ -229,6 +234,17 @@ struct PresetsView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(DesignTokens.acc))
         }
         .buttonStyle(.plain)
+    }
+
+    private var replacementGroup: some View {
+        SettingsGroup(title: "Replacing Text") {
+            SettingsField(
+                label: "Always replace automatically",
+                detail: "Some apps don't let OpenSuperMLX check that your text is still selected. Turn this off to get the rewrite on the clipboard in those apps and paste it yourself."
+            ) {
+                DesignToggle(isOn: $alwaysReplace)
+            }
+        }
     }
 
     private var usageGroup: some View {

@@ -237,6 +237,11 @@ final class AppPreferences {
     @UserDefault(key: "transcriptMCPPort", defaultValue: Int(TranscriptMCPHTTPServer.defaultPort))
     var transcriptMCPPort: Int
 
+    // MARK: - Prompt Presets
+
+    @UserDefault(key: "presetsAlwaysReplace", defaultValue: true)
+    var presetsAlwaysReplace: Bool
+
     // MARK: - Output Device Classifications
 
     @OptionalUserDefault(key: "outputDeviceClassifications")

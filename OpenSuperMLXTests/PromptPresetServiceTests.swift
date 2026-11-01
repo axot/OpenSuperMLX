@@ -228,6 +228,7 @@ final class PromptPresetServiceGuardTests: XCTestCase {
             },
             replaceSelection: { recorder.record($0, $1) },
             copyText: { copied = $0 },
+            alwaysReplace: { false },
             isAccessibilityGranted: { true }
         )
 
@@ -238,6 +239,27 @@ final class PromptPresetServiceGuardTests: XCTestCase {
         XCTAssertNil(recorder.text)
         XCTAssertFalse(didReadTarget)
         XCTAssertNotNil(outcome.toastMessage)
+    }
+
+    func testApplyReplacesUnverifiableSelectionWhenAlwaysReplaceIsOn() async {
+        let provider = StubLLMProvider(result: .success("Polished"))
+        let recorder = ReplacementRecorder()
+        let service = PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in
+                PromptPresetService.Selection(text: "raw text", target: .init(processID: 42))
+            },
+            readTarget: { _ in .init(processID: 42) },
+            replaceSelection: { recorder.record($0, $1) },
+            copyText: { _ in XCTFail("Always replace must not fall back to the clipboard") },
+            alwaysReplace: { true },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Polish", instruction: "Fix grammar."))
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(recorder.text, "Polished")
     }
 
     func testCopyOwnsPasteboardOnlyForASingleWrite() {

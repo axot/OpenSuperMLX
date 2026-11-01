@@ -84,6 +84,12 @@ final class AppPreferencesTests: XCTestCase {
     func testNeuralEngineAudioTowerIsOnByDefault() {
         XCTAssertTrue(AppPreferences.shared.useNeuralEngineAudioTower)
     }
+
+    // MARK: - Prompt Presets
+
+    func testPresetsAlwaysReplaceIsOnByDefault() {
+        XCTAssertTrue(AppPreferences.shared.presetsAlwaysReplace)
+    }
 }
 
 // MARK: - LLM Request Settings
