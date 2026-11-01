@@ -14,13 +14,14 @@ final class SidebarLayoutTests: XCTestCase {
     // MARK: - Ordering / allCases
 
     func testTabOrdering() {
-        XCTAssertEqual(SidebarTab.allCases, [.recordings, .stats, .settings])
+        XCTAssertEqual(SidebarTab.allCases, [.recordings, .stats, .presets, .settings])
     }
 
     func testRawValuesAreSequential() {
         XCTAssertEqual(SidebarTab.recordings.rawValue, 0)
         XCTAssertEqual(SidebarTab.stats.rawValue, 1)
-        XCTAssertEqual(SidebarTab.settings.rawValue, 2)
+        XCTAssertEqual(SidebarTab.presets.rawValue, 2)
+        XCTAssertEqual(SidebarTab.settings.rawValue, 3)
     }
 
     // MARK: - Labels
@@ -28,6 +29,7 @@ final class SidebarLayoutTests: XCTestCase {
     func testLabels() {
         XCTAssertEqual(SidebarTab.recordings.label, "Recordings")
         XCTAssertEqual(SidebarTab.stats.label, "Stats")
+        XCTAssertEqual(SidebarTab.presets.label, "Presets")
         XCTAssertEqual(SidebarTab.settings.label, "Settings")
     }
 

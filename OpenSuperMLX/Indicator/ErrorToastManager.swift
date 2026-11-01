@@ -8,6 +8,9 @@ import SwiftUI
 class ErrorToastManager {
     static let shared = ErrorToastManager()
 
+    static let width: CGFloat = 560
+    static let height: CGFloat = 116
+
     private var window: NSPanel?
 
     private init() {}
@@ -15,7 +18,7 @@ class ErrorToastManager {
     func show(_ message: String) {
         if window == nil {
             let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 90),
+                contentRect: NSRect(x: 0, y: 0, width: Self.width, height: Self.height),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -37,7 +40,7 @@ class ErrorToastManager {
 
         if let screen = NSScreen.main, let window = window {
             let screenFrame = screen.visibleFrame
-            let x = screenFrame.midX - 200
+            let x = screenFrame.midX - Self.width / 2
             let y = screenFrame.maxY - 100
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
@@ -67,7 +70,8 @@ struct ErrorToastView: View {
             Text(message)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.primary)
-                .lineLimit(2)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
 
@@ -80,7 +84,7 @@ struct ErrorToastView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(width: 400)
+        .frame(width: ErrorToastManager.width)
         .background {
             rect
                 .fill(colorScheme == .dark

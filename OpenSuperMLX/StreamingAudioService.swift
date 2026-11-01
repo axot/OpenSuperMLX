@@ -149,7 +149,6 @@ class StreamingAudioService: ObservableObject {
     private var isHandlingConfigChange = false
 
     private var isEngineWarmed = false
-    private var hasBeenWarmedOnce = false
     private var lastWarmUpTime: Date = .distantPast
     private var tapRecoveryAttempts = 0
 
@@ -283,6 +282,10 @@ class StreamingAudioService: ObservableObject {
     /// is still open restarts the metering timer the stop path tore down.
     private var popoverWantsMetering = false
 
+    /// Starts awaiting engine init own the engine before `isStreaming` flips, so idle
+    /// release must not cool it down underneath them.
+    private var pendingStreamStarts = 0
+
     /// Begin live mic metering for the picker popover. Warms the engine if needed
     /// (so the tap delivers buffers) and runs the RMS timer. No-op while streaming —
     /// streaming already drives `currentRMSLevel`.
@@ -297,12 +300,31 @@ class StreamingAudioService: ObservableObject {
         }
     }
 
-    /// Stop popover metering. Leaves the warmed engine in place (it's reused for the
-    /// next recording); only tears down the timer it owns and zeroes the level.
+    /// Stop popover metering and release the microphone. Streaming owns the engine
+    /// and timer while active, so this is a no-op mid-recording.
     func stopIdleMetering() {
         popoverWantsMetering = false
-        guard !isStreaming else { return } // streaming owns the timer; leave it
-        stopRMSTimer()
+        releaseEngineIfIdle()
+    }
+
+    /// An open input engine keeps Bluetooth headsets in the low-quality hands-free
+    /// profile, so the mic is held only while recording, starting to record, or while
+    /// the popover meters it.
+    nonisolated static func shouldReleaseEngine(
+        isStreaming: Bool,
+        hasPendingStart: Bool,
+        popoverWantsMetering: Bool
+    ) -> Bool {
+        !isStreaming && !hasPendingStart && !popoverWantsMetering
+    }
+
+    private func releaseEngineIfIdle() {
+        guard Self.shouldReleaseEngine(
+            isStreaming: isStreaming,
+            hasPendingStart: pendingStreamStarts > 0,
+            popoverWantsMetering: popoverWantsMetering
+        ) else { return }
+        coolDown()
     }
 
     /// Restart idle metering after a recording ends if the picker popover is still
@@ -349,8 +371,6 @@ class StreamingAudioService: ObservableObject {
                         self.coolDown()
                         await self.warmUp(fromBackground: true)
                     }
-                } else if self.hasBeenWarmedOnce {
-                    await self.warmUp(fromBackground: true)
                 }
             }
         }
@@ -466,7 +486,6 @@ class StreamingAudioService: ObservableObject {
             audioEngine = result.engine
             nativeSampleRate = rate
             isEngineWarmed = true
-            hasBeenWarmedOnce = true
             lastWarmUpTime = Date()
             // Snapshot post-start state so the configChange handler can branch on what
             // actually changed. The device snapshot is the *bound* device, not the
@@ -1031,6 +1050,11 @@ class StreamingAudioService: ObservableObject {
         }
 
         let generation = startGeneration
+        pendingStreamStarts += 1
+        defer {
+            pendingStreamStarts -= 1
+            releaseEngineIfIdle()
+        }
 
         guard let model = TranscriptionService.shared.streamingModel else {
             PipelineTrace.shared.log("STREAM", "no model available")
@@ -1126,7 +1150,7 @@ class StreamingAudioService: ObservableObject {
         recordingStartTime = startTime
         beginTranscriptSession(startedAt: startTime)
         playNotificationSound()
-        logger.info("Streaming started (engine pre-warmed)")
+        logger.info("Streaming started")
 
         let userSpeakerToggle = MicrophoneService.shared.speakerCaptureEnabled
         let classification = resolveCurrentClassification(askIfNeeded: userSpeakerToggle)
@@ -1296,6 +1320,7 @@ class StreamingAudioService: ObservableObject {
             // If the mic-picker popover is still open, restart its metering timer —
             // the teardown below invalidated it but the popover won't re-fire onAppear.
             resumeIdleMeteringIfNeeded()
+            releaseEngineIfIdle()
         }
 
         stopRMSTimer()
@@ -1441,6 +1466,7 @@ class StreamingAudioService: ObservableObject {
         defer {
             isStreaming = false
             resumeIdleMeteringIfNeeded()
+            releaseEngineIfIdle()
         }
 
         stopRMSTimer()

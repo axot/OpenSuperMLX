@@ -6,11 +6,12 @@ import KeyboardShortcuts
 import SwiftUI
 
 extension KeyboardShortcuts.Name {
-    static let toggleRecord = Self("toggleRecord", default: .init(.backtick, modifiers: .option))
-    static let toggleRecordWithLLM = Self("toggleRecordWithLLM", default: .init(.backtick, modifiers: [.option, .shift]))
-    static let escape = Self("escape", default: .init(.escape))
+    static let toggleRecord = Self("toggleRecord", initial: .init(.backtick, modifiers: .option))
+    static let toggleRecordWithLLM = Self("toggleRecordWithLLM", initial: .init(.backtick, modifiers: [.option, .shift]))
+    static let escape = Self("escape", initial: .init(.escape))
 }
 
+@MainActor
 class ShortcutManager {
     static let shared = ShortcutManager()
 
@@ -22,6 +23,8 @@ class ShortcutManager {
     @MainActor private var escapeReleaseTask: Task<Void, Never>?
     private var escapeMonitor: Any?
     private var applicationObservers: [NSObjectProtocol] = []
+    private var presetObserver: NSObjectProtocol?
+    private var registeredPresetIDs: Set<UUID> = []
 
     @MainActor var transcriptInspectorVisible: Bool {
         get { escapeState.inspectorVisible }
@@ -44,6 +47,7 @@ class ShortcutManager {
         
         setupKeyboardShortcuts()
         setupEscapeOwnership()
+        setupPresetShortcuts()
         
         NotificationCenter.default.addObserver(
             self,
@@ -84,6 +88,50 @@ class ShortcutManager {
             }
         }
         KeyboardShortcuts.disable(.escape)
+    }
+
+    private func setupPresetShortcuts() {
+        presetObserver = NotificationCenter.default.addObserver(
+            forName: .promptPresetsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncPresetShortcuts() }
+        }
+        syncPresetShortcuts()
+    }
+
+    private func syncPresetShortcuts() {
+        let presets = PromptPresetStore.shared.presets
+        let currentIDs = Set(presets.map(\.id))
+
+        for id in registeredPresetIDs.subtracting(currentIDs) {
+            let name = PromptPreset.shortcutName(for: id)
+            KeyboardShortcuts.removeHandler(for: name)
+            KeyboardShortcuts.setShortcut(nil, for: name)
+        }
+
+        for preset in presets {
+            let name = preset.shortcutName
+            KeyboardShortcuts.removeHandler(for: name)
+            KeyboardShortcuts.onKeyDown(for: name) { [weak self] in
+                Task { @MainActor in
+                    self?.runPreset(id: preset.id)
+                }
+            }
+        }
+
+        registeredPresetIDs = currentIDs
+    }
+
+    private func runPreset(id: UUID) {
+        guard let preset = PromptPresetStore.shared.presets.first(where: { $0.id == id }) else { return }
+        Task {
+            let outcome = await PromptPresetService.shared.apply(preset)
+            if let message = outcome.toastMessage {
+                ErrorToastManager.shared.show(message)
+            }
+        }
     }
 
     private func setupEscapeOwnership() {
@@ -148,7 +196,9 @@ class ShortcutManager {
         }
         
         let workItem = DispatchWorkItem { [weak self] in
-            self?.holdMode = true
+            MainActor.assumeIsolated {
+                self?.holdMode = true
+            }
         }
         holdWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold, execute: workItem)
