@@ -10,14 +10,19 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "PromptPresetSe
 
 enum PresetApplyOutcome: Equatable {
     case applied
+    case copiedToClipboard
     case ignored
     case failed(String)
 
-    var errorMessage: String? {
-        if case .failed(let message) = self {
+    var toastMessage: String? {
+        switch self {
+        case .applied, .ignored:
+            return nil
+        case .copiedToClipboard:
+            return "OpenSuperMLX can't confirm the selection in this app, so nothing was replaced. The result is on the clipboard. Press ⌘V to paste it."
+        case .failed(let message):
             return message
         }
-        return nil
     }
 }
 
@@ -34,6 +39,12 @@ final class PromptPresetService {
         var selectedText: String?
         var selectedRange: NSRange?
         var value: String?
+
+        /// A matching process alone can't tell the original selection from a new one in the
+        /// same app, so a write-back is safe only when Accessibility exposed the selection itself.
+        var canVerifySelection: Bool {
+            selectedText?.isEmpty == false || (selectedRange?.length ?? 0) > 0
+        }
 
         /// Every attribute readable at capture time must read back unchanged, so a moved
         /// selection or an edited document is never overwritten with a stale rewrite.
@@ -64,6 +75,7 @@ final class PromptPresetService {
     private let captureSelection: @MainActor (Bool) async -> Selection?
     private let readTarget: @MainActor (Selection) async -> Target?
     private let replaceSelection: @MainActor (Selection, String) async -> Void
+    private let copyText: @MainActor (String) -> Void
     private let isAccessibilityGranted: @MainActor () -> Bool
     private var isRunning = false
 
@@ -72,12 +84,17 @@ final class PromptPresetService {
         captureSelection: @escaping @MainActor (Bool) async -> Selection? = { await PromptPresetService.captureFrontmostSelection(canCopyImmediately: $0) },
         readTarget: @escaping @MainActor (Selection) async -> Target? = { await PromptPresetService.reactivateTarget(of: $0) },
         replaceSelection: @escaping @MainActor (Selection, String) async -> Void = { PromptPresetService.replace($0, with: $1) },
+        copyText: @escaping @MainActor (String) -> Void = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        },
         isAccessibilityGranted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
         self.providerFactory = providerFactory
         self.captureSelection = captureSelection
         self.readTarget = readTarget
         self.replaceSelection = replaceSelection
+        self.copyText = copyText
         self.isAccessibilityGranted = isAccessibilityGranted
     }
 
@@ -121,6 +138,11 @@ final class PromptPresetService {
             let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !result.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
+            }
+            guard selection.target.canVerifySelection else {
+                copyText(result)
+                logger.info("Preset \(preset.name, privacy: .public) result copied; the selection can't be verified")
+                return .copiedToClipboard
             }
             guard let current = await readTarget(selection) else {
                 return .failed("Couldn't return to the app with the selection. Nothing was replaced.")
@@ -253,6 +275,8 @@ final class PromptPresetService {
 
     /// A simulated ⌘C bumps `changeCount` at most once. Any further bump means another
     /// writer took the clipboard, so its contents are neither read nor overwritten.
+    /// NSPasteboard doesn't identify writers, so one foreign write in place of the copy
+    /// looks the same.
     nonisolated static func isCopyOnlyPasteboardWrite(changeCountAfterClear: Int, current: Int) -> Bool {
         current <= changeCountAfterClear + 1
     }

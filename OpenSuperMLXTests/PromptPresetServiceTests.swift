@@ -88,9 +88,12 @@ final class PromptPresetServiceTests: XCTestCase {
         let recorder = ReplacementRecorder()
         let service = PromptPresetService(
             providerFactory: { provider },
-            captureSelection: { _ in PromptPresetService.Selection(text: "raw text", target: .init()) },
+            captureSelection: { _ in
+                PromptPresetService.Selection(text: "raw text", target: .init(selectedText: "raw text"))
+            },
             readTarget: { _ in nil },
             replaceSelection: { recorder.record($0, $1) },
+            copyText: { _ in XCTFail("A verifiable selection must not fall back to the clipboard") },
             isAccessibilityGranted: { true }
         )
 
@@ -128,12 +131,13 @@ final class PromptPresetServiceTests: XCTestCase {
         text: String?,
         recorder: ReplacementRecorder
     ) -> PromptPresetService {
-        PromptPresetService(
+        let target = PromptPresetService.Target(selectedText: text)
+        return PromptPresetService(
             providerFactory: { provider },
             captureSelection: { _ in
-                text.map { PromptPresetService.Selection(text: $0, target: .init()) }
+                text.map { PromptPresetService.Selection(text: $0, target: target) }
             },
-            readTarget: { _ in .init() },
+            readTarget: { _ in target },
             replaceSelection: { recorder.record($0, $1) },
             isAccessibilityGranted: { true }
         )
@@ -189,6 +193,51 @@ final class PromptPresetServiceGuardTests: XCTestCase {
         XCTAssertFalse(captured.isUnchanged(in: moved))
         XCTAssertFalse(captured.isUnchanged(in: edited))
         XCTAssertFalse(captured.isUnchanged(in: otherApp))
+    }
+
+    func testSelectionIsVerifiableOnlyWhenAccessibilityExposesIt() {
+        XCTAssertTrue(PromptPresetService.Target(processID: 42, selectedText: "first").canVerifySelection)
+        XCTAssertTrue(
+            PromptPresetService.Target(processID: 42, selectedRange: NSRange(location: 0, length: 5)).canVerifySelection
+        )
+
+        XCTAssertFalse(PromptPresetService.Target(processID: 42).canVerifySelection)
+        XCTAssertFalse(PromptPresetService.Target(processID: 42, value: "first second").canVerifySelection)
+        XCTAssertFalse(
+            PromptPresetService.Target(
+                processID: 42,
+                selectedText: "",
+                selectedRange: NSRange(location: 3, length: 0)
+            ).canVerifySelection
+        )
+    }
+
+    func testApplyCopiesResultInsteadOfReplacingUnverifiableSelection() async {
+        let provider = StubLLMProvider(result: .success("Polished"))
+        let recorder = ReplacementRecorder()
+        var copied: String?
+        var didReadTarget = false
+        let service = PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in
+                PromptPresetService.Selection(text: "raw text", target: .init(processID: 42))
+            },
+            readTarget: { _ in
+                didReadTarget = true
+                return .init(processID: 42)
+            },
+            replaceSelection: { recorder.record($0, $1) },
+            copyText: { copied = $0 },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Polish", instruction: "Fix grammar."))
+
+        XCTAssertEqual(outcome, .copiedToClipboard)
+        XCTAssertEqual(copied, "Polished")
+        XCTAssertNil(recorder.text)
+        XCTAssertFalse(didReadTarget)
+        XCTAssertNotNil(outcome.toastMessage)
     }
 
     func testCopyOwnsPasteboardOnlyForASingleWrite() {

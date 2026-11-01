@@ -128,7 +128,7 @@ class ShortcutManager {
         guard let preset = PromptPresetStore.shared.presets.first(where: { $0.id == id }) else { return }
         Task {
             let outcome = await PromptPresetService.shared.apply(preset)
-            if let message = outcome.errorMessage {
+            if let message = outcome.toastMessage {
                 ErrorToastManager.shared.show(message)
             }
         }
