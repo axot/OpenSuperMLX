@@ -28,27 +28,55 @@ final class PromptPresetService {
     static let requestTimeout: Duration = .seconds(60)
     static let maximumSelectionLength = 20_000
 
+    struct Target {
+        var processID: pid_t?
+        var element: AXUIElement?
+        var selectedText: String?
+        var selectedRange: NSRange?
+        var value: String?
+
+        /// Every attribute readable at capture time must read back unchanged, so a moved
+        /// selection or an edited document is never overwritten with a stale rewrite.
+        func isUnchanged(in current: Target) -> Bool {
+            guard processID == current.processID else { return false }
+            if let element {
+                guard let other = current.element, CFEqual(element, other) else { return false }
+            }
+            if let selectedText, selectedText != current.selectedText { return false }
+            if let selectedRange, selectedRange != current.selectedRange { return false }
+            if let value, value != current.value { return false }
+            return true
+        }
+    }
+
     struct Selection {
         let text: String
-        let element: AXUIElement?
-        let range: CFRange?
-        let application: NSRunningApplication?
+        let target: Target
+    }
+
+    private enum CopyResult {
+        case copied(Selection)
+        case empty
+        case clipboardTakenOver
     }
 
     private let providerFactory: @Sendable () -> LLMProvider
     private let captureSelection: @MainActor (Bool) async -> Selection?
-    private let replaceSelection: @MainActor (Selection, String) async -> Bool
+    private let readTarget: @MainActor (Selection) async -> Target?
+    private let replaceSelection: @MainActor (Selection, String) async -> Void
     private let isAccessibilityGranted: @MainActor () -> Bool
     private var isRunning = false
 
     init(
         providerFactory: @escaping @Sendable () -> LLMProvider = { LLMCorrectionService.resolveProvider() },
         captureSelection: @escaping @MainActor (Bool) async -> Selection? = { await PromptPresetService.captureFrontmostSelection(canCopyImmediately: $0) },
-        replaceSelection: @escaping @MainActor (Selection, String) async -> Bool = { await PromptPresetService.replace($0, with: $1) },
+        readTarget: @escaping @MainActor (Selection) async -> Target? = { await PromptPresetService.reactivateTarget(of: $0) },
+        replaceSelection: @escaping @MainActor (Selection, String) async -> Void = { PromptPresetService.replace($0, with: $1) },
         isAccessibilityGranted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
         self.providerFactory = providerFactory
         self.captureSelection = captureSelection
+        self.readTarget = readTarget
         self.replaceSelection = replaceSelection
         self.isAccessibilityGranted = isAccessibilityGranted
     }
@@ -94,9 +122,13 @@ final class PromptPresetService {
             guard !result.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
             }
-            guard await replaceSelection(selection, result) else {
-                return .failed("Couldn't replace the selection. Enable OpenSuperMLX in System Settings → Privacy & Security → Accessibility.")
+            guard let current = await readTarget(selection) else {
+                return .failed("Couldn't return to the app with the selection. Nothing was replaced.")
             }
+            guard selection.target.isUnchanged(in: current) else {
+                return .failed("The selection changed while the preset was running. Nothing was replaced.")
+            }
+            await replaceSelection(selection, result)
             logger.info(
                 "Applied preset \(preset.name, privacy: .public): inputLength=\(text.count, privacy: .public), outputLength=\(result.count, privacy: .public)"
             )
@@ -129,52 +161,55 @@ final class PromptPresetService {
     // MARK: - Selection
 
     private static func captureFrontmostSelection(canCopyImmediately: Bool) async -> Selection? {
-        let application = NSWorkspace.shared.frontmostApplication
-
-        if let focused = focusedSelection() {
-            return Selection(
-                text: focused.text,
-                element: focused.element,
-                range: focused.range,
-                application: application
-            )
+        let target = readFrontmostTarget()
+        if let text = target.selectedText,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return Selection(text: text, target: target)
         }
 
         // Apps such as Word drop their highlight once the shortcut chord is handled.
         // With only Command held, sending ⌘C now is still a plain copy and catches it.
-        if canCopyImmediately,
-           let immediate = await copyFrontmostSelection(
-               application: application,
-               delay: .milliseconds(350)
-           ) {
-            return immediate
+        if canCopyImmediately {
+            switch await copyFrontmostSelection(delay: .milliseconds(350)) {
+            case .copied(let selection): return selection
+            case .clipboardTakenOver: return nil
+            case .empty: break
+            }
         }
 
         await waitForModifiersUp(timeout: .milliseconds(1500))
-        return await copyFrontmostSelection(application: application, delay: .milliseconds(500))
+        if case .copied(let selection) = await copyFrontmostSelection(delay: .milliseconds(500)) {
+            return selection
+        }
+        return nil
     }
 
-    private static func focusedSelection() -> (element: AXUIElement, text: String, range: CFRange?)? {
+    private static func readFrontmostTarget() -> Target {
+        let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused
         else {
-            return nil
+            return Target(processID: processID)
         }
         let element = focused as! AXUIElement
-
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success,
-              let text = value as? String,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else {
-            return nil
-        }
-        return (element, text, selectedTextRange(of: element))
+        return Target(
+            processID: processID,
+            element: element,
+            selectedText: stringAttribute(kAXSelectedTextAttribute, of: element),
+            selectedRange: selectedTextRange(of: element),
+            value: stringAttribute(kAXValueAttribute, of: element)
+        )
     }
 
-    private static func selectedTextRange(of element: AXUIElement) -> CFRange? {
+    private static func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+        return value as? String
+    }
+
+    private static func selectedTextRange(of element: AXUIElement) -> NSRange? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &ref) == .success,
               let ref,
@@ -184,59 +219,70 @@ final class PromptPresetService {
         }
         var range = CFRange(location: 0, length: 0)
         guard AXValueGetValue(ref as! AXValue, .cfRange, &range) else { return nil }
-        return range
+        return NSRange(location: range.location, length: range.length)
     }
 
-    private static func copyFrontmostSelection(
-        application: NSRunningApplication?,
-        delay: Duration
-    ) async -> Selection? {
-        guard AXIsProcessTrusted() else { return nil }
+    private static func copyFrontmostSelection(delay: Duration) async -> CopyResult {
+        guard AXIsProcessTrusted() else { return .empty }
 
+        let target = readFrontmostTarget()
         let pasteboard = NSPasteboard.general
         let saved = ClipboardUtil.saveCurrentPasteboardContents()
         pasteboard.clearContents()
+        let changeCountAfterClear = pasteboard.changeCount
         ClipboardUtil.sendCommandKey("c")
 
         try? await Task.sleep(for: delay)
+        let currentChangeCount = pasteboard.changeCount
+        guard isCopyOnlyPasteboardWrite(changeCountAfterClear: changeCountAfterClear, current: currentChangeCount) else {
+            logger.info(
+                "Preset copy abandoned — clipboard changeCount advanced from \(changeCountAfterClear, privacy: .public) to \(currentChangeCount, privacy: .public)"
+            )
+            return .clipboardTakenOver
+        }
         let text = pasteboard.string(forType: .string)
         if let saved {
             ClipboardUtil.restorePasteboardContents(saved)
         }
 
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .empty
+        }
+        return .copied(Selection(text: text, target: target))
+    }
+
+    /// A simulated ⌘C bumps `changeCount` at most once. Any further bump means another
+    /// writer took the clipboard, so its contents are neither read nor overwritten.
+    nonisolated static func isCopyOnlyPasteboardWrite(changeCountAfterClear: Int, current: Int) -> Bool {
+        current <= changeCountAfterClear + 1
+    }
+
+    private static func reactivateTarget(of selection: Selection) async -> Target? {
+        guard let processID = selection.target.processID,
+              let application = NSRunningApplication(processIdentifier: processID)
+        else {
             return nil
         }
-        return Selection(text: text, element: nil, range: nil, application: application)
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != processID {
+            _ = application.activate(options: [])
+            let deadline = ContinuousClock.now + .milliseconds(600)
+            while NSWorkspace.shared.frontmostApplication?.processIdentifier != processID {
+                guard ContinuousClock.now < deadline else { return nil }
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+        if let element = selection.target.element {
+            _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        }
+        return readFrontmostTarget()
     }
 
-    private static func replace(_ selection: Selection, with text: String) async -> Bool {
-        let isFrontmost = selection.application?.processIdentifier
-            == NSWorkspace.shared.frontmostApplication?.processIdentifier
-        if isFrontmost, let element = selection.element,
+    private static func replace(_ selection: Selection, with text: String) {
+        if let element = selection.target.element,
            AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success {
-            return true
-        }
-        if let element = selection.element {
-            focus(element, range: selection.range)
-        }
-
-        guard let application = selection.application else { return false }
-        _ = application.activate(options: [])
-        let deadline = ContinuousClock.now + .milliseconds(600)
-        while NSWorkspace.shared.frontmostApplication?.processIdentifier != application.processIdentifier {
-            guard ContinuousClock.now < deadline else { return false }
-            try? await Task.sleep(for: .milliseconds(30))
+            return
         }
         ClipboardUtil.insertText(text)
-        return true
-    }
-
-    private static func focus(_ element: AXUIElement, range: CFRange?) {
-        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        guard var range else { return }
-        guard let value = AXValueCreate(.cfRange, &range) else { return }
-        _ = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value)
     }
 
     private static func waitForModifiersUp(timeout: Duration) async {
