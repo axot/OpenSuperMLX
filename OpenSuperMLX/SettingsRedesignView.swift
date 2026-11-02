@@ -261,6 +261,18 @@ struct SettingsRedesignView: View {
                     SettingsField(label: "Check for updates automatically", detail: "Once a day from GitHub") {
                         DesignToggle(isOn: $viewModel.automaticallyChecksForUpdates)
                     }
+                    SettingsFieldDivider()
+                    SettingsField(label: "Check for updates") {
+                        Button("Check now") {
+                            AppUpdater.shared.controller.checkForUpdates(nil)
+                        }
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(DesignTokens.txt)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .fieldSurface()
+                        .buttonStyle(.plain)
+                        .help("Check for a new version now")
+                    }
                 }
             }
             SettingsGroup(title: "Debug") {

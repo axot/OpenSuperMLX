@@ -43,6 +43,13 @@ struct OpenSuperMLXApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                if AppUpdater.isEnabled {
+                    Button("Check for Updates…") {
+                        AppUpdater.shared.controller.checkForUpdates(nil)
+                    }
+                }
+            }
         }
         .handlesExternalEvents(matching: Set(arrayLiteral: "openMainWindow"))
     }
