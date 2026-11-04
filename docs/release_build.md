@@ -25,6 +25,25 @@ the workflow succeeds, verify the GitHub assets, checksums, signatures,
 notarization, and Homebrew installation. Delete the branch only after those
 checks pass.
 
+## Verify in-app updates
+
+Check for updates from **OpenSuperMLX → Check for Updates…** in the top-left
+application menu, **Settings → Advanced → Updates → Check now**, or the menu bar
+icon's **Check for Updates…** item. These controls use the same Sparkle updater.
+The updater and its controls are disabled in Debug and test builds; use a Release
+build to verify the menu and settings entry points.
+
+Verify installation through the officially signed app. An ad-hoc or
+different-team helper can display the appcast but cannot substitute for the app
+in an installation test: the official installer checks its caller's developer
+team over XPC. A local Release build verifies the controls, while the tagged
+GitHub Actions release verifies signing and notarization.
+
+Automatic checks run once a day. With automatic downloading and installation
+enabled, Sparkle can prepare an update in the background and install it when the
+app quits. After installation, verify the installed version and build number,
+the app and its nested signatures, notarization, and `diagnose --json` output.
+
 ## Legacy local notarization helper
 
 `notarize_app.sh` assumes native artifacts are already built. It is not

@@ -91,7 +91,9 @@ On first launch, macOS asks for microphone and accessibility access. OpenSuperML
 
 ### Updates
 
-OpenSuperMLX checks GitHub releases once a day and shows an update window when a new version is available. The window waits until you finish recording and stop typing, and the app restarts to install only when nothing is being recorded, saved, or transcribed. Choose **Check for Updates…** in the menu bar menu to check now, or turn off **Settings → Advanced → Check for updates automatically**.
+OpenSuperMLX checks GitHub releases once a day. To check now, choose **OpenSuperMLX → Check for Updates…** in the top-left application menu, or **Settings → Advanced → Updates → Check now**. **Check for Updates…** is also available from the menu bar icon.
+
+Scheduled update notices wait until you finish recording and pause typing. Update-requested restarts wait until nothing is being recorded, saved, or transcribed. If you enable automatic downloading and installation in the update window, an update can be prepared in the background and installed when you quit the app. Turn off **Settings → Advanced → Updates → Check for updates automatically** to disable automatic checks.
 
 Version 0.1.1 and earlier can't update themselves: install the next release once from the [releases page](https://github.com/axot/OpenSuperMLX/releases) or with `brew upgrade --cask opensupermlx`. Homebrew installs keep working with `brew upgrade` as before.
 
