@@ -130,7 +130,7 @@ class IndicatorViewModel: ObservableObject {
             return
         }
         
-        if AppPreferences.shared.useStreamingTranscription {
+        if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
             state = .recording
             startBlinking()

@@ -24,9 +24,18 @@ class TranscriptionService: ObservableObject {
     private var maxDownloadProgress: Double = 0
 
     private var currentEngine: TranscriptionEngine?
+    private var loadGeneration = 0
+
+    /// The model the engine runs, or is loading; set when a load starts.
+    @Published private(set) var activeModel: LocalMLXModel?
 
     var streamingModel: Qwen3ASRModel? {
         (currentEngine as? MLXEngine)?.qwen3Model
+    }
+
+    /// Live streaming needs a Qwen3-ASR model; other models record first, then transcribe.
+    var usesStreamingTranscription: Bool {
+        AppPreferences.shared.useStreamingTranscription && (activeModel?.supportsStreaming ?? true)
     }
 
     var audioEncoderBackend: String {
@@ -63,9 +72,13 @@ class TranscriptionService: ObservableObject {
     // MARK: - Engine Management
 
     private func loadEngine() {
-        logger.info("Loading MLX engine")
+        let localModel = MLXModelManager.selectedModel()
+        activeModel = localModel
+        loadGeneration += 1
+        let generation = loadGeneration
+        logger.info("Loading MLX engine: \(localModel.id, privacy: .public)")
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Engine load requested: model=\(MLXModelManager.model.repoID, privacy: .public), neuralEngineAudioTower=\(AppPreferences.shared.useNeuralEngineAudioTower, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
+            logger.debug("[DEBUG] Engine load requested: model=\(localModel.id, privacy: .public), neuralEngineAudioTower=\(AppPreferences.shared.useNeuralEngineAudioTower, privacy: .public), language=\(AppPreferences.shared.mlxLanguage, privacy: .public), streaming=\(AppPreferences.shared.useStreamingTranscription, privacy: .public)")
         }
         
         isLoading = true
@@ -74,7 +87,7 @@ class TranscriptionService: ObservableObject {
         downloadProgress = 0
 
         Task.detached(priority: .userInitiated) {
-            let engine = await MLXEngine()
+            let engine = await MLXEngine(localModel: localModel)
             engine.downloadProgressHandler = { [weak self] progress in
                 self?.updateDownloadProgress(progress)
             }
@@ -82,17 +95,21 @@ class TranscriptionService: ObservableObject {
             do {
                 try await engine.initialize()
                 await MainActor.run {
+                    guard generation == self.loadGeneration else { return }
                     self.currentEngine = engine
                     logger.info("MLX engine loaded successfully")
                 }
             } catch {
                 await MainActor.run {
+                    guard generation == self.loadGeneration else { return }
                     self.loadError = error
                     logger.error("Failed to load MLX engine: \(error, privacy: .public)")
+                    ErrorToastManager.shared.show("Failed to load \(localModel.name): \(error.localizedDescription)")
                 }
             }
             
             await MainActor.run {
+                guard generation == self.loadGeneration else { return }
                 self.isLoading = false
                 self.downloadProgress = nil
             }

@@ -54,6 +54,7 @@ struct ConfigKeyInfo {
 enum ConfigRegistry {
 
     static let allKeys: [ConfigKeyInfo] = [
+        ConfigKeyInfo("selectedModel", .optionalString, "null"),
         ConfigKeyInfo("useNeuralEngineAudioTower", .bool, "true"),
         ConfigKeyInfo("mlxLanguage", .string, "auto"),
         ConfigKeyInfo("translateToEnglish", .bool, "false"),

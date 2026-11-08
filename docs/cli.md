@@ -110,6 +110,18 @@ capture backpressure drops and inference resets. The existing capture
 backpressure policy is unchanged. This path does not alter the separate
 `transcribe` command.
 
+## Model Selection
+
+`config set selectedModel <folder>` selects a model folder from `mlx-models/mlx-audio` (the same choice as **Settings → Model**); `null` restores the built-in Qwen3 model. `diagnose` lists installed folders, and `transcribe` reports the model it used:
+
+```bash
+$BINARY config set selectedModel mlx-community_nemotron-3.5-asr-streaming-0.6b-8bit
+$BINARY transcribe jfk.wav --no-correction --json   # data.model is "mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit"
+$BINARY config set selectedModel null
+```
+
+Nemotron models do not support `stream-simulate`; the app records first and then transcribes with them.
+
 ## Neural Engine Audio Encoder
 
 The audio encoder runs on the Neural Engine by default; the text decoder stays on the GPU. Turn the setting off to run the encoder on the GPU instead:

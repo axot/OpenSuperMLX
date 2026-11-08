@@ -2,6 +2,8 @@
 // OpenSuperMLXTests
 
 import XCTest
+
+import MLXAudioSTT
 @testable import OpenSuperMLX
 
 final class MLXEngineTests: XCTestCase {
@@ -39,5 +41,21 @@ final class MLXEngineTests: XCTestCase {
             onFallback: { _ in XCTFail("Unexpected fallback") }
         )
         XCTAssertEqual(url, tower)
+    }
+
+    // MARK: - Nemotron Language
+
+    func testNemotronLanguageMapsAppCodesToPromptKeys() throws {
+        let model = try NemotronASRModel(config: try NemotronASRFixtures.config())
+
+        XCTAssertEqual(MLXEngine.nemotronLanguage(for: "auto", model: model), "auto")
+        XCTAssertEqual(MLXEngine.nemotronLanguage(for: "de", model: model), "de")
+        XCTAssertEqual(MLXEngine.nemotronLanguage(for: "zh", model: model), "zh-CN")
+    }
+
+    func testNemotronLanguageFallsBackToAutoDetectWhenUnsupported() throws {
+        let model = try NemotronASRModel(config: try NemotronASRFixtures.config())
+
+        XCTAssertNil(MLXEngine.nemotronLanguage(for: "ca", model: model))
     }
 }
