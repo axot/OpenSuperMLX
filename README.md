@@ -115,7 +115,7 @@ OpenSuperMLX uses **Qwen3-ASR-1.7B-5bit** (about 1.8 GB) by default, downloaded 
 
 Folders with other model types are listed as unsupported.
 
-**Settings → Model → Neural Engine audio encoder** (on by default) runs the model's audio encoder on the Neural Engine instead of the GPU. The first time the model loads, the app downloads a Core ML version of the encoder (about 300 MB). Turn the setting off to use the GPU encoder instead.
+**Settings → Model → Neural Engine audio encoder** (on by default) runs the model's audio encoder on the Neural Engine instead of the GPU. The first time the model loads, the app downloads a Core ML version of the encoder (about 300 MB). Turn the setting off to use the GPU encoder instead. The Core ML encoder is converted from Qwen3-ASR-1.7B, so other models, such as Qwen3-ASR-0.6B, always run their encoder on the GPU.
 
 ## Shortcuts
 

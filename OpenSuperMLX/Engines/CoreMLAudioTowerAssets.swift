@@ -4,6 +4,8 @@
 import Foundation
 import os
 
+import MLXAudioSTT
+
 enum CoreMLAudioTowerAssets {
     static let repositoryID = "ax0t/Qwen3-ASR-1.7B-CoreML-INT8"
     static let modelName = "qwen3_asr_audio_tower_int8.mlmodelc"
@@ -27,6 +29,17 @@ enum CoreMLAudioTowerAssets {
 
     static func downloadURL(for file: String) -> URL {
         URL(string: "https://huggingface.co/\(repositoryID)/resolve/main/\(modelName)/\(file)")!
+    }
+
+    /// The program is converted from Qwen3-ASR-1.7B's audio encoder, so its 2048-wide output only
+    /// fits decoders of checkpoints with that encoder.
+    static func isCompatible(with audioConfig: Qwen3AudioEncoderConfig) -> Bool {
+        audioConfig.numMelBins == 128
+            && audioConfig.dModel == 1024
+            && audioConfig.encoderLayers == 24
+            && audioConfig.encoderAttentionHeads == 16
+            && audioConfig.encoderFfnDim == 4096
+            && audioConfig.outputDim == 2048
     }
 
     static func isInstalled(at modelURL: URL) -> Bool {

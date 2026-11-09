@@ -45,8 +45,12 @@ class MLXEngine: TranscriptionEngine {
         let modelId = localModel.repoID
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
+        let towerSupported = Self.supportsNeuralEngineAudioTower(localModel)
+        if AppPreferences.shared.useNeuralEngineAudioTower && !towerSupported {
+            logger.info("Neural Engine audio encoder does not fit \(modelId, privacy: .public); using its GPU encoder")
+        }
         let audioTowerURL = await Self.neuralEngineAudioTowerURL(
-            enabled: AppPreferences.shared.useNeuralEngineAudioTower,
+            enabled: AppPreferences.shared.useNeuralEngineAudioTower && towerSupported,
             resolve: { try await CoreMLAudioTowerAssets.resolve(progressHandler: downloadProgressHandler) },
             onFallback: Self.reportNeuralEngineFallback
         )
@@ -81,6 +85,16 @@ class MLXEngine: TranscriptionEngine {
             onFallback(error)
             return nil
         }
+    }
+
+    static func supportsNeuralEngineAudioTower(_ localModel: LocalMLXModel) -> Bool {
+        let configURL = localModel.directory.appendingPathComponent("config.json")
+        guard let data = try? Data(contentsOf: configURL) else {
+            // The built-in model downloads on first load, and the tower is converted from its encoder.
+            return localModel.id == MLXModelManager.builtInModelID
+        }
+        guard let config = try? JSONDecoder().decode(Qwen3ASRConfig.self, from: data) else { return false }
+        return CoreMLAudioTowerAssets.isCompatible(with: config.audioConfig)
     }
 
     private static func reportNeuralEngineFallback(_ error: Error) {
