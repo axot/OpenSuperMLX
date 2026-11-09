@@ -6,6 +6,16 @@ import KeyboardShortcuts
 
 @MainActor
 class SettingsViewModel: ObservableObject {
+    @Published private(set) var availableModels: [LocalMLXModel]
+
+    @Published var selectedModelID: String {
+        didSet {
+            guard selectedModelID != oldValue else { return }
+            AppPreferences.shared.selectedModel = selectedModelID
+            TranscriptionService.shared.reloadEngine()
+        }
+    }
+
     @Published var useNeuralEngineAudioTower: Bool {
         didSet {
             AppPreferences.shared.useNeuralEngineAudioTower = useNeuralEngineAudioTower
@@ -174,6 +184,8 @@ class SettingsViewModel: ObservableObject {
     
     init() {
         let prefs = AppPreferences.shared
+        self.availableModels = MLXModelManager.availableModels()
+        self.selectedModelID = MLXModelManager.selectedModel().id
         self.useNeuralEngineAudioTower = prefs.useNeuralEngineAudioTower
         self.selectedLanguage = prefs.mlxLanguage
         self.translateToEnglish = prefs.translateToEnglish
@@ -208,6 +220,10 @@ class SettingsViewModel: ObservableObject {
         self.customPromptText = prefs.customCorrectionPrompt ?? LLMCorrectionService.defaultCorrectionPrompt
         self.useStreamingTranscription = prefs.useStreamingTranscription
         isInitializing = false
+    }
+
+    func refreshModels() {
+        availableModels = MLXModelManager.availableModels()
     }
 }
 

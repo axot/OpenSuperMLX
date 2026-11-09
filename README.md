@@ -104,9 +104,18 @@ Version 0.1.1 and earlier can't update themselves: install the next release once
 
 ## Model
 
-OpenSuperMLX uses **Qwen3-ASR-1.7B-5bit** (about 1.8 GB), downloaded from Hugging Face during first-launch setup.
+OpenSuperMLX uses **Qwen3-ASR-1.7B-5bit** (about 1.8 GB) by default, downloaded from Hugging Face during first-launch setup.
 
-**Settings → Model → Neural Engine audio encoder** (on by default) runs the model's audio encoder on the Neural Engine instead of the GPU. The first time the model loads, the app downloads a Core ML version of the encoder (about 300 MB). Turn the setting off to use the GPU encoder instead.
+**Settings → Model** lists every model folder in `~/Library/Application Support/org.axot.OpenSuperMLX/mlx-models/mlx-audio`. Add an MLX model by copying its Hugging Face folder there as `<org>_<name>` (for example `mlx-community_nemotron-3.5-asr-streaming-0.6b-8bit`), then select it. Supported model types:
+
+| `model_type` | Example | Streaming |
+|---|---|---|
+| `qwen3_asr` | `mlx-community/Qwen3-ASR-1.7B-5bit` | Live while recording |
+| `nemotron_asr` | `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit` | Transcribes when recording stops |
+
+Folders with other model types are listed as unsupported.
+
+**Settings → Model → Neural Engine audio encoder** (on by default) runs the model's audio encoder on the Neural Engine instead of the GPU. The first time the model loads, the app downloads a Core ML version of the encoder (about 300 MB). Turn the setting off to use the GPU encoder instead. The Core ML encoder is converted from Qwen3-ASR-1.7B, so other models, such as Qwen3-ASR-0.6B, always run their encoder on the GPU.
 
 ## Shortcuts
 

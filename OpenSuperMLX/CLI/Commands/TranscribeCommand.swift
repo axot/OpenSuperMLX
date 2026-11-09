@@ -90,7 +90,7 @@ struct TranscribeCommand: ParsableCommand {
             let data = TranscribeResult(
                 text: text,
                 language: language,
-                model: MLXModelManager.model.repoID,
+                model: service.activeModel?.repoID ?? MLXModelManager.model.repoID,
                 audioEncoder: service.audioEncoderBackend,
                 audioDurationS: audioDuration,
                 processingTimeS: elapsed,

@@ -2,6 +2,8 @@
 // OpenSuperMLXTests
 
 import XCTest
+
+import MLXAudioSTT
 @testable import OpenSuperMLX
 
 final class CoreMLAudioTowerAssetsTests: XCTestCase {
@@ -66,6 +68,16 @@ final class CoreMLAudioTowerAssetsTests: XCTestCase {
         } catch {}
 
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
+    // MARK: - Compatibility
+
+    func testOnlyTheQwen3ASR17BAudioEncoderIsCompatible() {
+        XCTAssertTrue(CoreMLAudioTowerAssets.isCompatible(with: Qwen3AudioEncoderConfig()))
+        XCTAssertFalse(CoreMLAudioTowerAssets.isCompatible(with: Qwen3AudioEncoderConfig(
+            encoderLayers: 18, encoderAttentionHeads: 14, encoderFfnDim: 3584, dModel: 896, outputDim: 1024
+        )))
+        XCTAssertFalse(CoreMLAudioTowerAssets.isCompatible(with: Qwen3AudioEncoderConfig(outputDim: 1024)))
     }
 
     // MARK: - Download

@@ -302,7 +302,7 @@ class ContentViewModel: ObservableObject {
 
         completedRecording = nil
         liveTranscriptSnapshot = LiveTranscriptSnapshot()
-        if AppPreferences.shared.useStreamingTranscription {
+        if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
             state = .recording
             startBlinking()

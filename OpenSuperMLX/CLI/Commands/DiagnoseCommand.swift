@@ -81,7 +81,7 @@ struct DiagnoseCommand: ParsableCommand {
                 accessibility: accessibilityStatus()
             ),
             settings: DiagnoseResult.SettingsSummary(
-                model: MLXModelManager.model.repoID,
+                model: MLXModelManager.selectedModel().repoID,
                 neuralEngineAudioTower: AppPreferences.shared.useNeuralEngineAudioTower,
                 language: AppPreferences.store.string(forKey: "mlxLanguage") ?? "auto",
                 streaming: AppPreferences.store.object(forKey: "useStreamingTranscription") != nil
@@ -105,30 +105,14 @@ struct DiagnoseCommand: ParsableCommand {
     }
 
     static func listInstalledModels(in modelsDirectory: URL = MLXModelManager.modelsDirectory) -> [String] {
-        var installed: [String] = []
-        let modelID = MLXModelManager.model.repoID
-        let modelDirectory = modelsDirectory
-            .appendingPathComponent("mlx-audio")
-            .appendingPathComponent(modelID.replacingOccurrences(of: "/", with: "_"))
-        if hasWeights(modelDirectory) {
-            installed.append(modelID)
-        }
+        var installed = MLXModelManager.installedModels(in: modelsDirectory.appendingPathComponent("mlx-audio"))
+            .map(\.repoID)
         let encoder = CoreMLAudioTowerAssets.installDirectory(in: modelsDirectory)
             .appendingPathComponent(CoreMLAudioTowerAssets.modelName)
         if CoreMLAudioTowerAssets.isInstalled(at: encoder) {
             installed.append(CoreMLAudioTowerAssets.repositoryID)
         }
         return installed
-    }
-
-    private static func hasWeights(_ directory: URL) -> Bool {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.fileSizeKey]
-        )) ?? []
-        return files.contains { file in
-            file.pathExtension == "safetensors"
-                && ((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) > 0
-        }
     }
 
     private static func microphoneAuthStatus() -> String {

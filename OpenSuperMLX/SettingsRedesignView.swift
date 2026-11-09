@@ -166,39 +166,84 @@ struct SettingsRedesignView: View {
 
     // MARK: - Model
 
+    private var isModelBusy: Bool {
+        isStreaming || transcriptionService.isTranscribing || transcriptionService.isLoading
+    }
+
     private var modelTab: some View {
         VStack(spacing: 22) {
             SettingsGroup(title: "Speech Recognition Model") {
-                SettingsField(label: MLXModelManager.model.name, detail: MLXModelManager.model.description) {
-                    Text(MLXModelManager.model.size)
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(DesignTokens.txt3)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
+                ForEach(Array(viewModel.availableModels.enumerated()), id: \.element.id) { index, model in
+                    if index > 0 {
+                        SettingsFieldDivider()
+                    }
+                    modelRow(model)
                 }
-                SettingsFieldDivider()
-                SettingsField(
-                    label: "Neural Engine audio encoder",
-                    detail: "Run the audio encoder on the Neural Engine to free the GPU"
-                ) {
-                    DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
-                        .disabled(
-                            isStreaming
-                                || transcriptionService.isTranscribing
-                                || transcriptionService.isLoading
-                        )
+                if viewModel.availableModels.first(where: { $0.id == viewModel.selectedModelID })?.architecture == .qwen3ASR {
+                    SettingsFieldDivider()
+                    SettingsField(
+                        label: "Neural Engine audio encoder",
+                        detail: "Run the audio encoder on the Neural Engine to free the GPU"
+                    ) {
+                        DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
+                            .disabled(isModelBusy)
+                    }
                 }
             }
             SettingsGroup(title: "Models Directory") {
-                SettingsField(label: directoryDisplay(MLXModelManager.modelsDirectory.appendingPathComponent("mlx-audio"))) {
-                    OpenFolderButton {
-                        let dir = MLXModelManager.modelsDirectory.appendingPathComponent("mlx-audio")
-                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                        NSWorkspace.shared.open(dir)
+                SettingsField(label: directoryDisplay(MLXModelManager.installedModelsDirectory)) {
+                    HStack(spacing: 8) {
+                        Button(action: viewModel.refreshModels) {
+                            Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                                .foregroundStyle(DesignTokens.txt)
+                                .padding(.horizontal, 9).padding(.vertical, 6)
+                                .fieldSurface()
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rescan the models directory")
+                        OpenFolderButton {
+                            let dir = MLXModelManager.installedModelsDirectory
+                            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                            NSWorkspace.shared.open(dir)
+                        }
                     }
                 }
             }
         }
+        .onAppear { viewModel.refreshModels() }
+    }
+
+    private func modelRow(_ model: LocalMLXModel) -> some View {
+        let isSelected = model.id == viewModel.selectedModelID
+        let size = model.sizeBytes > 0
+            ? ByteCountFormatter.string(fromByteCount: model.sizeBytes, countStyle: .file)
+            : (model.id == MLXModelManager.builtInModelID ? MLXModelManager.model.size : nil)
+        return Button {
+            viewModel.selectedModelID = model.id
+        } label: {
+            SettingsField(
+                label: model.name,
+                detail: model.architecture?.summary ?? "Unsupported model type: \(model.modelType ?? "unknown")"
+            ) {
+                HStack(spacing: 10) {
+                    if let size {
+                        Text(size)
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(DesignTokens.txt3)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
+                    }
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15))
+                        .foregroundStyle(isSelected ? DesignTokens.acc : DesignTokens.txt3)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.isSupported || isModelBusy)
+        .opacity(model.isSupported ? 1 : 0.5)
+        .help(model.isSupported ? "Use \(model.name)" : "This model type is not supported")
     }
 
     // MARK: - Transcription
@@ -228,7 +273,12 @@ struct SettingsRedesignView: View {
                 }
             }
             SettingsGroup(title: "Streaming") {
-                SettingsField(label: "Streaming transcription", detail: "Transcribe in real-time while recording") {
+                SettingsField(
+                    label: "Streaming transcription",
+                    detail: transcriptionService.activeModel?.supportsStreaming == false
+                        ? "Not available with \(transcriptionService.activeModel?.name ?? "this model"); transcribes when recording stops"
+                        : "Transcribe in real-time while recording"
+                ) {
                     DesignToggle(isOn: $viewModel.useStreamingTranscription)
                 }
             }

@@ -91,7 +91,7 @@ struct StreamSimulateCommand: ParsableCommand {
             let data = StreamSimulateResult(
                 text: injectionResult.text,
                 language: language,
-                model: MLXModelManager.model.repoID,
+                model: transcriptionService.activeModel?.repoID ?? MLXModelManager.model.repoID,
                 audioEncoder: transcriptionService.audioEncoderBackend,
                 audioDurationS: injectionResult.audioDurationS,
                 processingTimeS: elapsed,
