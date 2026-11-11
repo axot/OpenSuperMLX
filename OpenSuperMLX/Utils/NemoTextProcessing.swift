@@ -19,7 +19,7 @@ enum NemoTextProcessing {
     }
 
     static func normalizeSentence(_ input: String, maxSpanTokens: UInt32) -> String {
-        callNemo(input) { nemo_normalize_sentence_with_max_span($0, maxSpanTokens) }
+        callNemo(input) { nemo_normalize_sentence_with_options($0, 0, max(1, maxSpanTokens), 0) }
     }
 
     // MARK: - Private
