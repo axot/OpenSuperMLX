@@ -110,6 +110,18 @@ capture backpressure drops and inference resets. The existing capture
 backpressure policy is unchanged. This path does not alter the separate
 `transcribe` command.
 
+## Model Selection
+
+`config set selectedModel <folder>` selects a model folder from `mlx-models/mlx-audio` (the same choice as **Settings → Model**); `null` restores the built-in Qwen3 model. `diagnose` lists installed folders, and `transcribe` reports the model it used:
+
+```bash
+$BINARY config set selectedModel mlx-community_nemotron-3.5-asr-streaming-0.6b-8bit
+$BINARY transcribe jfk.wav --no-correction --json   # data.model is "mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit"
+$BINARY config set selectedModel null
+```
+
+Nemotron models do not support `stream-simulate`; the app records first and then transcribes with them.
+
 ## Neural Engine Audio Encoder
 
 The audio encoder runs on the Neural Engine by default; the text decoder stays on the GPU. Turn the setting off to run the encoder on the GPU instead:
@@ -120,7 +132,7 @@ $BINARY config set useNeuralEngineAudioTower false
 $BINARY stream-simulate audio.wav --json    # data.audio_encoder is "gpu"
 ```
 
-The app looks for the compiled encoder at `mlx-models/coreml/qwen3_asr_audio_tower_int8.mlmodelc` and otherwise downloads it from [`ax0t/Qwen3-ASR-1.7B-CoreML-INT8`](https://huggingface.co/ax0t/Qwen3-ASR-1.7B-CoreML-INT8). If it cannot be loaded, the app falls back to the GPU encoder, shows a toast, and `audio_encoder` reports `"gpu"`. `Scripts/qwen3_audio_tower_coreml.py` builds the encoder; `Scripts/qwen3_ane_audio_tower_eval.py` compares GPU utilization, memory, and speed against a pre-change build.
+The app looks for the compiled encoder at `mlx-models/coreml/qwen3_asr_audio_tower_int8.mlmodelc` and otherwise downloads it from [`ax0t/Qwen3-ASR-1.7B-CoreML-INT8`](https://huggingface.co/ax0t/Qwen3-ASR-1.7B-CoreML-INT8). If it cannot be loaded, the app falls back to the GPU encoder, shows a toast, and `audio_encoder` reports `"gpu"`. The encoder is converted from Qwen3-ASR-1.7B, so other checkpoints, such as Qwen3-ASR-0.6B, always use their own GPU encoder and report `"gpu"`. `Scripts/qwen3_audio_tower_coreml.py` builds the encoder; `Scripts/qwen3_ane_audio_tower_eval.py` compares GPU utilization, memory, and speed against a pre-change build.
 
 ## Transcript MCP Bridge
 

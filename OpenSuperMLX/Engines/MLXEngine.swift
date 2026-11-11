@@ -12,7 +12,9 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "MLXEngine")
 class MLXEngine: TranscriptionEngine {
     var engineName: String { "MLX" }
 
+    private let localModel: LocalMLXModel
     private var model: Qwen3ASRModel?
+    private var nemotronModel: NemotronASRModel?
     private let cancelledLock = OSAllocatedUnfairLock(initialState: false)
 
     private var isCancelled: Bool {
@@ -26,15 +28,29 @@ class MLXEngine: TranscriptionEngine {
     var qwen3Model: Qwen3ASRModel? { model }
 
     var isModelLoaded: Bool {
-        model != nil
+        model != nil || nemotronModel != nil
+    }
+
+    init(localModel: LocalMLXModel) {
+        self.localModel = localModel
     }
 
     func initialize() async throws {
-        let modelId = MLXModelManager.model.repoID
+        if localModel.architecture == .nemotronASR {
+            logger.info("Initializing Nemotron model from \(self.localModel.directory.path, privacy: .public)")
+            nemotronModel = try NemotronASRModel.fromDirectory(localModel.directory)
+            logger.info("Nemotron model initialized")
+            return
+        }
+        let modelId = localModel.repoID
         let cache = HubCache(cacheDirectory: MLXModelManager.modelsDirectory)
         logger.info("Initializing MLX model: \(modelId, privacy: .public) from \(MLXModelManager.modelsDirectory.path, privacy: .public)")
+        let towerSupported = Self.supportsNeuralEngineAudioTower(localModel)
+        if AppPreferences.shared.useNeuralEngineAudioTower && !towerSupported {
+            logger.info("Neural Engine audio encoder does not fit \(modelId, privacy: .public); using its GPU encoder")
+        }
         let audioTowerURL = await Self.neuralEngineAudioTowerURL(
-            enabled: AppPreferences.shared.useNeuralEngineAudioTower,
+            enabled: AppPreferences.shared.useNeuralEngineAudioTower && towerSupported,
             resolve: { try await CoreMLAudioTowerAssets.resolve(progressHandler: downloadProgressHandler) },
             onFallback: Self.reportNeuralEngineFallback
         )
@@ -71,6 +87,16 @@ class MLXEngine: TranscriptionEngine {
         }
     }
 
+    static func supportsNeuralEngineAudioTower(_ localModel: LocalMLXModel) -> Bool {
+        let configURL = localModel.directory.appendingPathComponent("config.json")
+        guard let data = try? Data(contentsOf: configURL) else {
+            // The built-in model downloads on first load, and the tower is converted from its encoder.
+            return localModel.id == MLXModelManager.builtInModelID
+        }
+        guard let config = try? JSONDecoder().decode(Qwen3ASRConfig.self, from: data) else { return false }
+        return CoreMLAudioTowerAssets.isCompatible(with: config.audioConfig)
+    }
+
     private static func reportNeuralEngineFallback(_ error: Error) {
         logger.error("Neural Engine audio encoder unavailable, using the GPU: \(error, privacy: .public)")
         Task { @MainActor in
@@ -79,7 +105,7 @@ class MLXEngine: TranscriptionEngine {
     }
 
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
-        guard let model = model else {
+        guard model != nil || nemotronModel != nil else {
             throw TranscriptionError.contextInitializationFailed
         }
 
@@ -104,21 +130,17 @@ class MLXEngine: TranscriptionEngine {
 
         Memory.cacheLimit = 64 * 1024 * 1024
 
-        let language = mapLanguageCode(settings.selectedLanguage)
-        let chunkDuration: Float = 1200.0
-        let expectedChunks = max(1, Int(ceil(audioDurationSec / chunkDuration)))
-        let maxTokens = expectedChunks * 4096
-        if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Generation params: language=\(language, privacy: .public), maxTokens=\(maxTokens, privacy: .public), chunks=\(expectedChunks, privacy: .public), chunkDuration=\(chunkDuration, privacy: .public)s, memoryCacheLimit=64MB")
-        }
-        logger.info("Generating with language: \(language, privacy: .public), maxTokens: \(maxTokens, privacy: .public), chunks: ~\(expectedChunks, privacy: .public), chunkDuration: \(chunkDuration, privacy: .public)s")
-        let startTime = Date()
-        let output = try model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
-        let elapsed = Date().timeIntervalSince(startTime)
-        logger.info("Generate completed in \(String(format: "%.1f", elapsed), privacy: .public)s, tokens: \(output.totalTokens, privacy: .public), text length: \(output.text.count, privacy: .public)")
-        if AppPreferences.shared.debugMode {
-            let tokensPerSec = elapsed > 0 ? Double(output.totalTokens) / elapsed : 0
-            logger.debug("[DEBUG] Generate performance: elapsed=\(String(format: "%.2f", elapsed), privacy: .public)s, tokensPerSec=\(String(format: "%.1f", tokensPerSec), privacy: .public), autocorrect=\(settings.shouldApplyAsianAutocorrect, privacy: .public)")
+        let rawText: String
+        if let nemotronModel {
+            let language = Self.nemotronLanguage(for: settings.selectedLanguage, model: nemotronModel)
+            logger.info("Generating with Nemotron, language: \(language ?? "default", privacy: .public)")
+            let startTime = Date()
+            rawText = try nemotronModel.transcribe(audio: audio, language: language)
+            logger.info("Generate completed in \(String(format: "%.1f", Date().timeIntervalSince(startTime)), privacy: .public)s, text length: \(rawText.count, privacy: .public)")
+        } else if let model {
+            rawText = try generateWithQwen3(model: model, audio: audio, audioDurationSec: audioDurationSec, settings: settings)
+        } else {
+            throw TranscriptionError.contextInitializationFailed
         }
 
         Memory.clearCache()
@@ -129,7 +151,7 @@ class MLXEngine: TranscriptionEngine {
 
         onProgressUpdate?(0.95)
 
-        var processedText = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var processedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if settings.shouldApplyChineseITN && !processedText.isEmpty {
             processedText = ITNProcessor.process(processedText)
@@ -146,6 +168,41 @@ class MLXEngine: TranscriptionEngine {
         onProgressUpdate?(1.0)
 
         return processedText.isEmpty ? "No speech detected in the audio" : processedText
+    }
+
+    private func generateWithQwen3(
+        model: Qwen3ASRModel,
+        audio: MLXArray,
+        audioDurationSec: Float,
+        settings: Settings
+    ) throws -> String {
+        let language = mapLanguageCode(settings.selectedLanguage)
+        let chunkDuration: Float = 1200.0
+        let expectedChunks = max(1, Int(ceil(audioDurationSec / chunkDuration)))
+        let maxTokens = expectedChunks * 4096
+        if AppPreferences.shared.debugMode {
+            logger.debug("[DEBUG] Generation params: language=\(language, privacy: .public), maxTokens=\(maxTokens, privacy: .public), chunks=\(expectedChunks, privacy: .public), chunkDuration=\(chunkDuration, privacy: .public)s, memoryCacheLimit=64MB")
+        }
+        logger.info("Generating with language: \(language, privacy: .public), maxTokens: \(maxTokens, privacy: .public), chunks: ~\(expectedChunks, privacy: .public), chunkDuration: \(chunkDuration, privacy: .public)s")
+        let startTime = Date()
+        let output = try model.generate(audio: audio, maxTokens: maxTokens, language: language, chunkDuration: chunkDuration)
+        let elapsed = Date().timeIntervalSince(startTime)
+        logger.info("Generate completed in \(String(format: "%.1f", elapsed), privacy: .public)s, tokens: \(output.totalTokens, privacy: .public), text length: \(output.text.count, privacy: .public)")
+        if AppPreferences.shared.debugMode {
+            let tokensPerSec = elapsed > 0 ? Double(output.totalTokens) / elapsed : 0
+            logger.debug("[DEBUG] Generate performance: elapsed=\(String(format: "%.2f", elapsed), privacy: .public)s, tokensPerSec=\(String(format: "%.1f", tokensPerSec), privacy: .public), autocorrect=\(settings.shouldApplyAsianAutocorrect, privacy: .public)")
+        }
+        return output.text
+    }
+
+    /// Nemotron prompt key for an app language code; `nil` (auto-detect) when the model lacks it.
+    static func nemotronLanguage(for code: String, model: NemotronASRModel) -> String? {
+        let key = code == "zh" ? "zh-CN" : code
+        guard model.promptIndex(for: key) != nil else {
+            logger.warning("Nemotron has no prompt for language \(code, privacy: .public); using auto-detect")
+            return nil
+        }
+        return key
     }
 
     func cancelTranscription() {

@@ -112,7 +112,7 @@ enum LLMProviderType: String, CaseIterable {
     var displayName: String {
         switch self {
         case .bedrock: return "AWS Bedrock"
-        case .openai: return "OpenAI Compatible"
+        case .openai: return "Custom API"
         }
     }
 }

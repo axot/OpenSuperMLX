@@ -218,7 +218,7 @@ OpenSuperMLX/                    # Main app target
 ├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
 ├── TranscriptionService.swift   # Transcription orchestration (singleton)
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
-├── MLXModelManager.swift        # The single built-in model (Qwen3-ASR-1.7B-5bit) + models directory
+├── MLXModelManager.swift        # Built-in model (Qwen3-ASR-1.7B-5bit), models-directory discovery + selection
 ├── MicrophoneService.swift      # Audio device enumeration, selection, CoreAudio
 ├── ShortcutManager.swift        # Global hotkey handling + hold-to-record
 ├── FileDropHandler.swift        # Drag-and-drop audio file import
@@ -285,6 +285,7 @@ Scripts/                         # Utility scripts (keyboard layout mgmt, patch 
 Resources/ITN/                   # ITN binary resources
 VendoredPackages/
 └── mlx-audio-swift/             # MLX Audio library (MLXAudioCore, MLXAudioCodecs, MLXAudioSTT)
+    ├── Sources/MLXAudioSTT/Models/NemotronASR/ # Nemotron 3.5 cache-aware RNN-T (record-then-transcribe in the app)
     └── Sources/MLXAudioSTT/Streaming/
         ├── StreamingTypes.swift              # Configuration, results, completeness
         ├── ContinuousChunkProcessor.swift    # Mel, encoder/prefix/KV state, decode acceptance

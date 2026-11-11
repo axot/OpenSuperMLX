@@ -95,6 +95,9 @@ final class AppPreferences {
     
     @UserDefault(key: "useNeuralEngineAudioTower", defaultValue: true)
     var useNeuralEngineAudioTower: Bool
+
+    @OptionalUserDefault(key: "selectedModel")
+    var selectedModel: String?
     
     @UserDefault(key: "mlxLanguage", defaultValue: "auto")
     var mlxLanguage: String
@@ -236,6 +239,11 @@ final class AppPreferences {
 
     @UserDefault(key: "transcriptMCPPort", defaultValue: Int(TranscriptMCPHTTPServer.defaultPort))
     var transcriptMCPPort: Int
+
+    // MARK: - Prompt Presets
+
+    @UserDefault(key: "presetsAlwaysReplace", defaultValue: true)
+    var presetsAlwaysReplace: Bool
 
     // MARK: - Output Device Classifications
 

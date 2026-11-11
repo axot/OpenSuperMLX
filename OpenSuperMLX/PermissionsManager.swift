@@ -102,11 +102,7 @@ class PermissionsManager: ObservableObject {
     }
 
     func checkAccessibilityPermission() {
-        #if DEBUG
-        let granted = true
-        #else
         let granted = AXIsProcessTrusted()
-        #endif
         DispatchQueue.main.async { [weak self] in
             self?.isAccessibilityPermissionGranted = granted
         }
@@ -128,6 +124,15 @@ class PermissionsManager: ObservableObject {
         default:
             openSystemPreferences(for: .microphone)
         }
+    }
+
+    func requestAccessibilityPermissionOrOpenSystemPreferences() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        if AXIsProcessTrustedWithOptions(options) {
+            isAccessibilityPermissionGranted = true
+            return
+        }
+        openSystemPreferences(for: .accessibility)
     }
 
     @objc private func accessibilityPermissionChanged() {

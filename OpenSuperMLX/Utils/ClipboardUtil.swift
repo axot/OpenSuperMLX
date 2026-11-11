@@ -44,7 +44,7 @@ class ClipboardUtil {
         let changeCountAfterWrite = pasteboard.changeCount
 
         // Simulate Cmd+V using layout-aware keycode resolution
-        simulatePaste()
+        sendCommandKey("v")
 
         // Skip restore if changeCount advanced (third party wrote something newer).
         guard let contents = savedContents else { return }
@@ -60,36 +60,35 @@ class ClipboardUtil {
         }
     }
     
-    private static func simulatePaste() {
-        sendCmdV()
-    }
-    
-    private static func sendCmdV() {
-        // QWERTY keycode for V
-        let qwertyKeyCodeV: CGKeyCode = 9
-        
-        // Determine the correct keycode for Cmd+V
-        let keyCodeV: CGKeyCode
-        
+    /// Post a layout-aware ⌘ keystroke for a single character.
+    static func sendCommandKey(_ character: Character) {
+        let fallbackKeyCode: CGKeyCode
+        switch character {
+        case "c": fallbackKeyCode = 8
+        case "v": fallbackKeyCode = 9
+        default: return
+        }
+
+        let keyCode: CGKeyCode
         if isQwertyCommandLayout() {
             // For layouts like "Dvorak - QWERTY ⌘" that use QWERTY for Command shortcuts
-            keyCodeV = qwertyKeyCodeV
-        } else if let foundKeycode = findKeycodeForCharacter("v") {
+            keyCode = fallbackKeyCode
+        } else if let foundKeyCode = findKeycodeForCharacter(character) {
             // For layouts where shortcuts follow the layout (Dvorak Left/Right Hand)
-            keyCodeV = foundKeycode
+            keyCode = foundKeyCode
         } else {
             // Fallback for non-Latin layouts (Russian, etc.) - use QWERTY keycode
-            keyCodeV = qwertyKeyCodeV
+            keyCode = fallbackKeyCode
         }
-        
+
         guard let source = CGEventSource(stateID: .combinedSessionState),
-              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         else { return }
-        
+
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
-        
+
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }
@@ -160,7 +159,7 @@ class ClipboardUtil {
         return nil
     }
     
-    private static func saveCurrentPasteboardContents() -> ([NSPasteboard.PasteboardType: Any], [NSPasteboard.PasteboardType])? {
+    static func saveCurrentPasteboardContents() -> ([NSPasteboard.PasteboardType: Any], [NSPasteboard.PasteboardType])? {
         let pasteboard = NSPasteboard.general
         let types = pasteboard.types ?? []
         
@@ -181,7 +180,7 @@ class ClipboardUtil {
         return (!savedContents.isEmpty) ? (savedContents, types) : nil
     }
     
-    private static func restorePasteboardContents(_ contents: ([NSPasteboard.PasteboardType: Any], [NSPasteboard.PasteboardType])) {
+    static func restorePasteboardContents(_ contents: ([NSPasteboard.PasteboardType: Any], [NSPasteboard.PasteboardType])) {
         let pasteboard = NSPasteboard.general
         let (savedContents, types) = contents
         

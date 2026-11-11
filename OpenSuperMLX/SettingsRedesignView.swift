@@ -121,11 +121,19 @@ struct SettingsRedesignView: View {
         VStack(spacing: 22) {
             SettingsGroup(title: "Recording Trigger") {
                 SettingsField(label: "Toggle record shortcut") {
-                    KeyboardShortcuts.Recorder("", name: .toggleRecord).frame(width: 150)
+                    KeyboardShortcuts.Recorder("", name: .toggleRecord)
+                        .shortcutValidation { shortcut in
+                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                        }
+                        .frame(width: 150)
                 }
                 SettingsFieldDivider()
                 SettingsField(label: "Record with LLM cleanup") {
-                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM).frame(width: 150)
+                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM)
+                        .shortcutValidation { shortcut in
+                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                        }
+                        .frame(width: 150)
                 }
             }
             SettingsGroup(title: "Recording Behavior") {
@@ -145,41 +153,97 @@ struct SettingsRedesignView: View {
         }
     }
 
+    private func presetConflict(for shortcut: KeyboardShortcuts.Shortcut) -> KeyboardShortcuts.ValidationResult {
+        MainActor.assumeIsolated {
+            if let preset = PromptPresetStore.shared.presets.first(where: {
+                $0.shortcutName.shortcut == shortcut
+            }) {
+                return .disallow(reason: "Already used by preset “\(preset.name)”.")
+            }
+            return .allow
+        }
+    }
+
     // MARK: - Model
+
+    private var isModelBusy: Bool {
+        isStreaming || transcriptionService.isTranscribing || transcriptionService.isLoading
+    }
 
     private var modelTab: some View {
         VStack(spacing: 22) {
             SettingsGroup(title: "Speech Recognition Model") {
-                SettingsField(label: MLXModelManager.model.name, detail: MLXModelManager.model.description) {
-                    Text(MLXModelManager.model.size)
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(DesignTokens.txt3)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
+                ForEach(Array(viewModel.availableModels.enumerated()), id: \.element.id) { index, model in
+                    if index > 0 {
+                        SettingsFieldDivider()
+                    }
+                    modelRow(model)
                 }
-                SettingsFieldDivider()
-                SettingsField(
-                    label: "Neural Engine audio encoder",
-                    detail: "Run the audio encoder on the Neural Engine to free the GPU"
-                ) {
-                    DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
-                        .disabled(
-                            isStreaming
-                                || transcriptionService.isTranscribing
-                                || transcriptionService.isLoading
-                        )
+                if viewModel.availableModels.first(where: { $0.id == viewModel.selectedModelID })?.architecture == .qwen3ASR {
+                    SettingsFieldDivider()
+                    SettingsField(
+                        label: "Neural Engine audio encoder",
+                        detail: "Run the audio encoder on the Neural Engine to free the GPU"
+                    ) {
+                        DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
+                            .disabled(isModelBusy)
+                    }
                 }
             }
             SettingsGroup(title: "Models Directory") {
-                SettingsField(label: directoryDisplay(MLXModelManager.modelsDirectory.appendingPathComponent("mlx-audio"))) {
-                    OpenFolderButton {
-                        let dir = MLXModelManager.modelsDirectory.appendingPathComponent("mlx-audio")
-                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                        NSWorkspace.shared.open(dir)
+                SettingsField(label: directoryDisplay(MLXModelManager.installedModelsDirectory)) {
+                    HStack(spacing: 8) {
+                        Button(action: viewModel.refreshModels) {
+                            Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                                .foregroundStyle(DesignTokens.txt)
+                                .padding(.horizontal, 9).padding(.vertical, 6)
+                                .fieldSurface()
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rescan the models directory")
+                        OpenFolderButton {
+                            let dir = MLXModelManager.installedModelsDirectory
+                            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                            NSWorkspace.shared.open(dir)
+                        }
                     }
                 }
             }
         }
+        .onAppear { viewModel.refreshModels() }
+    }
+
+    private func modelRow(_ model: LocalMLXModel) -> some View {
+        let isSelected = model.id == viewModel.selectedModelID
+        let size = model.sizeBytes > 0
+            ? ByteCountFormatter.string(fromByteCount: model.sizeBytes, countStyle: .file)
+            : (model.id == MLXModelManager.builtInModelID ? MLXModelManager.model.size : nil)
+        return Button {
+            viewModel.selectedModelID = model.id
+        } label: {
+            SettingsField(
+                label: model.name,
+                detail: model.architecture?.summary ?? "Unsupported model type: \(model.modelType ?? "unknown")"
+            ) {
+                HStack(spacing: 10) {
+                    if let size {
+                        Text(size)
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(DesignTokens.txt3)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 5).fill(DesignTokens.surface3))
+                    }
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15))
+                        .foregroundStyle(isSelected ? DesignTokens.acc : DesignTokens.txt3)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.isSupported || isModelBusy)
+        .opacity(model.isSupported ? 1 : 0.5)
+        .help(model.isSupported ? "Use \(model.name)" : "This model type is not supported")
     }
 
     // MARK: - Transcription
@@ -209,7 +273,12 @@ struct SettingsRedesignView: View {
                 }
             }
             SettingsGroup(title: "Streaming") {
-                SettingsField(label: "Streaming transcription", detail: "Transcribe in real-time while recording") {
+                SettingsField(
+                    label: "Streaming transcription",
+                    detail: transcriptionService.activeModel?.supportsStreaming == false
+                        ? "Not available with \(transcriptionService.activeModel?.name ?? "this model"); transcribes when recording stops"
+                        : "Transcribe in real-time while recording"
+                ) {
                     DesignToggle(isOn: $viewModel.useStreamingTranscription)
                 }
             }
@@ -241,6 +310,18 @@ struct SettingsRedesignView: View {
                 SettingsGroup(title: "Updates") {
                     SettingsField(label: "Check for updates automatically", detail: "Once a day from GitHub") {
                         DesignToggle(isOn: $viewModel.automaticallyChecksForUpdates)
+                    }
+                    SettingsFieldDivider()
+                    SettingsField(label: "Check for updates") {
+                        Button("Check now") {
+                            AppUpdater.shared.controller.checkForUpdates(nil)
+                        }
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(DesignTokens.txt)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .fieldSurface()
+                        .buttonStyle(.plain)
+                        .help("Check for a new version now")
                     }
                 }
             }
@@ -673,9 +754,17 @@ private struct PermissionsCard: View {
 
     var body: some View {
         SettingsGroup(title: "Permissions") {
-            permRow("Microphone", granted: permissions.isMicrophonePermissionGranted, action: nil)
+            permRow(
+                "Microphone",
+                granted: permissions.isMicrophonePermissionGranted,
+                action: { permissions.requestMicrophonePermissionOrOpenSystemPreferences() }
+            )
             SettingsFieldDivider()
-            permRow("Accessibility", granted: permissions.isAccessibilityPermissionGranted, action: nil)
+            permRow(
+                "Accessibility",
+                granted: permissions.isAccessibilityPermissionGranted,
+                action: { permissions.requestAccessibilityPermissionOrOpenSystemPreferences() }
+            )
             SettingsFieldDivider()
             permRow("Screen Recording", granted: permissions.isScreenRecordingPermissionGranted) {
                 permissions.openSystemPreferences(for: .screenRecording)

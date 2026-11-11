@@ -83,6 +83,9 @@ struct RecordingDock<Tools: View>: View {
     let text: String
     let onRecord: () -> Void
     let onStop: () -> Void
+    var detailsOpen = false
+    var canShowDetails = false
+    var onShowDetails: () -> Void = {}
     @ViewBuilder var tools: () -> Tools
 
     @State private var hovering = false
@@ -90,25 +93,35 @@ struct RecordingDock<Tools: View>: View {
     private var timeString: String { StatsFormat.clock(elapsed) }
 
     var body: some View {
-        HStack(spacing: 15) {
+        HStack(spacing: 10) {
             recordButton
-            middle
-            Spacer(minLength: 8)
+            Button(action: onShowDetails) {
+                middle
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canShowDetails)
+            .help(detailsOpen ? "Close recording details" : "Show complete transcript")
             tools()
         }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 22)
-        .contentColumn()
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: 360)
+        .background(DesignTokens.surface, in: Capsule())
+        .overlay {
+            Capsule().stroke(DesignTokens.lineHard, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 78)
         .overlay(alignment: .top) {
             Rectangle().fill(DesignTokens.line2).frame(height: 1)
         }
-        .background(
-            LinearGradient(
-                colors: [.clear, Color.black.opacity(0.012)],
-                startPoint: .top, endPoint: .bottom
-            )
-        )
+        .background(DesignTokens.surface2)
     }
 
     // MARK: Leading button (fixed 46pt frame in both states)
@@ -158,6 +171,9 @@ struct RecordingDock<Tools: View>: View {
                     LogoWaveform(level: level)
                     Text(timeString)
                         .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(DesignTokens.txt3)
+                    Image(systemName: detailsOpen ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(DesignTokens.txt3)
                 }
                 TypewriterText(target: text, placeholder: "Listening…")

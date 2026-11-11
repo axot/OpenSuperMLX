@@ -81,6 +81,7 @@ class StreamingAudioService: ObservableObject {
 
     @Published private(set) var confirmedText = ""
     @Published private(set) var provisionalText = ""
+    @Published private(set) var transcriptDisplayUpdate: LiveTranscriptSnapshot?
     @Published private(set) var isStreaming = false
     @Published private(set) var currentRMSLevel: Float = 0
 
@@ -148,7 +149,6 @@ class StreamingAudioService: ObservableObject {
     private var isHandlingConfigChange = false
 
     private var isEngineWarmed = false
-    private var hasBeenWarmedOnce = false
     private var lastWarmUpTime: Date = .distantPast
     private var tapRecoveryAttempts = 0
 
@@ -282,6 +282,10 @@ class StreamingAudioService: ObservableObject {
     /// is still open restarts the metering timer the stop path tore down.
     private var popoverWantsMetering = false
 
+    /// Starts awaiting engine init own the engine before `isStreaming` flips, so idle
+    /// release must not cool it down underneath them.
+    private var pendingStreamStarts = 0
+
     /// Begin live mic metering for the picker popover. Warms the engine if needed
     /// (so the tap delivers buffers) and runs the RMS timer. No-op while streaming —
     /// streaming already drives `currentRMSLevel`.
@@ -296,12 +300,31 @@ class StreamingAudioService: ObservableObject {
         }
     }
 
-    /// Stop popover metering. Leaves the warmed engine in place (it's reused for the
-    /// next recording); only tears down the timer it owns and zeroes the level.
+    /// Stop popover metering and release the microphone. Streaming owns the engine
+    /// and timer while active, so this is a no-op mid-recording.
     func stopIdleMetering() {
         popoverWantsMetering = false
-        guard !isStreaming else { return } // streaming owns the timer; leave it
-        stopRMSTimer()
+        releaseEngineIfIdle()
+    }
+
+    /// An open input engine keeps Bluetooth headsets in the low-quality hands-free
+    /// profile, so the mic is held only while recording, starting to record, or while
+    /// the popover meters it.
+    nonisolated static func shouldReleaseEngine(
+        isStreaming: Bool,
+        hasPendingStart: Bool,
+        popoverWantsMetering: Bool
+    ) -> Bool {
+        !isStreaming && !hasPendingStart && !popoverWantsMetering
+    }
+
+    private func releaseEngineIfIdle() {
+        guard Self.shouldReleaseEngine(
+            isStreaming: isStreaming,
+            hasPendingStart: pendingStreamStarts > 0,
+            popoverWantsMetering: popoverWantsMetering
+        ) else { return }
+        coolDown()
     }
 
     /// Restart idle metering after a recording ends if the picker popover is still
@@ -348,8 +371,6 @@ class StreamingAudioService: ObservableObject {
                         self.coolDown()
                         await self.warmUp(fromBackground: true)
                     }
-                } else if self.hasBeenWarmedOnce {
-                    await self.warmUp(fromBackground: true)
                 }
             }
         }
@@ -465,7 +486,6 @@ class StreamingAudioService: ObservableObject {
             audioEngine = result.engine
             nativeSampleRate = rate
             isEngineWarmed = true
-            hasBeenWarmedOnce = true
             lastWarmUpTime = Date()
             // Snapshot post-start state so the configChange handler can branch on what
             // actually changed. The device snapshot is the *bound* device, not the
@@ -1030,6 +1050,11 @@ class StreamingAudioService: ObservableObject {
         }
 
         let generation = startGeneration
+        pendingStreamStarts += 1
+        defer {
+            pendingStreamStarts -= 1
+            releaseEngineIfIdle()
+        }
 
         guard let model = TranscriptionService.shared.streamingModel else {
             PipelineTrace.shared.log("STREAM", "no model available")
@@ -1059,6 +1084,7 @@ class StreamingAudioService: ObservableObject {
         resetHealthForNewRecording()
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
 
         let startTime = Date()
         let recordingID = UUID()
@@ -1124,7 +1150,7 @@ class StreamingAudioService: ObservableObject {
         recordingStartTime = startTime
         beginTranscriptSession(startedAt: startTime)
         playNotificationSound()
-        logger.info("Streaming started (engine pre-warmed)")
+        logger.info("Streaming started")
 
         let userSpeakerToggle = MicrophoneService.shared.speakerCaptureEnabled
         let classification = resolveCurrentClassification(askIfNeeded: userSpeakerToggle)
@@ -1294,6 +1320,7 @@ class StreamingAudioService: ObservableObject {
             // If the mic-picker popover is still open, restart its metering timer —
             // the teardown below invalidated it but the popover won't re-fire onAppear.
             resumeIdleMeteringIfNeeded()
+            releaseEngineIfIdle()
         }
 
         stopRMSTimer()
@@ -1406,6 +1433,7 @@ class StreamingAudioService: ObservableObject {
         endCurrentTranscriptSession(finalText: finalText, elapsedMs: currentTranscriptElapsedMs())
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
         streamingSession = nil
         recordingStartTime = nil
         currentRecordingID = nil
@@ -1438,6 +1466,7 @@ class StreamingAudioService: ObservableObject {
         defer {
             isStreaming = false
             resumeIdleMeteringIfNeeded()
+            releaseEngineIfIdle()
         }
 
         stopRMSTimer()
@@ -1560,13 +1589,16 @@ class StreamingAudioService: ObservableObject {
         switch event {
         case .provisional(let text):
             provisionalText = text
+            publishTranscriptDisplayUpdate()
 
         case .confirmed(let text):
             confirmedText = text
+            publishTranscriptDisplayUpdate()
 
         case .displayUpdate(let confirmed, let provisional):
             confirmedText = confirmed
             provisionalText = provisional
+            publishTranscriptDisplayUpdate()
 
         case .stats(let stats):
             if let gap = stats.recoveryGap {
@@ -1591,10 +1623,17 @@ class StreamingAudioService: ObservableObject {
             let cleaned = Self.finalizedText(fullText, hasGaps: hasTranscriptionGaps)
             confirmedText = cleaned
             provisionalText = ""
+            publishTranscriptDisplayUpdate()
             logger.info("Streaming ended, full text length: \(fullText.count, privacy: .public) → cleaned: \(cleaned.count, privacy: .public)")
         }
 
         recordTranscriptEvent(event, elapsedMs: currentTranscriptElapsedMs())
+    }
+
+    private func publishTranscriptDisplayUpdate() {
+        var snapshot = LiveTranscriptSnapshot()
+        snapshot.capture(confirmed: confirmedText, provisional: provisionalText)
+        transcriptDisplayUpdate = snapshot
     }
 
     @discardableResult
@@ -1694,6 +1733,7 @@ class StreamingAudioService: ObservableObject {
         hasReportedUnavailableEncoder = false
         confirmedText = ""
         provisionalText = ""
+        transcriptDisplayUpdate = nil
         recordingStartTime = nil
         currentRecordingID = nil
         currentRecordingFileName = nil

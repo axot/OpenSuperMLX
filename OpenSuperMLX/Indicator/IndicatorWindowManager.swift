@@ -1,19 +1,20 @@
 import AppKit
+import Combine
 import SwiftUI
 
 import KeyboardShortcuts
 
 @MainActor
-class IndicatorWindowManager: IndicatorViewDelegate {
+class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     static let shared = IndicatorWindowManager()
 
     private var window: NSWindow?
-    private var viewModel: IndicatorViewModel?
+    @Published private(set) var viewModel: IndicatorViewModel?
     
     private init() {}
     
     func show(nearPoint point: NSPoint? = nil) -> IndicatorViewModel {
-        KeyboardShortcuts.enable(.escape)
+        ShortcutManager.shared.indicatorVisible = true
         RecordingActivity.shared.report(self, isActive: true)
 
         viewModel?.cleanup()
@@ -84,7 +85,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
     }
 
     func hide() {
-        KeyboardShortcuts.disable(.escape)
+        ShortcutManager.shared.indicatorVisible = false
         
         Task {
             guard let viewModel = self.viewModel else { return }
