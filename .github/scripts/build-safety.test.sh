@@ -85,6 +85,16 @@ assert_spm_resolution_is_reproducible() {
     fi
 }
 
+assert_bridging_header_compiles() {
+    clang -fsyntax-only -x c -include "$REPOSITORY_ROOT/Bridge.h" /dev/null
+}
+
+assert_nemo_wrapper_typechecks() {
+    swiftc -typecheck -import-objc-header "$REPOSITORY_ROOT/Bridge.h" \
+        -I "$REPOSITORY_ROOT/text-processing-rs/swift/include/CNemoTextProcessing" \
+        "$REPOSITORY_ROOT/OpenSuperMLX/Utils/NemoTextProcessing.swift"
+}
+
 assert_hosted_tests_skip_audio_graph() {
     local step_block
 
@@ -264,6 +274,10 @@ run_case "integration tests allow declared Swift package plug-ins" \
     assert_test_step_skips_package_validation "Run integration tests (hosted)"
 run_case "SPM resolution must leave Package.resolved unchanged" \
     assert_spm_resolution_is_reproducible
+run_case "native bridging header compiles against checked-out submodules" \
+    assert_bridging_header_compiles
+run_case "Nemo wrapper typechecks against the native FFI" \
+    assert_nemo_wrapper_typechecks
 run_case "hosted tests skip hardware-dependent audio graph tests" \
     assert_hosted_tests_skip_audio_graph
 run_case "libomp codesign failure stops run.sh" \
