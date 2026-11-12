@@ -13,7 +13,10 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     
     private init() {}
     
-    func show(nearPoint point: NSPoint? = nil) -> IndicatorViewModel {
+    static let panelSize = NSSize(width: 380, height: 88)
+    static let bottomMargin: CGFloat = 16
+
+    func show(onScreenContaining point: NSPoint? = nil) -> IndicatorViewModel {
         ShortcutManager.shared.indicatorVisible = true
         RecordingActivity.shared.report(self, isActive: true)
 
@@ -28,26 +31,13 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
 
         let targetScreen = point.flatMap { FocusUtils.screenContaining(point: $0) } ?? NSScreen.main
         if let window = window, let screen = targetScreen {
-            let windowFrame = window.frame
-            let screenFrame = screen.frame
+            window.setContentSize(Self.panelSize)
+            window.setFrameOrigin(Self.indicatorOrigin(
+                windowSize: window.frame.size,
+                visibleFrame: screen.visibleFrame
+            ))
 
-            var x: CGFloat
-            var y: CGFloat
-
-            if let point = point {
-                x = point.x - windowFrame.width / 2
-                y = point.y + 20
-            } else {
-                x = screenFrame.midX - windowFrame.width / 2
-                y = screenFrame.maxY - windowFrame.height - 100
-            }
-
-            x = max(screenFrame.minX, min(x, screenFrame.maxX - windowFrame.width))
-            y = max(screenFrame.minY, min(y, screenFrame.maxY - windowFrame.height))
-
-            window.setFrameOrigin(NSPoint(x: x, y: y))
-
-            let hostingView = NSHostingView(rootView: IndicatorWindow(viewModel: newViewModel))
+            let hostingView = FirstMouseHostingView(rootView: IndicatorWindow(viewModel: newViewModel))
             window.contentView = hostingView
         }
 
@@ -55,10 +45,17 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
         return newViewModel
     }
 
+    static func indicatorOrigin(windowSize: NSSize, visibleFrame: NSRect) -> NSPoint {
+        NSPoint(
+            x: visibleFrame.midX - windowSize.width / 2,
+            y: visibleFrame.minY + bottomMargin
+        )
+    }
+
     static func makePanel() -> NSPanel {
         // NSPanel for full-screen space compatibility
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+            contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -68,7 +65,8 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.canHide = false
         panel.hidesOnDeactivate = false
         return panel
@@ -107,4 +105,10 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     func didFinishDecoding() {
         hide()
     }
+}
+
+/// The pill never becomes key, so without this the first click on the cleanup chip
+/// would only focus the panel instead of opening the menu.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

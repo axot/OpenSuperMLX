@@ -157,23 +157,6 @@ class SettingsViewModel: ObservableObject {
         didSet { AppPreferences.shared.bedrockMaxOutputTokens = LLMRequestOptions.clampedTokens(bedrockMaxOutputTokens) }
     }
     
-    @Published var useCustomPrompt: Bool {
-        didSet {
-            guard !isInitializing else { return }
-            AppPreferences.shared.useCustomCorrectionPrompt = useCustomPrompt
-            if useCustomPrompt && customPromptText.isEmpty {
-                customPromptText = LLMCorrectionService.defaultCorrectionPrompt
-            }
-        }
-    }
-    
-    @Published var customPromptText: String {
-        didSet {
-            guard !isInitializing else { return }
-            AppPreferences.shared.customCorrectionPrompt = customPromptText
-        }
-    }
-
     @Published var useStreamingTranscription: Bool {
         didSet {
             AppPreferences.shared.useStreamingTranscription = useStreamingTranscription
@@ -181,6 +164,7 @@ class SettingsViewModel: ObservableObject {
     }
     
     private var isInitializing = true
+    private var cleanupObserver: NSObjectProtocol?
     
     init() {
         let prefs = AppPreferences.shared
@@ -216,10 +200,19 @@ class SettingsViewModel: ObservableObject {
         self.bedrockThinkingEffort = prefs.bedrockThinkingEffort
         self.bedrockContextTokens = prefs.bedrockContextTokens
         self.bedrockMaxOutputTokens = prefs.bedrockMaxOutputTokens
-        self.useCustomPrompt = prefs.useCustomCorrectionPrompt
-        self.customPromptText = prefs.customCorrectionPrompt ?? LLMCorrectionService.defaultCorrectionPrompt
         self.useStreamingTranscription = prefs.useStreamingTranscription
         isInitializing = false
+        cleanupObserver = NotificationCenter.default.addObserver(
+            forName: .dictationCleanupDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let enabled = AppPreferences.shared.llmCorrectionEnabled
+                if self.llmCorrectionEnabled != enabled {
+                    self.llmCorrectionEnabled = enabled
+                }
+            }
+        }
     }
 
     func refreshModels() {
@@ -752,56 +745,6 @@ struct SettingsView: View {
                         .background(Color(.controlBackgroundColor).opacity(0.3))
                         .cornerRadius(12)
                     }
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Correction Prompt")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Input text is automatically wrapped in <transcription> tags, and a safety preamble is prepended to prevent the LLM from following instructions found in the transcription.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            Picker("Prompt Mode", selection: $viewModel.useCustomPrompt) {
-                                Text("Default").tag(false)
-                                Text("Custom").tag(true)
-                            }
-                            .pickerStyle(.segmented)
-                            
-                            if viewModel.useCustomPrompt {
-                                Text("Custom prompt preserved across app updates")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                TextEditor(text: $viewModel.customPromptText)
-                                    .font(.system(.body, design: .monospaced))
-                                    .frame(minHeight: 80)
-                                    .padding(4)
-                                    .background(Color(.textBackgroundColor).opacity(0.5))
-                                    .cornerRadius(6)
-                            } else {
-                                Text("Uses the built-in prompt, automatically updated with new app versions")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                ScrollView {
-                                    Text(LLMCorrectionService.defaultCorrectionPrompt)
-                                        .font(.system(.body, design: .monospaced))
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .frame(minHeight: 80, maxHeight: 200)
-                                .padding(4)
-                                .background(Color(.textBackgroundColor).opacity(0.3))
-                                .cornerRadius(6)
-                            }
-                        }
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.controlBackgroundColor).opacity(0.3))
-                    .cornerRadius(12)
             }
             .padding()
         }
@@ -834,18 +777,6 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             KeyboardShortcuts.Recorder("", name: .toggleRecord)
-                                .frame(width: 150)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.textBackgroundColor).opacity(0.5))
-                        .cornerRadius(8)
-                        
-                        HStack {
-                            Text("Record with LLM")
-                                .font(.subheadline)
-                            Spacer()
-                            KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM)
                                 .frame(width: 150)
                         }
                         .padding(.horizontal, 12)

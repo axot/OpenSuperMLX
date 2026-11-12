@@ -22,8 +22,8 @@ struct CorrectCommand: ParsableCommand {
     @Option(name: .long, help: "LLM provider (bedrock or openai)")
     var provider: String?
 
-    @Option(name: .long, help: "Custom correction prompt")
-    var prompt: String?
+    @Option(name: .long, help: "Apply a preset from Settings → Presets by name (case-insensitive)")
+    var preset: String?
 
     // MARK: - Execution
 
@@ -45,8 +45,18 @@ struct CorrectCommand: ParsableCommand {
 
     @MainActor
     func executeCorrection(
-        service: LLMCorrectionService
+        service: LLMCorrectionService,
+        presets: [PromptPreset]? = nil
     ) async -> Result<CorrectResult, CLIError> {
+        var selectedPreset: PromptPreset?
+        if let preset {
+            let available = presets ?? PromptPresetStore.shared.presets
+            guard let match = available.first(where: { $0.name.caseInsensitiveCompare(preset) == .orderedSame }) else {
+                return .failure(.presetNotFound)
+            }
+            selectedPreset = match
+        }
+
         let inputText: String
 
         if let filePath = file {
@@ -67,13 +77,8 @@ struct CorrectCommand: ParsableCommand {
             AppPreferences.shared.llmProvider = providerName
         }
 
-        if let customPrompt = prompt {
-            AppPreferences.shared.useCustomCorrectionPrompt = true
-            AppPreferences.shared.customCorrectionPrompt = customPrompt
-        }
-
         let startTime = CFAbsoluteTimeGetCurrent()
-        let outcome = await service.correct(inputText, forceEnabled: true)
+        let outcome = await service.correct(inputText, forceEnabled: true, preset: selectedPreset)
         let processingTime = CFAbsoluteTimeGetCurrent() - startTime
 
         if outcome.errorMessage != nil, !outcome.correctedAnything {
@@ -84,6 +89,7 @@ struct CorrectCommand: ParsableCommand {
             originalText: inputText,
             correctedText: outcome.text,
             provider: AppPreferences.shared.llmProvider,
+            preset: selectedPreset?.name,
             mode: outcome.mode.rawValue,
             chunkCount: outcome.chunkCount,
             failedChunkCount: outcome.failedChunkCount,
@@ -99,6 +105,7 @@ struct CorrectResult: Encodable {
     let originalText: String
     let correctedText: String
     let provider: String
+    let preset: String?
     let mode: String
     let chunkCount: Int
     let failedChunkCount: Int
@@ -109,6 +116,7 @@ struct CorrectResult: Encodable {
         case originalText = "original_text"
         case correctedText = "corrected_text"
         case provider
+        case preset
         case mode
         case chunkCount = "chunk_count"
         case failedChunkCount = "failed_chunk_count"

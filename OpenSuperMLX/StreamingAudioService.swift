@@ -1518,7 +1518,7 @@ class StreamingAudioService: ObservableObject {
     func finalizeRecording(
         duration: TimeInterval = 0,
         applyCorrection: Bool = true,
-        forceLLM: Bool = false,
+        cleanupPreset: PromptPreset? = nil,
         onCorrectionStarted: () -> Void = {}
     ) async -> StreamingResult? {
         let saveCoordinator = RecordingSaveCoordinator.shared
@@ -1556,9 +1556,9 @@ class StreamingAudioService: ObservableObject {
         }
 
         var llmErrorMessage: String?
-        if applyCorrection && LLMCorrectionService.willCorrect(forceEnabled: forceLLM) {
+        if applyCorrection && LLMCorrectionService.willCorrect(forceEnabled: false) {
             onCorrectionStarted()
-            let outcome = await LLMCorrectionService.shared.correct(text, forceEnabled: forceLLM)
+            let outcome = await LLMCorrectionService.shared.correct(text, preset: cleanupPreset)
             text = outcome.text
             llmErrorMessage = outcome.errorMessage
         }

@@ -160,6 +160,113 @@ final class PromptPresetServiceTests: XCTestCase {
     }
 }
 
+// MARK: - Voice Command
+
+@MainActor
+final class PromptPresetCommandTests: XCTestCase {
+
+    func testInstructionRewritesSelectionWithCommandPrompt() async {
+        let provider = StubLLMProvider(result: .success(" سلام دنیا "))
+        let recorder = ReplacementRecorder()
+        let service = makeService(provider: provider, recorder: recorder)
+        let selection = PromptPresetService.Selection(text: "hello world", target: .init(selectedText: "hello world"))
+
+        let outcome = await service.applyInstruction("translate this to Farsi", to: selection)
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(provider.receivedSystemPrompt, PromptPresetService.commandSystemPrompt)
+        XCTAssertEqual(
+            provider.receivedText,
+            PromptPresetService.commandUserMessage(instruction: "translate this to Farsi", text: "hello world")
+        )
+        XCTAssertEqual(recorder.text, "سلام دنیا")
+    }
+
+    func testInstructionWithoutSelectionInsertsNewTextAtCursor() async {
+        let provider = StubLLMProvider(result: .success("Thanks, but I can't make it."))
+        let recorder = ReplacementRecorder()
+        var inserted: String?
+        let service = makeService(provider: provider, recorder: recorder, insertText: { inserted = $0 })
+
+        let outcome = await service.applyInstruction("write a polite decline", to: nil)
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(inserted, "Thanks, but I can't make it.")
+        XCTAssertNil(recorder.text)
+        XCTAssertTrue(provider.receivedText?.contains("No text is selected") == true)
+    }
+
+    func testCancelledCommandWritesNothing() async {
+        let gate = AsyncGate()
+        let provider = StubLLMProvider(result: .success("Rewritten")) { await gate.wait() }
+        let recorder = ReplacementRecorder()
+        let service = makeService(provider: provider, recorder: recorder)
+        let selection = PromptPresetService.Selection(text: "hello", target: .init(selectedText: "hello"))
+
+        let task = Task { await service.applyInstruction("make it formal", to: selection) }
+        while provider.receivedText == nil { await Task.yield() }
+        task.cancel()
+        await gate.open()
+
+        let outcome = await task.value
+        XCTAssertEqual(outcome, .ignored)
+        XCTAssertNil(recorder.text)
+    }
+
+    func testEmptyInstructionFailsWithoutCallingProvider() async {
+        let provider = StubLLMProvider()
+        let service = makeService(provider: provider, recorder: ReplacementRecorder())
+        let selection = PromptPresetService.Selection(text: "hello", target: .init(selectedText: "hello"))
+
+        let outcome = await service.applyInstruction("  \n ", to: selection)
+
+        XCTAssertEqual(outcome, .failed(PromptPresetService.noInstructionMessage))
+        XCTAssertNil(provider.receivedText)
+    }
+
+    func testCommandSelectionCaptureRequiresAccessibility() async {
+        let service = makeService(provider: StubLLMProvider(), recorder: ReplacementRecorder(), accessibility: false)
+
+        let capture = await service.captureCommandSelection()
+
+        guard case .failure = capture else {
+            XCTFail("Expected an accessibility failure"); return
+        }
+    }
+
+    func testCommandSelectionCaptureAllowsEmptySelection() async {
+        let service = makeService(provider: StubLLMProvider(), recorder: ReplacementRecorder(), selectedText: nil)
+
+        let capture = await service.captureCommandSelection()
+
+        guard case .success(let selection) = capture else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertNil(selection)
+    }
+
+    // MARK: - Helpers
+
+    private func makeService(
+        provider: StubLLMProvider,
+        recorder: ReplacementRecorder,
+        selectedText: String? = "hello world",
+        accessibility: Bool = true,
+        insertText: @escaping @MainActor (String) -> Void = { _ in }
+    ) -> PromptPresetService {
+        PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in
+                selectedText.map { PromptPresetService.Selection(text: $0, target: .init(selectedText: $0)) }
+            },
+            readTarget: { $0.target },
+            replaceSelection: { recorder.record($0, $1) },
+            insertText: insertText,
+            isAccessibilityGranted: { accessibility }
+        )
+    }
+}
+
 // MARK: - Target and Clipboard Guards
 
 @MainActor
@@ -324,6 +431,22 @@ private final class StubLLMProvider: LLMProvider, @unchecked Sendable {
         }
         await onRequest()
         return try result.get()
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
     }
 }
 

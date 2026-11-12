@@ -16,6 +16,7 @@ enum CLIError: String, Error, CustomStringConvertible {
     case audioFileMissing = "audio_file_missing"
     case invalidConfigKey = "invalid_config_key"
     case invalidConfigValue = "invalid_config_value"
+    case presetNotFound = "preset_not_found"
 
     var description: String {
         switch self {
@@ -31,6 +32,7 @@ enum CLIError: String, Error, CustomStringConvertible {
         case .audioFileMissing: return "Recording audio file missing from disk"
         case .invalidConfigKey: return "Unknown configuration key"
         case .invalidConfigValue: return "Invalid value for configuration key"
+        case .presetNotFound: return "No preset with that name"
         }
     }
 

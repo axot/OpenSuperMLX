@@ -33,6 +33,26 @@ final class AudioRecorderTests: XCTestCase {
         XCTAssertTrue(context.backend.recordCalled)
     }
 
+    func testMeteredLevelConvertsAveragePowerToLinearRMS() throws {
+        let context = try makeContext(prepareResult: true, recordResult: true)
+        context.backend.averagePowerDB = -20
+        XCTAssertTrue(context.recorder.startRecordingWithRecorder(
+            fileURL: context.outputURL,
+            monitorConnection: false
+        ))
+
+        XCTAssertEqual(context.recorder.meteredLevel(), 0.1, accuracy: 0.0001)
+        XCTAssertTrue(context.backend.isMeteringEnabled)
+        XCTAssertEqual(context.backend.updateMetersCallCount, 1)
+    }
+
+    func testMeteredLevelIsZeroWithoutActiveRecording() throws {
+        let context = try makeContext(prepareResult: true, recordResult: true)
+        context.backend.averagePowerDB = -20
+
+        XCTAssertEqual(context.recorder.meteredLevel(), 0)
+    }
+
     func testSuccessfulFinishReturnsPlayableURL() async throws {
         let context = try makeContext(prepareResult: true, recordResult: true)
         XCTAssertTrue(context.recorder.startRecordingWithRecorder(
@@ -248,6 +268,8 @@ private final class FakeAudioRecordingBackend: AudioRecordingBackend {
     private let recordResult: Bool
     private(set) var recordCalled = false
     private(set) var stopCallCount = 0
+    private(set) var updateMetersCallCount = 0
+    var averagePowerDB: Float = -160
     var onStop: (() -> Void)?
 
     init(
@@ -272,5 +294,13 @@ private final class FakeAudioRecordingBackend: AudioRecordingBackend {
     func stop() {
         stopCallCount += 1
         onStop?()
+    }
+
+    func updateMeters() {
+        updateMetersCallCount += 1
+    }
+
+    func averagePower(forChannel channelNumber: Int) -> Float {
+        averagePowerDB
     }
 }

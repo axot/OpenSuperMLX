@@ -123,15 +123,18 @@ struct SettingsRedesignView: View {
                 SettingsField(label: "Toggle record shortcut") {
                     KeyboardShortcuts.Recorder("", name: .toggleRecord)
                         .shortcutValidation { shortcut in
-                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                            MainActor.assumeIsolated { shortcutConflict(for: shortcut, excluding: .toggleRecord) }
                         }
                         .frame(width: 150)
                 }
                 SettingsFieldDivider()
-                SettingsField(label: "Record with LLM cleanup") {
-                    KeyboardShortcuts.Recorder("", name: .toggleRecordWithLLM)
+                SettingsField(
+                    label: "Voice command on selection",
+                    detail: "Select text, press, say what to do, press again"
+                ) {
+                    KeyboardShortcuts.Recorder("", name: .voiceCommand)
                         .shortcutValidation { shortcut in
-                            MainActor.assumeIsolated { presetConflict(for: shortcut) }
+                            MainActor.assumeIsolated { shortcutConflict(for: shortcut, excluding: .voiceCommand) }
                         }
                         .frame(width: 150)
                 }
@@ -153,8 +156,14 @@ struct SettingsRedesignView: View {
         }
     }
 
-    private func presetConflict(for shortcut: KeyboardShortcuts.Shortcut) -> KeyboardShortcuts.ValidationResult {
+    private func shortcutConflict(
+        for shortcut: KeyboardShortcuts.Shortcut,
+        excluding name: KeyboardShortcuts.Name
+    ) -> KeyboardShortcuts.ValidationResult {
         MainActor.assumeIsolated {
+            if let owner = ShortcutManager.builtInShortcutOwner(of: shortcut, excluding: name) {
+                return .disallow(reason: "Already used by \(owner).")
+            }
             if let preset = PromptPresetStore.shared.presets.first(where: {
                 $0.shortcutName.shortcut == shortcut
             }) {
@@ -374,8 +383,6 @@ struct SettingsRedesignView: View {
             }
 
             modelLimitsCard
-
-            correctionPromptCard
         }
     }
 
@@ -516,7 +523,7 @@ struct SettingsRedesignView: View {
         let prefs = AppPreferences.shared
         return LLMCorrectionService.limitsNotice(
             options: prefs.llmRequestOptions(for: isOpenAIProvider ? .openai : .bedrock),
-            userPrompt: prefs.effectiveCorrectionPrompt
+            userPrompt: LLMCorrectionService.defaultCorrectionPrompt
         )
     }
 
@@ -566,45 +573,6 @@ struct SettingsRedesignView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
-    }
-
-    private var correctionPromptCard: some View {
-        SettingsGroup(title: "Correction Prompt") {
-            SettingsField(label: "Prompt mode") {
-                Picker("", selection: $viewModel.useCustomPrompt) {
-                    Text("Default").tag(false)
-                    Text("Custom").tag(true)
-                }
-                .labelsHidden().pickerStyle(.segmented).fixedSize()
-            }
-            SettingsFieldDivider()
-            VStack(alignment: .leading, spacing: 8) {
-                if viewModel.useCustomPrompt {
-                    Text("Editable · preserved across updates")
-                        .font(.system(size: 11)).foregroundStyle(DesignTokens.txt3)
-                    TextEditor(text: $viewModel.customPromptText)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(minHeight: 140)
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(DesignTokens.surface3))
-                } else {
-                    Text("Built-in prompt, updated with new app versions")
-                        .font(.system(size: 11)).foregroundStyle(DesignTokens.txt3)
-                    ScrollView {
-                        Text(LLMCorrectionService.defaultCorrectionPrompt)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(DesignTokens.txt2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(minHeight: 120, maxHeight: 200)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(DesignTokens.surface3))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-        }
     }
 
     private func directoryDisplay(_ url: URL) -> String {

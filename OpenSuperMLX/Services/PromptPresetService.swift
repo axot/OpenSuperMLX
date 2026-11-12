@@ -26,6 +26,10 @@ enum PresetApplyOutcome: Equatable {
     }
 }
 
+struct PresetCommandUnavailable: Error, Equatable {
+    let message: String
+}
+
 @MainActor
 final class PromptPresetService {
     static let shared = PromptPresetService()
@@ -76,6 +80,7 @@ final class PromptPresetService {
     private let readTarget: @MainActor (Selection) async -> Target?
     private let replaceSelection: @MainActor (Selection, String) async -> Void
     private let copyText: @MainActor (String) -> Void
+    private let insertText: @MainActor (String) -> Void
     private let alwaysReplace: @MainActor () -> Bool
     private let isAccessibilityGranted: @MainActor () -> Bool
     private var isRunning = false
@@ -89,6 +94,7 @@ final class PromptPresetService {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         },
+        insertText: @escaping @MainActor (String) -> Void = { ClipboardUtil.insertText($0) },
         alwaysReplace: @escaping @MainActor () -> Bool = { AppPreferences.shared.presetsAlwaysReplace },
         isAccessibilityGranted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
@@ -97,6 +103,7 @@ final class PromptPresetService {
         self.readTarget = readTarget
         self.replaceSelection = replaceSelection
         self.copyText = copyText
+        self.insertText = insertText
         self.alwaysReplace = alwaysReplace
         self.isAccessibilityGranted = isAccessibilityGranted
     }
@@ -128,38 +135,137 @@ final class PromptPresetService {
             return .failed("The selection is too long. Select up to \(Self.maximumSelectionLength.formatted()) characters.")
         }
 
+        return await rewrite(
+            selection,
+            systemPrompt: Self.buildSystemPrompt(for: preset),
+            userMessage: text,
+            label: preset.name
+        )
+    }
+
+    // MARK: - Voice Command
+
+    static let noInstructionMessage = "Didn't catch an instruction. Nothing was changed."
+
+    static let commandSystemPrompt = """
+        You are a precise text-editing assistant inside a dictation tool. The user spoke an instruction. Apply it to the provided text and return ONLY the resulting text — no preamble, no explanation, no closing remarks, no code fences, and do not wrap the result in quotes. The output replaces the user's selection verbatim.
+
+        Rules:
+        - Follow the instruction literally (e.g. "make this bullet points" → "- " bullets, one idea per line; "make it formal" → rewrite tone only; "fix grammar" → minimal edits).
+        - Keep the original language unless the instruction asks to translate.
+        - Preserve meaning, names, numbers, links and line breaks that the instruction does not ask you to change. Plain text or light markdown only.
+        - If no text is provided, write the text the instruction asks for.
+        - If the instruction is unclear, return the text unchanged.
+        """
+
+    static func commandUserMessage(instruction: String, text: String?) -> String {
+        let instruction = instruction.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Instruction: \(instruction)\n\n(No text is selected — write the requested text.)"
+        }
+        return "Instruction: \(instruction)\n\nText:\n<<<\n\(text)\n>>>"
+    }
+
+    /// Captured when the command shortcut is first pressed, before the user speaks.
+    /// `.success(nil)` means nothing was selected, so the instruction writes new text.
+    func captureCommandSelection() async -> Result<Selection?, PresetCommandUnavailable> {
+        guard isAccessibilityGranted() else {
+            return .failure(.init(message: "Enable OpenSuperMLX in System Settings → Privacy & Security → Accessibility to edit selected text by voice."))
+        }
+        guard let selection = await captureSelection(true),
+              !selection.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return .success(nil)
+        }
+        guard selection.text.count <= Self.maximumSelectionLength else {
+            return .failure(.init(message: "The selection is too long. Select up to \(Self.maximumSelectionLength.formatted()) characters."))
+        }
+        return .success(selection)
+    }
+
+    func applyInstruction(_ instruction: String, to selection: Selection?) async -> PresetApplyOutcome {
+        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty, !instruction.contains("No speech detected") else {
+            return .failed(Self.noInstructionMessage)
+        }
+        guard !isRunning else { return .ignored }
+        isRunning = true
+        defer { isRunning = false }
+
+        let userMessage = Self.commandUserMessage(instruction: instruction, text: selection?.text)
+        guard let selection else {
+            return await generate(userMessage: userMessage)
+        }
+        return await rewrite(selection, systemPrompt: Self.commandSystemPrompt, userMessage: userMessage, label: "voice command")
+    }
+
+    // MARK: - Rewrite
+
+    private func generate(userMessage: String) async -> PresetApplyOutcome {
+        let provider = providerFactory()
+        guard provider.isConfigured else {
+            return .failed(LLMProviderError.notConfigured(provider: provider.displayName).userFacingMessage)
+        }
+        do {
+            let output = try await Self.withTimeout(Self.requestTimeout) {
+                try await provider.correctTranscription(userMessage, systemPrompt: Self.commandSystemPrompt)
+            }
+            guard !Task.isCancelled else { return .ignored }
+            let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !result.isEmpty else {
+                return .failed("The model returned an empty result. Nothing was inserted.")
+            }
+            insertText(result)
+            return .applied
+        } catch {
+            guard !Task.isCancelled else { return .ignored }
+            logger.error("Voice command failed: \(error, privacy: .public)")
+            return .failed((error as? LLMProviderError)?.userFacingMessage
+                ?? "The voice command failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func rewrite(
+        _ selection: Selection,
+        systemPrompt: String,
+        userMessage: String,
+        label: String
+    ) async -> PresetApplyOutcome {
         let provider = providerFactory()
         guard provider.isConfigured else {
             return .failed(LLMProviderError.notConfigured(provider: provider.displayName).userFacingMessage)
         }
 
-        let systemPrompt = Self.buildSystemPrompt(for: preset)
         do {
             let output = try await Self.withTimeout(Self.requestTimeout) {
-                try await provider.correctTranscription(text, systemPrompt: systemPrompt)
+                try await provider.correctTranscription(userMessage, systemPrompt: systemPrompt)
             }
+            guard !Task.isCancelled else { return .ignored }
             let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !result.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
             }
             guard selection.target.canVerifySelection || alwaysReplace() else {
                 copyText(result)
-                logger.info("Preset \(preset.name, privacy: .public) result copied; the selection can't be verified")
+                logger.info("\(label, privacy: .public) result copied; the selection can't be verified")
                 return .copiedToClipboard
             }
-            guard let current = await readTarget(selection) else {
-                return .failed("Couldn't return to the app with the selection. Nothing was replaced.")
+            guard let current = await readTarget(selection), !Task.isCancelled else {
+                return Task.isCancelled
+                    ? .ignored
+                    : .failed("Couldn't return to the app with the selection. Nothing was replaced.")
             }
             guard selection.target.isUnchanged(in: current) else {
                 return .failed("The selection changed while the preset was running. Nothing was replaced.")
             }
             await replaceSelection(selection, result)
             logger.info(
-                "Applied preset \(preset.name, privacy: .public): inputLength=\(text.count, privacy: .public), outputLength=\(result.count, privacy: .public)"
+                "Applied \(label, privacy: .public): inputLength=\(selection.text.count, privacy: .public), outputLength=\(result.count, privacy: .public)"
             )
             return .applied
         } catch {
-            logger.error("Preset \(preset.name, privacy: .public) failed: \(error, privacy: .public)")
+            guard !Task.isCancelled else { return .ignored }
+            logger.error("\(label, privacy: .public) failed: \(error, privacy: .public)")
             let message = (error as? LLMProviderError)?.userFacingMessage
                 ?? "The preset request failed: \(error.localizedDescription)"
             return .failed(message)

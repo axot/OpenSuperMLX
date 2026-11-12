@@ -230,7 +230,7 @@ OpenSuperMLX/                    # Main app target
 ├── CLI/
 │   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
 │   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation
-│   ├── CLIError.swift             # 12 enumerated error codes
+│   ├── CLIError.swift             # 13 enumerated error codes
 │   └── Commands/                  # 10 subcommand implementations
 │       ├── TranscribeCommand.swift
 │       ├── StreamSimulateCommand.swift

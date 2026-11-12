@@ -25,16 +25,21 @@ protocol IndicatorViewDelegate: AnyObject {
 
 @MainActor
 class IndicatorViewModel: ObservableObject {
+    static let levelHistoryCapacity = 22
+
     @Published var state: RecordingState = .idle
-    @Published var isBlinking = false
+    @Published private(set) var levelHistory = [Float](repeating: 0, count: levelHistoryCapacity)
+    @Published private(set) var recordingStartedAt: Date?
+    @Published private(set) var dictationCleanup: DictationCleanup = .raw
+    @Published private(set) var isCommandMode = false
+    private var commandSelection: PromptPresetService.Selection?
     let recorder: AudioRecorder = .shared
     @Published var isVisible = false
     @Published private(set) var isStreamingMode = false
     @Published private(set) var completedRecording: Recording?
-    var forceLLMCorrection: Bool = false
     
     var delegate: IndicatorViewDelegate?
-    private var blinkTimer: Timer?
+    private var levelTimer: Timer?
     private var hideTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "OpenSuperMLX", category: "IndicatorViewModel")
@@ -45,6 +50,7 @@ class IndicatorViewModel: ObservableObject {
     private let saveCoordinator: RecordingSaveCoordinator
     private let recoveryPresenter: () -> Void
     private let textInserter: (String) -> Void
+    private let commandRunner: @MainActor (String, PromptPresetService.Selection?) async -> PresetApplyOutcome
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
     private var startStreamingTask: Task<Void, Never>?
@@ -53,7 +59,8 @@ class IndicatorViewModel: ObservableObject {
     init(
         saveCoordinator: RecordingSaveCoordinator? = nil,
         recoveryPresenter: (() -> Void)? = nil,
-        textInserter: ((String) -> Void)? = nil
+        textInserter: ((String) -> Void)? = nil,
+        commandRunner: (@MainActor (String, PromptPresetService.Selection?) async -> PresetApplyOutcome)? = nil
     ) {
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
@@ -62,6 +69,7 @@ class IndicatorViewModel: ObservableObject {
             RecordingRecoveryPanelController.shared.show()
         }
         self.textInserter = textInserter ?? { ClipboardUtil.insertText($0) }
+        self.commandRunner = commandRunner ?? { await PromptPresetService.shared.applyInstruction($0, to: $1) }
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -69,7 +77,7 @@ class IndicatorViewModel: ObservableObject {
                 guard let self = self, !self.isStreamingMode else { return }
                 if isConnecting {
                     self.state = .connecting
-                    self.stopBlinking()
+                    self.stopLevelMetering()
                 }
             }
             .store(in: &cancellables)
@@ -80,7 +88,7 @@ class IndicatorViewModel: ObservableObject {
                 guard let self = self, !self.isStreamingMode else { return }
                 if isRecording {
                     self.state = .recording
-                    self.startBlinking()
+                    self.startLevelMetering()
                 }
             }
             .store(in: &cancellables)
@@ -129,11 +137,12 @@ class IndicatorViewModel: ObservableObject {
             showBusyMessage()
             return
         }
-        
+        dictationCleanup = isCommandMode ? .raw : .current
+
         if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
             state = .recording
-            startBlinking()
+            startLevelMetering()
 
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }
@@ -145,7 +154,7 @@ class IndicatorViewModel: ObservableObject {
                     ErrorToastManager.shared.show(error.localizedDescription)
                     self.state = .idle
                     self.isStreamingMode = false
-                    self.stopBlinking()
+                    self.stopLevelMetering()
                 }
             }
         } else {
@@ -153,10 +162,10 @@ class IndicatorViewModel: ObservableObject {
             
             if MicrophoneService.shared.isActiveMicrophoneRequiresConnection() {
                 state = .connecting
-                stopBlinking()
+                stopLevelMetering()
             } else {
                 state = .recording
-                startBlinking()
+                startLevelMetering()
             }
             
             Task.detached { [weak self, recorder] in
@@ -164,7 +173,7 @@ class IndicatorViewModel: ObservableObject {
                 await MainActor.run {
                     self?.state = .idle
                     self?.isStreamingMode = false
-                    self?.stopBlinking()
+                    self?.stopLevelMetering()
                 }
             }
         }
@@ -178,7 +187,7 @@ class IndicatorViewModel: ObservableObject {
             logger.warning("startDecoding() called but state is \(String(describing: self.state), privacy: .public), ignoring")
             return
         }
-        stopBlinking()
+        stopLevelMetering()
 
         if isStreamingMode {
             state = .decoding
@@ -193,8 +202,8 @@ class IndicatorViewModel: ObservableObject {
                 await self.awaitStartStreamingIfNeeded()
 
                 guard let result = await self.streamingService.finalizeRecording(
-                    applyCorrection: true,
-                    forceLLM: self.forceLLMCorrection,
+                    applyCorrection: !self.isCommandMode,
+                    cleanupPreset: self.dictationCleanup.preset,
                     onCorrectionStarted: { self.state = .correcting }
                 ) else {
                     self.state = .idle
@@ -213,7 +222,7 @@ class IndicatorViewModel: ObservableObject {
                     ErrorToastManager.shared.show(error)
                 }
 
-                self.insertText(result.text)
+                await self.deliver(result.text)
                 logger.info("Transcription result: \(result.text.prefix(100), privacy: .public)")
 
                 self.isStreamingMode = false
@@ -283,8 +292,32 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    func insertText(_ text: String) {
-        textInserter(text)
+    var commandLabel: String? {
+        guard isCommandMode else { return nil }
+        return commandSelection == nil ? "New text" : "Edit selection"
+    }
+
+    func prepareCommand(selection: PromptPresetService.Selection?) {
+        commandSelection = selection
+        isCommandMode = true
+    }
+
+    func selectCleanup(_ choice: DictationCleanup) {
+        guard !isCommandMode, state == .recording || state == .connecting else { return }
+        choice.select()
+        dictationCleanup = choice
+    }
+
+    func deliver(_ text: String) async {
+        guard isCommandMode else {
+            textInserter(text)
+            return
+        }
+        state = .correcting
+        let outcome = await commandRunner(text, commandSelection)
+        if let message = outcome.toastMessage {
+            ErrorToastManager.shared.show(message)
+        }
     }
 
     func completeNonStreamingSave(
@@ -297,20 +330,23 @@ class IndicatorViewModel: ObservableObject {
         if recording == nil {
             recoveryPresenter()
         }
-        insertText(finalText)
+        await deliver(finalText)
     }
     
     // MARK: - LLM Correction
     
     private func runLLMCorrectionIfNeeded(on text: String) async -> String? {
-        guard AppPreferences.shared.llmCorrectionEnabled || forceLLMCorrection else {
+        guard !isCommandMode, AppPreferences.shared.llmCorrectionEnabled else {
             return text
         }
         
         state = .correcting
         var correctedText = text
         correctionTask = Task {
-            let result = await LLMCorrectionService.shared.correctTranscription(text, forceEnabled: self.forceLLMCorrection)
+            let result = await LLMCorrectionService.shared.correctTranscription(
+                text,
+                preset: self.dictationCleanup.preset
+            )
             guard !Task.isCancelled else { return }
             correctedText = result
         }
@@ -344,24 +380,47 @@ class IndicatorViewModel: ObservableObject {
         }
     }
 
-    private func startBlinking() {
-        blinkTimer?.invalidate()
-        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+    nonisolated static func appendingLevel(_ level: Float, to history: [Float], capacity: Int) -> [Float] {
+        Array((history + [level]).suffix(capacity))
+    }
+
+    nonisolated static func formatElapsed(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func startLevelMetering() {
+        if recordingStartedAt == nil {
+            recordingStartedAt = Date()
+        }
+        levelTimer?.invalidate()
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self = self else { return }
-                self.isBlinking.toggle()
+                guard let self else { return }
+                let level = self.isStreamingMode
+                    ? self.streamingService.currentRMSLevel
+                    : self.recorder.meteredLevel()
+                self.levelHistory = Self.appendingLevel(
+                    level,
+                    to: self.levelHistory,
+                    capacity: Self.levelHistoryCapacity
+                )
             }
         }
     }
-    
-    private func stopBlinking() {
-        blinkTimer?.invalidate()
-        blinkTimer = nil
-        isBlinking = false
+
+    private func stopLevelMetering() {
+        levelTimer?.invalidate()
+        levelTimer = nil
     }
 
     func cleanup() {
-        stopBlinking()
+        stopLevelMetering()
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
@@ -402,123 +461,239 @@ class IndicatorViewModel: ObservableObject {
     }
 }
 
-struct RecordingIndicator: View {
-    let isBlinking: Bool
-    
+// MARK: - Indicator Views
+
+struct PulsingRecordDot: View {
+    @State private var isPulsing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.red.opacity(0.45))
+                .scaleEffect(isPulsing ? 1 : 0.45)
+                .opacity(isPulsing ? 0 : 1)
+            Circle()
+                .fill(Color.red)
+                .frame(width: 8, height: 8)
+                .shadow(color: .red.opacity(0.7), radius: 4)
+        }
+        .frame(width: 18, height: 18)
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                isPulsing = true
+            }
+        }
+    }
+}
+
+struct HUDSpinner: View {
+    @State private var isSpinning = false
+
     var body: some View {
         Circle()
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.red.opacity(0.8),
-                        Color.red
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+            .trim(from: 0, to: 0.7)
+            .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(isSpinning ? 360 : 0))
+            .onAppear {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                    isSpinning = true
+                }
+            }
+    }
+}
+
+struct LiveWaveform: View {
+    let levels: [Float]
+
+    private let barWidth: CGFloat = 3
+    private let minHeight: CGFloat = 3
+    private let maxHeight: CGFloat = 24
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2.5) {
+            ForEach(levels.indices, id: \.self) { i in
+                Capsule()
+                    .fill(Color.white)
+                    .frame(width: barWidth, height: barHeight(levels[i]))
+            }
+        }
+        .frame(height: maxHeight)
+        .animation(.easeOut(duration: 0.08), value: levels)
+        // Older samples fade out on the left so the wave reads as scrolling.
+        .mask(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.6), .black],
+                startPoint: .leading,
+                endPoint: .trailing
             )
-            .frame(width: 8, height: 8)
-            .shadow(color: .red.opacity(0.5), radius: 4)
-            .opacity(isBlinking ? 0.3 : 1.0)
-            .animation(.easeInOut(duration: 0.4), value: isBlinking)
+        )
+    }
+
+    private func barHeight(_ level: Float) -> CGFloat {
+        minHeight + VUScale.amplitude(level) * (maxHeight - minHeight)
+    }
+}
+
+struct CleanupChip: View {
+    let selection: DictationCleanup
+    let choices: [DictationCleanup]
+    let onSelect: (DictationCleanup) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(choices) { choice in
+                Button {
+                    onSelect(choice)
+                } label: {
+                    if choice == selection {
+                        Label(choice.title, systemImage: "checkmark")
+                    } else {
+                        Text(choice.title)
+                    }
+                }
+                if choice == .clean, choices.count > 2 {
+                    Divider()
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(selection.title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(selection == .raw ? .white.opacity(0.65) : .white)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(maxWidth: 100, alignment: .leading)
+        .help("Cleanup applied when you stop recording")
+    }
+}
+
+struct CommandChip: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 10, weight: .semibold))
+            Text(title)
+                .lineLimit(1)
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundColor(.white)
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(Capsule().fill(Color.purple.opacity(0.55)))
+        .fixedSize()
+        .help("Say what to do with the selection, then press the shortcut again")
     }
 }
 
 struct IndicatorWindow: View {
     @ObservedObject var viewModel: IndicatorViewModel
-    @Environment(\.colorScheme) private var colorScheme
-    
-    private var backgroundColor: Color {
-        colorScheme == .dark
-            ? Color.black.opacity(0.24)
-            : Color.white.opacity(0.24)
-    }
-    
-    var body: some View {
 
-        let rect = RoundedRectangle(cornerRadius: 24)
-        
-        VStack(spacing: 12) {
-            switch viewModel.state {
-            case .connecting:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
-                    
-                    Text("Connecting...")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .recording:
-                HStack(spacing: 8) {
-                    RecordingIndicator(isBlinking: viewModel.isBlinking)
-                        .frame(width: 24)
-                    
-                    Text("Recording...")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .decoding:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
-                    
-                    Text("Transcribing...")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .correcting:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
-                    
-                    Text("Correcting...")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .busy:
-                HStack(spacing: 8) {
-                    Image(systemName: "hourglass")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-                    
-                    Text("Processing...")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .idle:
-                EmptyView()
+    var body: some View {
+        let shape = Capsule()
+
+        content
+            .padding(.horizontal, 16)
+            .frame(width: 340, height: 44)
+            .background {
+                shape
+                    .fill(Color.black.opacity(0.78))
+                    .background(.ultraThinMaterial, in: shape)
             }
-        }
-        .padding(.horizontal, 24)
-        .frame(height: 36)
-        .background {
-            rect
-                .fill(backgroundColor)
-                .background {
-                    rect
-                        .fill(Material.thinMaterial)
+            .overlay {
+                shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            }
+            .clipShape(shape)
+            .shadow(color: .black.opacity(0.3), radius: 14, x: 0, y: 6)
+            .environment(\.colorScheme, .dark)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.state)
+            .scaleEffect(viewModel.isVisible ? 1 : 0.6)
+            .offset(y: viewModel.isVisible ? 0 : 16)
+            .opacity(viewModel.isVisible ? 1 : 0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isVisible)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                viewModel.isVisible = true
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch viewModel.state {
+        case .recording:
+            HStack(spacing: 10) {
+                PulsingRecordDot()
+                if let commandLabel = viewModel.commandLabel {
+                    CommandChip(title: commandLabel)
+                } else {
+                    CleanupChip(
+                        selection: viewModel.dictationCleanup,
+                        choices: DictationCleanup.choices(presets: PromptPresetStore.shared.presets),
+                        onSelect: viewModel.selectCleanup
+                    )
                 }
-                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+                LiveWaveform(levels: viewModel.levelHistory)
+                    .frame(maxWidth: .infinity)
+                if let startedAt = viewModel.recordingStartedAt {
+                    TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                        Text(IndicatorViewModel.formatElapsed(context.date.timeIntervalSince(startedAt)))
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+            }
+            .transition(.opacity)
+
+        case .connecting:
+            statusRow("Connecting…")
+
+        case .decoding:
+            statusRow("Transcribing…")
+
+        case .correcting:
+            if viewModel.isCommandMode {
+                statusRow("Applying instruction…")
+            } else {
+                statusRow(viewModel.dictationCleanup.preset.map { "Applying \($0.name)…" } ?? "Correcting…")
+            }
+
+        case .busy:
+            HStack(spacing: 8) {
+                Image(systemName: "hourglass")
+                    .foregroundColor(.orange)
+                Text("Still processing…")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.orange)
+            }
+            .transition(.opacity)
+
+        case .idle:
+            EmptyView()
         }
-        .clipShape(rect)
-        .frame(width: 200)
-        .scaleEffect(viewModel.isVisible ? 1 : 0.5)
-        .offset(y: viewModel.isVisible ? 0 : 20)
-        .opacity(viewModel.isVisible ? 1 : 0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isVisible)
-        .onAppear {
-            viewModel.isVisible = true
+    }
+
+    private func statusRow(_ title: String) -> some View {
+        HStack(spacing: 10) {
+            HUDSpinner()
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
         }
+        .transition(.opacity)
     }
 }
 

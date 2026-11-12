@@ -35,7 +35,7 @@
 - **Real time, even in long sessions.** Words stream in while you talk, and long meetings keep transcribing.
 - **Made for multilingual speakers.** It detects the language automatically across 19 languages, fixes spacing and punctuation for Chinese, Japanese, and Korean, and writes numbers as digits in Chinese and English.
 - **Recordings you can come back to.** Every session is kept, with its audio, in a searchable history. If a save fails, you can retry instead of losing the take. You can also drop in an existing audio file to transcribe it.
-- **Optional LLM cleanup.** A second shortcut sends only the text to your own AWS Bedrock or OpenAI-compatible model to fix misheard words and punctuation.
+- **Optional LLM cleanup and voice edits.** Pick how a dictation is cleaned up (Clean, Email, Bullet points, or your own preset) right on the recording pill, or select text, press a shortcut, and say what to change. Only text is sent, to your own AWS Bedrock or OpenAI-compatible model.
 
 ## Made for
 
@@ -47,6 +47,7 @@
 
 **Dictation**
 - Tap the shortcut to start and stop, or hold it to record only while it's pressed. Press <kbd>Escape</kbd> to cancel.
+- A recording pill at the bottom center of the screen shows a live waveform and the elapsed time.
 - Live streaming transcription.
 - Switch between built-in, USB, Bluetooth, and Continuity microphones.
 - Optional system-audio capture with headphones. On speakers it records the microphone only, to avoid echo.
@@ -56,6 +57,9 @@
 - Asian autocorrect for Chinese, Japanese, and Korean.
 - Numbers, dates, and amounts written as digits (inverse text normalization) for Chinese and English.
 - Optional LLM correction through AWS Bedrock or any OpenAI-compatible API. Long transcripts are split to fit the model's limits.
+- Cleanup presets: choose Raw, Clean, or any preset from **Presets** in the dropdown on the recording pill. The choice is remembered, and Raw turns LLM correction off.
+- Presets also rewrite selected text in any app: give a preset a shortcut in **Presets**, select text, and press it.
+- Voice commands: select text, press <kbd>F17</kbd>, say what to do ("translate this to Farsi", "make it more formal"), and press <kbd>F17</kbd> again. The selection is replaced. With nothing selected, the instruction writes new text at the cursor.
 
 **History and stats**
 - Searchable transcript history. Regenerate any transcript from its audio.
@@ -123,7 +127,7 @@ Folders with other model types are listed as unsupported.
 |---|---|
 | Tap <kbd>⌥</kbd> + <kbd>&#96;</kbd> | Start or stop recording |
 | Hold <kbd>⌥</kbd> + <kbd>&#96;</kbd> | Record only while held |
-| Tap <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd> | Start or stop recording with LLM correction |
+| Tap <kbd>F17</kbd> | Start or stop a voice command on the selected text |
 | <kbd>Escape</kbd> | Cancel the active recording |
 
 Change them in **Settings → Shortcuts**.

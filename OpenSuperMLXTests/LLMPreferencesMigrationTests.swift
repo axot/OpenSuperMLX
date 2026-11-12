@@ -43,26 +43,6 @@ final class LLMPreferencesMigrationTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: "llmMigrationCompleted"))
     }
 
-    func testMigration_CustomPrompt_MigratedToCustomMode() {
-        defaults.set("My custom prompt", forKey: "bedrockCorrectionPrompt")
-
-        AppPreferences.migrateOldPreferences(defaults: defaults)
-
-        XCTAssertEqual(defaults.string(forKey: "customCorrectionPrompt"), "My custom prompt")
-        XCTAssertTrue(defaults.bool(forKey: "useCustomCorrectionPrompt"))
-        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
-    }
-
-    func testMigration_DefaultPrompt_NotMigratedToCustom() {
-        defaults.set(LLMCorrectionService.defaultCorrectionPrompt, forKey: "bedrockCorrectionPrompt")
-
-        AppPreferences.migrateOldPreferences(defaults: defaults)
-
-        XCTAssertNil(defaults.object(forKey: "customCorrectionPrompt"))
-        XCTAssertFalse(defaults.bool(forKey: "useCustomCorrectionPrompt"))
-        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
-    }
-
     func testMigration_Idempotent() {
         defaults.set(true, forKey: "bedrockEnabled")
 

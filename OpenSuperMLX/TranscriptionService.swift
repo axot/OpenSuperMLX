@@ -45,14 +45,18 @@ class TranscriptionService: ObservableObject {
     private var transcriptionTask: Task<String, Error>?
     private var isCancelled = false
     
+    private let corrector: LLMCorrectionService
+
     init() {
+        corrector = .shared
         if !ProcessInfo.processInfo.arguments.contains("--skip-model-load") {
             loadEngine()
         }
     }
     
-    init(engine: TranscriptionEngine?) {
+    init(engine: TranscriptionEngine?, corrector: LLMCorrectionService = .shared) {
         self.currentEngine = engine
+        self.corrector = corrector
         self.isLoading = false
     }
     
@@ -143,10 +147,15 @@ class TranscriptionService: ObservableObject {
     
     // MARK: - Transcription
 
-    func transcribeAudio(url: URL, settings: Settings, applyCorrection: Bool = true, forceLLM: Bool = false) async throws -> String {
+    func transcribeAudio(
+        url: URL,
+        settings: Settings,
+        applyCorrection: Bool = true,
+        cleanupPreset: PromptPreset? = nil
+    ) async throws -> String {
         logger.info("Starting transcription for: \(url.lastPathComponent, privacy: .public)")
         if AppPreferences.shared.debugMode {
-            logger.debug("[DEBUG] Transcription settings: language=\(settings.selectedLanguage, privacy: .public), temperature=\(settings.temperature, privacy: .public), applyCorrection=\(applyCorrection, privacy: .public), forceLLM=\(forceLLM, privacy: .public)")
+            logger.debug("[DEBUG] Transcription settings: language=\(settings.selectedLanguage, privacy: .public), temperature=\(settings.temperature, privacy: .public), applyCorrection=\(applyCorrection, privacy: .public)")
         }
         
         self.progress = 0.0
@@ -180,6 +189,7 @@ class TranscriptionService: ObservableObject {
         guard let engine = currentEngine else {
             throw TranscriptionError.contextInitializationFailed
         }
+        let corrector = self.corrector
         
         if let mlxEngine = engine as? MLXEngine {
             mlxEngine.onProgressUpdate = { [weak self] (newProgress: Float) in
@@ -209,7 +219,7 @@ class TranscriptionService: ObservableObject {
             try Task.checkCancellation()
             let correctedResult: String
             if applyCorrection {
-                correctedResult = await LLMCorrectionService.shared.correctTranscription(result, forceEnabled: forceLLM)
+                correctedResult = await corrector.correctTranscription(result, preset: cleanupPreset)
             } else {
                 correctedResult = result
             }

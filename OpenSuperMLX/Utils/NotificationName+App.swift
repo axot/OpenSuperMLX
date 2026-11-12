@@ -8,4 +8,5 @@ extension Notification.Name {
     static let outputDeviceClassificationDidChange = Notification.Name("outputDeviceClassificationDidChange")
     static let saveReservationReleased = Notification.Name("saveReservationReleased")
     static let promptPresetsDidChange = Notification.Name("promptPresetsDidChange")
+    static let dictationCleanupDidChange = Notification.Name("dictationCleanupDidChange")
 }
