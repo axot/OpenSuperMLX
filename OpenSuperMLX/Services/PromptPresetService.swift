@@ -89,7 +89,7 @@ final class PromptPresetService {
         providerFactory: @escaping @Sendable () -> LLMProvider = { LLMCorrectionService.resolveProvider() },
         captureSelection: @escaping @MainActor (Bool) async -> Selection? = { await PromptPresetService.captureFrontmostSelection(canCopyImmediately: $0) },
         readTarget: @escaping @MainActor (Selection) async -> Target? = { await PromptPresetService.reactivateTarget(of: $0) },
-        replaceSelection: @escaping @MainActor (Selection, String) async -> Void = { PromptPresetService.replace($0, with: $1) },
+        replaceSelection: @escaping @MainActor (Selection, String) async -> Void = { await PromptPresetService.replace($0, with: $1) },
         copyText: @escaping @MainActor (String) -> Void = { text in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
@@ -410,12 +410,61 @@ final class PromptPresetService {
         return readFrontmostTarget()
     }
 
-    private static func replace(_ selection: Selection, with text: String) {
-        if let element = selection.target.element,
-           AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success {
+    enum SelectionWriteOutcome: Equatable {
+        case applied
+        case ignored
+    }
+
+    /// Some apps (Outlook) report success for the Accessibility write and leave the text
+    /// untouched, so trust the success only when nothing readable proves it was ignored.
+    nonisolated static func selectionWriteOutcome(
+        original: Target,
+        newText: String,
+        selectedTextAfter: String?,
+        valueAfter: String?
+    ) -> SelectionWriteOutcome {
+        if selectedTextAfter == newText { return .applied }
+        if let value = original.value, let after = valueAfter, value != after { return .applied }
+        if let value = original.value, let after = valueAfter, value == after { return .ignored }
+        if let before = original.selectedText, !before.isEmpty, selectedTextAfter == before { return .ignored }
+        return .applied
+    }
+
+    private static func replace(_ selection: Selection, with text: String) async {
+        guard let element = selection.target.element else {
+            ClipboardUtil.insertText(text)
             return
         }
-        ClipboardUtil.insertText(text)
+        guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success else {
+            ClipboardUtil.insertText(text)
+            return
+        }
+
+        let original = selection.target
+        var reread = attributes(of: element)
+        if selectionWriteOutcome(
+            original: original, newText: text,
+            selectedTextAfter: reread.selectedText, valueAfter: reread.value
+        ) == .ignored {
+            // The app may commit the write on its next run-loop pass.
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(80))
+                reread = attributes(of: element)
+                guard selectionWriteOutcome(
+                    original: original, newText: text,
+                    selectedTextAfter: reread.selectedText, valueAfter: reread.value
+                ) == .ignored else { return }
+            }
+            logger.info("Accessibility write had no effect; pasting instead")
+            ClipboardUtil.insertText(text)
+        }
+    }
+
+    private static func attributes(of element: AXUIElement) -> (selectedText: String?, value: String?) {
+        (
+            stringAttribute(kAXSelectedTextAttribute, of: element),
+            stringAttribute(kAXValueAttribute, of: element)
+        )
     }
 
     private static func waitForModifiersUp(timeout: Duration) async {

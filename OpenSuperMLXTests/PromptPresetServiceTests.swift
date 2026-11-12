@@ -369,6 +369,73 @@ final class PromptPresetServiceGuardTests: XCTestCase {
         XCTAssertEqual(recorder.text, "Polished")
     }
 
+    // MARK: - Write Verification
+
+    func testWriteIsIgnoredWhenTheDocumentValueIsUnchanged() {
+        let target = PromptPresetService.Target(selectedText: "teh cat", value: "teh cat sat")
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: "teh cat",
+            valueAfter: "teh cat sat"
+        )
+
+        XCTAssertEqual(outcome, .ignored, "Apps such as Outlook report success without changing the text")
+    }
+
+    func testWriteIsAppliedWhenTheDocumentValueChanges() {
+        let target = PromptPresetService.Target(selectedText: "teh cat", value: "teh cat sat")
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: nil,
+            valueAfter: "The cat sat"
+        )
+
+        XCTAssertEqual(outcome, .applied)
+    }
+
+    func testWriteIsAppliedWhenTheSelectionBecomesTheNewText() {
+        let target = PromptPresetService.Target(selectedText: "teh cat", value: "teh cat sat")
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: "The cat sat",
+            valueAfter: nil
+        )
+
+        XCTAssertEqual(outcome, .applied)
+    }
+
+    func testWriteIsIgnoredWhenTheSelectionIsStillTheOriginal() {
+        let target = PromptPresetService.Target(selectedText: "teh cat")
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: "teh cat",
+            valueAfter: nil
+        )
+
+        XCTAssertEqual(outcome, .ignored)
+    }
+
+    func testWriteIsTrustedWhenNothingCanBeReadBack() {
+        let target = PromptPresetService.Target(selectedText: "teh cat")
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: nil,
+            valueAfter: nil
+        )
+
+        XCTAssertEqual(outcome, .applied, "Without evidence the write was ignored, don't paste twice")
+    }
+
     func testCopyOwnsPasteboardOnlyForASingleWrite() {
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 10))
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 11))
