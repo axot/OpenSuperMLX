@@ -39,6 +39,28 @@ struct MicrophoneCaptureSource {
     }
 }
 
+struct MicrophoneCaptureClaim {
+    private var generation: Int?
+
+    init(existingGeneration: Int?, isReady: Bool) {
+        generation = isReady ? existingGeneration : nil
+    }
+
+    mutating func claim(_ generation: Int) {
+        self.generation = generation
+    }
+
+    func generationToEnd(currentGeneration: Int?) -> Int? {
+        guard let generation, generation == currentGeneration else { return nil }
+        return generation
+    }
+
+    func generationToAbort(currentGeneration: Int?, isStreaming: Bool, hasPendingStart: Bool) -> Int? {
+        guard !isStreaming, !hasPendingStart else { return nil }
+        return generationToEnd(currentGeneration: currentGeneration)
+    }
+}
+
 struct StreamingFeedState: Sendable {
     let archive: StreamingAACArchive
     private(set) var retryBuffer = PCMRetryBuffer()
@@ -153,7 +175,7 @@ class StreamingAudioService: ObservableObject {
     private var captureRequestGeneration: Int?
     private var captureStartedAt: Date?
     private var lastWarmUpTime: Date = .distantPast
-    private var inputRecoveryAttempts = 0
+    private let inputRecovery = MicrophoneCaptureRecovery()
 
     /// Serializes one engine-init transaction at a time. Native calls run here so a
     /// slow device handoff never blocks the main thread; the commit decision stays on
@@ -670,7 +692,7 @@ class StreamingAudioService: ObservableObject {
 
     private func resetHealthForNewRecording() {
         cancelInputHealthCheck()
-        inputRecoveryAttempts = 0
+        inputRecovery.reset()
         resetCaptureHealth()
     }
 
@@ -680,31 +702,40 @@ class StreamingAudioService: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, let self, self.isStreaming else { return }
-                guard let input = self.microphoneInput else { return }
-                let last = input.buffer.lastBufferDeliveryHostTime
+                let last = self.microphoneInput?.buffer.lastBufferDeliveryHostTime ?? 0
                 let now = DispatchTime.now().uptimeNanoseconds
-                if !input.isRunning || last == 0 || now - last > 900_000_000 {
+                if self.microphoneInput?.isRunning != true || last == 0 || now - last > 900_000_000 {
                     await self.recoverInputStall()
                 } else {
-                    self.inputRecoveryAttempts = 0
+                    self.inputRecovery.reset()
                 }
             }
         }
     }
 
     private func recoverInputStall() async {
-        guard isStreaming, captureIsRequested, let input = microphoneInput else { return }
-        guard inputRecoveryAttempts < 2 else {
+        guard isStreaming, captureIsRequested, let generation = captureRequestGeneration else { return }
+        let resume: (() async -> Bool)?
+        if let input = microphoneInput {
+            resume = {
+                let verdict = await self.resumeInput(input, restart: input.isRunning)
+                if case .commit = verdict { return true }
+                return false
+            }
+        } else {
+            resume = nil
+        }
+        let result = await inputRecovery.recover(resume: resume, rebuild: {
+            await self.hotSwapMicrophone()
+        })
+        guard isStreaming, captureIsRequested, captureRequestGeneration == generation else { return }
+        if result == .exhausted {
             cancelInputHealthCheck()
             isCaptureReady = false
+            microphoneInput?.pause()
             logger.error("Microphone input did not resume after retry")
             ErrorToastManager.shared.show("Microphone audio stopped. Try recording again.")
-            return
         }
-        inputRecoveryAttempts += 1
-        let verdict = await resumeInput(input, restart: input.isRunning)
-        if case .commit = verdict { return }
-        await hotSwapMicrophone()
     }
 
     private var retiredInputs: [PreparedMicrophoneInput] = []
@@ -713,7 +744,7 @@ class StreamingAudioService: ObservableObject {
         stopRMSTimer()
         if !preservingCapturedAudio {
             cancelInputHealthCheck()
-            inputRecoveryAttempts = 0
+            inputRecovery.reset()
             microphoneSource.withLock { $0.discard() }
             ringBuffer.withLock { $0.removeAll() }
         }
@@ -759,6 +790,15 @@ class StreamingAudioService: ObservableObject {
         isCaptureReady = false
     }
 
+    func abortUnclaimedCapture(generation: Int) {
+        let claim = MicrophoneCaptureClaim(existingGeneration: generation, isReady: true)
+        guard claim.generationToAbort(
+            currentGeneration: captureRequestGeneration,
+            isStreaming: isStreaming, hasPendingStart: pendingStreamStarts > 0
+        ) != nil else { return }
+        abortPendingStart()
+    }
+
     private func throwIfStartAborted(_ generation: Int, reason: String) throws {
         guard startGeneration == generation, !Task.isCancelled else {
             PipelineTrace.shared.log("STREAM", reason)
@@ -776,18 +816,23 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Mic Hot-Swap
 
-    private func hotSwapMicrophone() async {
-        guard let input = microphoneInput, captureIsRequested,
-              let generation = captureRequestGeneration else { return }
+    @discardableResult
+    private func hotSwapMicrophone() async -> Bool {
+        guard captureIsRequested, let generation = captureRequestGeneration else { return false }
+        if isStreaming, inputHealthTask == nil {
+            inputRecovery.reset()
+            scheduleInputHealthCheck()
+        }
         let gate = captureStartGate
         let source = microphoneSource
         isCaptureReady = false
-        input.pause()
+        microphoneInput?.pause()
         coolDown(preservingCapturedAudio: true)
         lastWarmUpTime = .distantPast
         let verdict = await beginEngineInit()
         guard case .commit = verdict, let replacement = microphoneInput,
-              isStreaming, captureIsRequested, captureRequestGeneration == generation else { return }
+              isStreaming, captureIsRequested, captureRequestGeneration == generation,
+              !Task.isCancelled else { return false }
         let started: EngineInitVerdict = await withCheckedContinuation { continuation in
             Self.engineInitQueue.async {
                 guard gate.shouldCommit(generation: generation, targetUID: "recording"),
@@ -810,11 +855,11 @@ class StreamingAudioService: ObservableObject {
             while !replacement.buffer.hasReceivedAudio && ContinuousClock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(5))
                 guard captureIsRequested, captureRequestGeneration == generation,
-                      microphoneInput === replacement, !Task.isCancelled else { return }
+                      microphoneInput === replacement, !Task.isCancelled else { return false }
             }
             isCaptureReady = captureIsRequested && replacement.isRunning && replacement.buffer.hasReceivedAudio
             if isCaptureReady {
-                scheduleInputHealthCheck()
+                if inputHealthTask == nil { scheduleInputHealthCheck() }
                 startRMSTimer()
             } else {
                 replacement.pause()
@@ -822,6 +867,7 @@ class StreamingAudioService: ObservableObject {
         } else {
             logger.error("Hot-swap failed: \(String(describing: started), privacy: .public)")
         }
+        return isCaptureReady
     }
 
     /// True when the mic that should be recording now differs from the device the warm
@@ -890,8 +936,9 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Start Streaming
 
-    func beginMicrophoneCapture(requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds) async throws {
-        if captureIsRequested && isCaptureReady { return }
+    @discardableResult
+    func beginMicrophoneCapture(requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds) async throws -> Int {
+        if captureIsRequested, isCaptureReady, let generation = captureRequestGeneration { return generation }
         guard !captureIsRequested else { throw StreamingAudioError.startAborted }
         _ = resolveCurrentClassification(askIfNeeded: MicrophoneService.shared.speakerCaptureEnabled)
         let generation = startGeneration
@@ -963,6 +1010,7 @@ class StreamingAudioService: ObservableObject {
                 PipelineTrace.shared.log("MIC_READY", "first_delivery_ms=\(latency)")
             }
             playNotificationSound()
+            return captureGeneration
         } catch {
             if captureRequestGeneration == captureGeneration {
                 captureIsRequested = false
@@ -987,9 +1035,13 @@ class StreamingAudioService: ObservableObject {
         guard pendingStreamStarts == 0 else { throw StreamingAudioError.startAborted }
 
         let generation = startGeneration
+        var captureClaim = MicrophoneCaptureClaim(
+            existingGeneration: captureRequestGeneration, isReady: isCaptureReady
+        )
         pendingStreamStarts += 1
         defer {
-            if !isStreaming, startGeneration == generation, let captureGeneration = captureRequestGeneration {
+            if !isStreaming, startGeneration == generation,
+               let captureGeneration = captureClaim.generationToEnd(currentGeneration: captureRequestGeneration) {
                 captureStartGate.endRequest(generation: captureGeneration)
                 captureRequestGeneration = nil
                 captureIsRequested = false
@@ -1004,7 +1056,8 @@ class StreamingAudioService: ObservableObject {
             throw StreamingAudioError.modelNotLoaded
         }
 
-        try await beginMicrophoneCapture(requestedAt: requestedAt)
+        let captureGeneration = try await beginMicrophoneCapture(requestedAt: requestedAt)
+        captureClaim.claim(captureGeneration)
         shouldStopFeeding.withLock { $0 = false }
         resetHealthForNewRecording()
         confirmedText = ""
@@ -1428,7 +1481,7 @@ class StreamingAudioService: ObservableObject {
         isCaptureReady = false
         stopRMSTimer()
         cancelInputHealthCheck()
-        inputRecoveryAttempts = 0
+        inputRecovery.reset()
         shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
         let completedFeedState: StreamingFeedState?

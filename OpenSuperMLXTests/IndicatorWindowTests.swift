@@ -51,4 +51,11 @@ final class IndicatorWindowTests: XCTestCase {
         XCTAssertFalse(RecordingState.allowsCaptureStart(saveBlocked: false, busy: true))
         XCTAssertFalse(RecordingState.allowsCaptureStart(saveBlocked: true, busy: true))
     }
+
+    func testFailedCurrentStartupReturnsIdleButStaleFailureIsIgnored() {
+        XCTAssertEqual(RecordingState.connecting.afterStartFailure(isCurrent: true), .idle)
+        XCTAssertEqual(RecordingState.recording.afterStartFailure(isCurrent: true), .idle)
+        XCTAssertEqual(RecordingState.decoding.afterStartFailure(isCurrent: true), .decoding)
+        XCTAssertNil(RecordingState.connecting.afterStartFailure(isCurrent: false))
+    }
 }

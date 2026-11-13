@@ -17,7 +17,10 @@ class ShortcutManager {
 
     private var activeVm: IndicatorViewModel?
     private var captureStartPending = false {
-        didSet { refreshEscapeShortcut() }
+        didSet {
+            RecordingActivity.shared.report(self, isActive: captureStartPending)
+            refreshEscapeShortcut()
+        }
     }
     private var captureStartEpoch = 0
     private var holdWorkItem: DispatchWorkItem?
@@ -205,14 +208,12 @@ class ShortcutManager {
                 }
                 IndicatorWindowManager.shared.releasePreviousViewModel()
                 let vm = IndicatorViewModel()
-                var openedCapture = false
+                var openedCaptureGeneration: Int?
                 if vm.canStartRecording && TranscriptionService.shared.usesStreamingTranscription {
                     do {
-                        try await StreamingAudioService.shared.beginMicrophoneCapture(requestedAt: requestedAt)
-                        openedCapture = true
+                        openedCaptureGeneration = try await StreamingAudioService.shared.beginMicrophoneCapture(requestedAt: requestedAt)
                     } catch {
                         if self.captureStartEpoch == epoch {
-                            StreamingAudioService.shared.abortPendingStart()
                             if StreamingAudioError.shouldReportStartFailure(error) {
                                 ErrorToastManager.shared.show(error.localizedDescription)
                             }
@@ -228,8 +229,8 @@ class ShortcutManager {
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()
                 _ = IndicatorWindowManager.shared.show(nearPoint: cursorPosition, viewModel: vm)
                 if forceLLM { vm.forceLLMCorrection = true }
-                if !vm.startRecording(), openedCapture {
-                    StreamingAudioService.shared.abortPendingStart()
+                if !vm.startRecording(), let openedCaptureGeneration {
+                    StreamingAudioService.shared.abortUnclaimedCapture(generation: openedCaptureGeneration)
                 }
                 self.activeVm = vm
                 Task.detached(priority: .userInitiated) { [weak self, weak vm] in

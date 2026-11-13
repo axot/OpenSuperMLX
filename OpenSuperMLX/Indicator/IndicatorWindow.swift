@@ -24,6 +24,11 @@ enum RecordingState: Equatable {
         guard isCapturing else { return self }
         return isReady ? .recording : .connecting
     }
+
+    func afterStartFailure(isCurrent: Bool) -> RecordingState? {
+        guard isCurrent else { return nil }
+        return isCapturing ? .idle : self
+    }
 }
 
 @MainActor
@@ -57,6 +62,7 @@ class IndicatorViewModel: ObservableObject {
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
     private var startStreamingTask: Task<Void, Never>?
+    private var startStreamingEpoch = 0
     private var micDisconnectObserver: NSObjectProtocol?
 
     init(
@@ -160,15 +166,19 @@ class IndicatorViewModel: ObservableObject {
             state = streamingService.isCaptureReady ? .recording : .connecting
             if state == .recording { startBlinking() } else { stopBlinking() }
 
+            startStreamingEpoch += 1
+            let epoch = startStreamingEpoch
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
                 } catch {
-                    guard StreamingAudioError.shouldReportStartFailure(error) else { return }
-                    self.logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    ErrorToastManager.shared.show(error.localizedDescription)
-                    self.state = .idle
+                    guard let state = self.state.afterStartFailure(isCurrent: self.startStreamingEpoch == epoch) else { return }
+                    if StreamingAudioError.shouldReportStartFailure(error) {
+                        self.logger.error("Failed to start streaming: \(error, privacy: .public)")
+                        ErrorToastManager.shared.show(error.localizedDescription)
+                    }
+                    self.state = state
                     self.isStreamingMode = false
                     self.stopBlinking()
                 }
@@ -355,6 +365,7 @@ class IndicatorViewModel: ObservableObject {
     // MARK: - Task Cleanup
     
     private func cancelActiveTasks() {
+        startStreamingEpoch += 1
         startStreamingTask?.cancel()
         startStreamingTask = nil
         decodingTask?.cancel()

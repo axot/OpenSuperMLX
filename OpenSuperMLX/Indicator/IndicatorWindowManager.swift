@@ -10,20 +10,34 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
 
     private var window: NSWindow?
     @Published private(set) var viewModel: IndicatorViewModel?
-    
-    private init() {}
+
+    private let recordingActivity: RecordingActivity
+    private let visibilityChanged: (Bool) -> Void
+
+    private convenience init() {
+        self.init(recordingActivity: .shared) { ShortcutManager.shared.indicatorVisible = $0 }
+    }
+
+    init(recordingActivity: RecordingActivity, visibilityChanged: @escaping (Bool) -> Void) {
+        self.recordingActivity = recordingActivity
+        self.visibilityChanged = visibilityChanged
+    }
     
     func releasePreviousViewModel() {
         viewModel?.cleanup()
         viewModel = nil
+        window?.contentView = nil
+        window?.orderOut(nil)
+        visibilityChanged(false)
+        recordingActivity.report(self, isActive: false)
     }
 
     func show(
         nearPoint point: NSPoint? = nil,
         viewModel providedViewModel: IndicatorViewModel? = nil
     ) -> IndicatorViewModel {
-        ShortcutManager.shared.indicatorVisible = true
-        RecordingActivity.shared.report(self, isActive: true)
+        visibilityChanged(true)
+        recordingActivity.report(self, isActive: true)
 
         viewModel?.cleanup()
         let newViewModel = providedViewModel ?? IndicatorViewModel()
@@ -102,7 +116,7 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     }
 
     func hide() {
-        ShortcutManager.shared.indicatorVisible = false
+        visibilityChanged(false)
         
         Task {
             guard let viewModel = self.viewModel else { return }
@@ -115,7 +129,7 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
             self.window?.contentView = nil
             self.window?.orderOut(nil)
             self.viewModel = nil
-            RecordingActivity.shared.report(self, isActive: false)
+            self.recordingActivity.report(self, isActive: false)
             
             NotificationCenter.default.post(name: .indicatorWindowDidHide, object: nil)
         }

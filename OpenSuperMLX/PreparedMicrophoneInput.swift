@@ -92,8 +92,15 @@ final class PreparedMicrophoneInput: @unchecked Sendable {
                 pause()
                 return .abandon
             }
-            let verdict = EngineInitTransaction.evaluate(observation())
-            if case .commit = verdict { return verdict }
+            let observed = observation()
+            let verdict = EngineInitTransaction.evaluate(observed)
+            if case .commit = verdict {
+                if let preparedFormat, observed.deviceSideFormat != preparedFormat {
+                    pause()
+                    return .failExplicit(.invalidGraphFormat)
+                }
+                return verdict
+            }
             pause()
             return verdict
         } catch {

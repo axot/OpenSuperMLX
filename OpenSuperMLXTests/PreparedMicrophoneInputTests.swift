@@ -20,11 +20,13 @@ final class PreparedMicrophoneInputTests: XCTestCase {
         var pauses = 0
         var stops = 0
         var stopsDuringStart = false
+        var formatDuringStart: EngineInitFormat?
 
         func prepare() { prepares += 1 }
         func start() throws {
             starts += 1
             isRunning = !stopsDuringStart
+            if let formatDuringStart { format = formatDuringStart }
         }
         func pause() {
             pauses += 1
@@ -150,5 +152,12 @@ final class PreparedMicrophoneInputTests: XCTestCase {
 
         XCTAssertEqual(input.resume(), .failExplicit(.invalidGraphFormat))
         XCTAssertEqual(engine.starts, 1)
+
+        engine.format = EngineInitFormat(sampleRate: 48000, channelCount: 1, isInterleaved: false)
+        engine.formatDuringStart = EngineInitFormat(sampleRate: 96000, channelCount: 1, isInterleaved: false)
+
+        XCTAssertEqual(input.start(at: 20), .failExplicit(.invalidGraphFormat))
+        XCTAssertFalse(engine.hardwareIsRunning)
+        XCTAssertFalse(input.buffer.isCapturing)
     }
 }
