@@ -48,17 +48,35 @@ Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for genera
 ### Microphone startup probe
 
 `mic probe --json` runs 20 pause/resume trials without loading a model or saving audio.
-Each trial measures the recording request to the first nonempty buffer delivered to
-the app, and checks that idle hardware I/O and callbacks are off. `data.passed` is
-true only when every delivery is below 100 ms and every idle check passes. The
-command exits with code 1 if that acceptance gate fails.
+Each trial pauses the prepared input, allows 100 ms to settle, counts callbacks
+over the next 150 ms, and samples hardware I/O state at the end of that window.
+It then measures the resume request to the first nonempty buffer delivered to the
+capture backend. `data.passed` is true only when every delivery is finite and below
+100 ms, every observed idle callback count is zero, and every sampled idle hardware
+state is off. The command exits with code 1 if that acceptance gate fails.
 
 ```bash
 $BINARY mic probe --iterations 20 --json
+$BINARY mic probe --iterations 50 --json
 ```
 
+| Field | Meaning |
+|---|---|
+| `data.trials[].first_delivery_ms` | Resume request to first nonempty callback delivery; `null` if none arrives within 300 ms |
+| `data.trials[].idle_callbacks` | Callback count in the observed 150 ms idle window |
+| `data.trials[].idle_hardware_running` | Hardware I/O state sampled after that idle window |
+| `data.passed` | Whether every trial meets the acceptance gate |
+
+Check `data.passed` and the exit code: the outer `status: "success"` means the
+command produced measurements and can accompany a failed acceptance gate.
+Missing permission or a preparation/start failure reports `microphone_unavailable`.
+`--iterations` must be greater than zero.
+
 This requires microphone permission. Results apply to the selected microphone and
-the current system; they are delivery measurements, not buffer sample timestamps.
+current system. They measure callback delivery, not buffer sample timestamps,
+cold device preparation, or the complete hotkey/UI flow. Idle checks establish
+inactivity in the observation window rather than immediate shutdown timing.
+See [startup and recovery behavior](audio-diagnostics.md#startup-and-idle-input).
 
 ### LLM correction sizing
 
@@ -221,6 +239,7 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 | Settings / AppPreferences | `config get <key>` |
 | Recordings DB | `recordings list --json` |
 | Audio devices | `mic list --json` |
+| Microphone startup / idle I/O | `mic probe --iterations 50 --json` |
 | Model catalog | `model list --json` |
 | Any change (minimum bar) | `diagnose --json` |
 
