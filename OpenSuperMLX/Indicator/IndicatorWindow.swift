@@ -15,6 +15,15 @@ enum RecordingState: Equatable {
     var isCapturing: Bool { self == .connecting || self == .recording }
     var isProcessing: Bool { self == .decoding || self == .correcting }
     var hasRecordingSession: Bool { isCapturing || isProcessing }
+
+    static func allowsCaptureStart(saveBlocked: Bool, busy: Bool) -> Bool {
+        !saveBlocked && !busy
+    }
+
+    func afterCaptureReadiness(_ isReady: Bool) -> RecordingState {
+        guard isCapturing else { return self }
+        return isReady ? .recording : .connecting
+    }
 }
 
 @MainActor
@@ -62,6 +71,15 @@ class IndicatorViewModel: ObservableObject {
             RecordingRecoveryPanelController.shared.show()
         }
         self.textInserter = textInserter ?? { ClipboardUtil.insertText($0) }
+
+        streamingService.$isCaptureReady
+            .removeDuplicates()
+            .sink { [weak self] ready in
+                guard let self, self.isStreamingMode, self.state.isCapturing else { return }
+                self.state = self.state.afterCaptureReadiness(ready)
+                if ready { self.startBlinking() } else { self.stopBlinking() }
+            }
+            .store(in: &cancellables)
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -114,10 +132,17 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    func startRecording() {
+    var canStartRecording: Bool {
+        RecordingState.allowsCaptureStart(
+            saveBlocked: saveCoordinator.blocksNewRecording, busy: isTranscriptionBusy
+        )
+    }
+
+    @discardableResult
+    func startRecording() -> Bool {
         guard !saveCoordinator.blocksNewRecording else {
             recoveryPresenter()
-            return
+            return false
         }
         if AppPreferences.shared.debugMode {
             let traceDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
@@ -127,13 +152,13 @@ class IndicatorViewModel: ObservableObject {
         PipelineTrace.shared.log("UI", "IndicatorWindow.startRecording()")
         if isTranscriptionBusy {
             showBusyMessage()
-            return
+            return false
         }
         
         if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
-            state = .recording
-            startBlinking()
+            state = streamingService.isCaptureReady ? .recording : .connecting
+            if state == .recording { startBlinking() } else { stopBlinking() }
 
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }
@@ -168,13 +193,14 @@ class IndicatorViewModel: ObservableObject {
                 }
             }
         }
+        return true
     }
     
     /// `coolDownOnFinish` is for the mic-disconnect path: the engine holds a dead
     /// device and must be released, but only after the finalize Task drained the ring
     /// buffer — tearing it down before that would drop the recording's tail audio.
     func startDecoding(coolDownOnFinish: Bool = false) {
-        guard state == .recording else {
+        guard state.isCapturing else {
             logger.warning("startDecoding() called but state is \(String(describing: self.state), privacy: .public), ignoring")
             return
         }
@@ -365,8 +391,8 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
-        streamingService.abortPendingStart()
         if isStreamingMode {
+            streamingService.abortPendingStart()
             Task { await streamingService.cancelStreaming() }
             isStreamingMode = false
         }

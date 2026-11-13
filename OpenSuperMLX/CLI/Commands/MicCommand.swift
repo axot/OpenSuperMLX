@@ -12,6 +12,7 @@ struct MicCommand: ParsableCommand {
         subcommands: [
             MicListCommand.self,
             MicSelectCommand.self,
+            MicProbeCommand.self,
         ]
     )
 

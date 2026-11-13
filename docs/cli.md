@@ -38,12 +38,27 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 | `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
 | `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
 | `queue` | Manage imported-file transcription | `add <files>...`, `status`, `process` |
-| `mic` | Inspect or select input devices | `list`, `select <device>` |
+| `mic` | Inspect, select, or measure input devices | `list`, `select <device>`, `probe --iterations <count>` |
 | `model` | Show the built-in model | `list` |
 | `benchmark <file>` | Measure accuracy, speed, and memory | `--language`, `--runs`, `--wer-threshold`, `--reference-text`, `--suite` |
 | `diagnose` | Print an environment snapshot | No command-specific arguments |
 
 Run `$BINARY help <command>` or `$BINARY help <command> <subcommand>` for generated usage and defaults.
+
+### Microphone startup probe
+
+`mic probe --json` runs 20 pause/resume trials without loading a model or saving audio.
+Each trial measures the recording request to the first nonempty buffer delivered to
+the app, and checks that idle hardware I/O and callbacks are off. `data.passed` is
+true only when every delivery is below 100 ms and every idle check passes. The
+command exits with code 1 if that acceptance gate fails.
+
+```bash
+$BINARY mic probe --iterations 20 --json
+```
+
+This requires microphone permission. Results apply to the selected microphone and
+the current system; they are delivery measurements, not buffer sample timestamps.
 
 ### LLM correction sizing
 
@@ -178,6 +193,7 @@ With `--json`, command failures are written to stderr as `{"status":"error","com
 | `audio_file_missing` | A history entry no longer has usable audio |
 | `invalid_config_key` | The configuration key is unknown |
 | `invalid_config_value` | The value does not match the key's type |
+| `microphone_unavailable` | The microphone could not be prepared or permission is missing |
 
 ## Running CLI Tests
 

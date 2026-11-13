@@ -5,7 +5,7 @@ Quick reference for diagnosing capture quality, recording storage, and save reco
 ## Pipeline Overview
 
 ```
-Mic → AVAudioEngine tap (native rate) → ringBuffer → drain every ~100ms
+Mic → AVAudioSinkNode (native rate) → bounded capture buffer → drain every ~100ms
                                                          ↓
 Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
                                                          ↓
@@ -19,6 +19,22 @@ Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
 ```
 
 **Note on AEC:** VPIO (`setVoiceProcessingEnabled`) was removed. AEC is now handled at the routing layer via `OutputDeviceClassifier`: if the active output device is classified as a speaker AND the user enabled system-audio capture, the routing forces mic-only to avoid the speaker→mic echo path. Headphone outputs allow free mic+sys mixing.
+
+## Startup and Idle Input
+
+The app prepares the selected microphone engine without starting input I/O.
+Recording requests enable capture immediately; accepted audio waits in a bounded
+buffer while archive and transcription setup finish. Samples before the request
+are excluded. The recording indicator and start sound follow actual audio readiness.
+
+Stopping or cancelling pauses the input hardware while retaining prepared resources.
+The microphone picker does not keep idle input running. Configuration events that
+stop an otherwise unchanged input resume the same engine; device or format changes
+require a prepared replacement.
+
+`mic probe --json` measures pause-to-first-buffer delivery and rejects trials at or
+above 100 ms or with idle input activity. Unified logs include `first_delivery_ms`.
+The first frame's timestamp is distinct from the later callback delivery time.
 
 ## Enable Pipeline Trace
 

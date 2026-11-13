@@ -13,12 +13,20 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     
     private init() {}
     
-    func show(nearPoint point: NSPoint? = nil) -> IndicatorViewModel {
+    func releasePreviousViewModel() {
+        viewModel?.cleanup()
+        viewModel = nil
+    }
+
+    func show(
+        nearPoint point: NSPoint? = nil,
+        viewModel providedViewModel: IndicatorViewModel? = nil
+    ) -> IndicatorViewModel {
         ShortcutManager.shared.indicatorVisible = true
         RecordingActivity.shared.report(self, isActive: true)
 
         viewModel?.cleanup()
-        let newViewModel = IndicatorViewModel()
+        let newViewModel = providedViewModel ?? IndicatorViewModel()
         newViewModel.delegate = self
         viewModel = newViewModel
 
@@ -53,6 +61,15 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
 
         window?.orderFront(nil)
         return newViewModel
+    }
+
+    func move(nearPoint point: NSPoint) {
+        guard let window, let screen = FocusUtils.screenContaining(point: point) ?? NSScreen.main else { return }
+        let bounds = screen.frame
+        window.setFrameOrigin(NSPoint(
+            x: max(bounds.minX, min(point.x - window.frame.width / 2, bounds.maxX - window.frame.width)),
+            y: max(bounds.minY, min(point.y + 20, bounds.maxY - window.frame.height))
+        ))
     }
 
     static func makePanel() -> NSPanel {

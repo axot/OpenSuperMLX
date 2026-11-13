@@ -12,18 +12,6 @@ import MLXAudioSTT
 
 private let logger = Logger(subsystem: "OpenSuperMLX", category: "StreamingAudioService")
 
-struct StreamingTapHealth: Equatable {
-    var callbacks = 0
-
-    var needsRecovery: Bool {
-        callbacks == 0
-    }
-
-    mutating func recordCallback() {
-        callbacks += 1
-    }
-}
-
 struct StreamingCaptureHealth: Equatable {
     var samplesCaptured = 0
 
@@ -33,6 +21,21 @@ struct StreamingCaptureHealth: Equatable {
 
     mutating func recordSamplesCaptured(_ count: Int) {
         samplesCaptured += max(0, count)
+    }
+}
+
+struct MicrophoneCaptureSource {
+    var buffer: MicrophoneCaptureBuffer?
+    var sampleRate: Double = 44100
+    var pendingDrops = 0
+
+    mutating func beginRequest() {
+        pendingDrops = 0
+    }
+
+    mutating func discard() {
+        buffer = nil
+        pendingDrops = 0
     }
 }
 
@@ -83,11 +86,12 @@ class StreamingAudioService: ObservableObject {
     @Published private(set) var provisionalText = ""
     @Published private(set) var transcriptDisplayUpdate: LiveTranscriptSnapshot?
     @Published private(set) var isStreaming = false
+    @Published private(set) var isCaptureReady = false
     @Published private(set) var currentRMSLevel: Float = 0
 
     // MARK: - Private State
 
-    private var audioEngine: AVAudioEngine?
+    private var microphoneInput: PreparedMicrophoneInput?
     private var audioMixer: AudioMixer?
     private var nativeSampleRate: Double = 44100
     /// True iff the current streaming session is mixing system audio with mic.
@@ -108,7 +112,7 @@ class StreamingAudioService: ObservableObject {
 
     private var feedTask: Task<StreamingFeedState, Never>?
     private var eventTask: Task<Void, Never>?
-    private var tapHealthTask: Task<Void, Never>?
+    private var inputHealthTask: Task<Void, Never>?
     private var recordingStartTime: Date?
     private var microphoneChangeObserver: NSObjectProtocol?
     private var microphoneDisconnectObserver: NSObjectProtocol?
@@ -117,15 +121,11 @@ class StreamingAudioService: ObservableObject {
     private var configDebounceTask: Task<Void, Never>?
     private var outputDebounceTask: Task<Void, Never>?
 
-    /// Thread-safe ring buffer: tap callback appends on CoreAudio thread, polling loop drains on Task.
+    /// Retained samples from file injection or a microphone handoff.
     private let ringBuffer = OSAllocatedUnfairLock(initialState: [Float]())
-    private let tapState = OSAllocatedUnfairLock(initialState: StreamingTapHealth())
+    private let microphoneSource = OSAllocatedUnfairLock(initialState: MicrophoneCaptureSource())
     private let captureState = OSAllocatedUnfairLock(initialState: StreamingCaptureHealth())
 
-    /// RMS level written from the tap callback (CoreAudio thread), read by a 30Hz main
-    /// timer that publishes `currentRMSLevel`. Mirrors the `ringBuffer` lock pattern so
-    /// the tap never touches actor-isolated state.
-    private let rmsLock = OSAllocatedUnfairLock(initialState: Float(0))
     private var rmsTimer: Timer?
 
     private let shouldStopFeeding = OSAllocatedUnfairLock(initialState: false)
@@ -141,22 +141,26 @@ class StreamingAudioService: ObservableObject {
     /// change (re-tap on same engine — does NOT re-trigger configChange), (c) device
     /// change (full hot-swap). This eliminates the self-induced configChange loop
     /// caused by hotSwap → AUHAL property write → configChange → hotSwap …
-    private var lastKnownInputFormat: AVAudioFormat?
+    private var lastKnownInputFormat: EngineInitFormat?
     private var lastKnownInputDeviceID: AudioDeviceID?
 
     /// Synchronously gates re-entry into the configChange handler within a single
     /// dispatch — strict scope, no timer. Set true on entry, defer-cleared on exit.
     private var isHandlingConfigChange = false
 
-    private var isEngineWarmed = false
+    private var isEnginePrepared = false
+    private var captureIsRequested = false
+    private var captureRequestGeneration: Int?
+    private var captureStartedAt: Date?
     private var lastWarmUpTime: Date = .distantPast
-    private var tapRecoveryAttempts = 0
+    private var inputRecoveryAttempts = 0
 
     /// Serializes one engine-init transaction at a time. Native calls run here so a
     /// slow device handoff never blocks the main thread; the commit decision stays on
     /// the main actor, gated by the generation counter.
     private static let engineInitQueue = DispatchQueue(label: "OpenSuperMLX.engineInit", qos: .userInitiated)
     private let initGate = EngineInitGate()
+    private let captureStartGate = EngineInitGate()
     private var engineInitTask: Task<EngineInitVerdict, Never>?
     private var engineInitTargetUID: String?
     /// Identity token for the currently tracked init transaction; lets the launching
@@ -264,7 +268,7 @@ class StreamingAudioService: ObservableObject {
         rmsTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.currentRMSLevel = self.rmsLock.withLock { $0 }
+                self.currentRMSLevel = self.microphoneInput?.buffer.rmsLevel ?? 0
             }
         }
     }
@@ -286,45 +290,39 @@ class StreamingAudioService: ObservableObject {
     /// release must not cool it down underneath them.
     private var pendingStreamStarts = 0
 
-    /// Begin live mic metering for the picker popover. Warms the engine if needed
-    /// (so the tap delivers buffers) and runs the RMS timer. No-op while streaming —
-    /// streaming already drives `currentRMSLevel`.
+    /// Prepare the selected input without enabling idle microphone I/O.
     func startIdleMetering() {
         popoverWantsMetering = true
         guard !isStreaming else { return }
-        if !isEngineWarmed || audioEngine?.isRunning != true {
+        if !isEnginePrepared {
             Task { await self.warmUp() }
-        }
-        if rmsTimer == nil {
-            startRMSTimer()
         }
     }
 
-    /// Stop popover metering and release the microphone. Streaming owns the engine
-    /// and timer while active, so this is a no-op mid-recording.
+    /// Close the picker without interrupting a requested capture.
     func stopIdleMetering() {
         popoverWantsMetering = false
         releaseEngineIfIdle()
     }
 
-    /// An open input engine keeps Bluetooth headsets in the low-quality hands-free
-    /// profile, so the mic is held only while recording, starting to record, or while
-    /// the popover meters it.
+    /// Idle input I/O stops even when the picker is open; prepared resources stay cached.
     nonisolated static func shouldReleaseEngine(
         isStreaming: Bool,
         hasPendingStart: Bool,
         popoverWantsMetering: Bool
     ) -> Bool {
-        !isStreaming && !hasPendingStart && !popoverWantsMetering
+        !isStreaming && !hasPendingStart
     }
 
     private func releaseEngineIfIdle() {
         guard Self.shouldReleaseEngine(
             isStreaming: isStreaming,
-            hasPendingStart: pendingStreamStarts > 0,
+            hasPendingStart: pendingStreamStarts > 0 || captureIsRequested,
             popoverWantsMetering: popoverWantsMetering
         ) else { return }
-        coolDown()
+        microphoneInput?.pause()
+        stopRMSTimer()
+        isCaptureReady = false
     }
 
     /// Restart idle metering after a recording ends if the picker popover is still
@@ -366,7 +364,7 @@ class StreamingAudioService: ObservableObject {
                     if self.activeTargetDiffersFromBoundEngine() {
                         await self.hotSwapMicrophone()
                     }
-                } else if self.isEngineWarmed {
+                } else if self.isEnginePrepared {
                     if self.activeTargetDiffersFromBoundEngine() {
                         self.coolDown()
                         await self.warmUp(fromBackground: true)
@@ -384,7 +382,7 @@ class StreamingAudioService: ObservableObject {
                 guard let self else { return }
                 if self.isStreaming {
                     logger.info("Active microphone disconnected during streaming — deferring to IndicatorViewModel")
-                } else if self.isEngineWarmed {
+                } else if self.isEnginePrepared {
                     logger.info("Active microphone disconnected — stopping engine (no fallback)")
                     self.coolDown()
                 }
@@ -411,7 +409,7 @@ class StreamingAudioService: ObservableObject {
     // MARK: - Engine Pre-Warm
 
     func warmUp(fromBackground: Bool = false) async {
-        guard !isEngineWarmed, audioEngine == nil else { return }
+        guard !isEnginePrepared, microphoneInput == nil else { return }
         if fromBackground && Date().timeIntervalSince(lastWarmUpTime) < 1.0 {
             logger.info("Skipping warmUp — last warmUp was < 1s ago")
             return
@@ -460,177 +458,71 @@ class StreamingAudioService: ObservableObject {
     }
 
     private struct NativeEngineInitResult {
-        let observation: EngineInitObservation
-        let engine: AVAudioEngine
-        let deviceSideFormat: AVAudioFormat?
-        let tapInstalled: Bool
+        let input: PreparedMicrophoneInput?
+        let verdict: EngineInitVerdict
     }
 
-    @MainActor
     private func runInitTransaction(target: MicrophoneService.AudioDevice, generation: Int) async -> EngineInitVerdict {
-        resetTapHealth()
-
         let result: NativeEngineInitResult = await withCheckedContinuation { continuation in
             Self.engineInitQueue.async { [weak self] in
                 guard let self else { return }
                 continuation.resume(returning: self.performNativeInit(target: target))
             }
         }
-
-        var observation = result.observation
-        if Task.isCancelled { observation.cancelled = true }
-
-        let verdict = EngineInitTransaction.evaluate(observation)
-        switch verdict {
-        case .commit(let rate) where initGate.shouldCommit(generation: generation, targetUID: target.id):
-            audioEngine = result.engine
-            nativeSampleRate = rate
-            isEngineWarmed = true
-            lastWarmUpTime = Date()
-            // Snapshot post-start state so the configChange handler can branch on what
-            // actually changed. The device snapshot is the *bound* device, not the
-            // system default — with a pinned non-default mic the two differ, and the
-            // compare must be engine-scoped.
-            lastKnownInputFormat = result.deviceSideFormat
-            lastKnownInputDeviceID = observation.boundDeviceID
-            observeEngineConfigChange(result.engine)
-            logger.info("Audio engine warmed up: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz")
-            return verdict
-        case .commit:
-            teardownUnadoptedEngine(result.engine)
+        guard !Task.isCancelled,
+              initGate.shouldCommit(generation: generation, targetUID: target.id) else {
+            result.input?.stop()
             return .abandon
-        case .abandon, .failExplicit:
-            if EngineInitTransaction.shouldTeardownUnadoptedEngine(
-                engineRunning: result.engine.isRunning,
-                tapInstalled: result.tapInstalled
-            ) {
-                teardownUnadoptedEngine(result.engine)
-            }
+        }
+        guard let input = result.input else { return result.verdict }
+        let verdict = input.preparedVerdict
+        guard case .commit(let rate) = verdict else {
+            input.stop()
             return verdict
         }
+        microphoneInput = input
+        nativeSampleRate = rate
+        isEnginePrepared = true
+        lastWarmUpTime = Date()
+        lastKnownInputFormat = input.format
+        lastKnownInputDeviceID = input.boundDeviceID
+        let preserveCapturedAudio = isStreaming || captureIsRequested
+        microphoneSource.withLock { source in
+            let retained = ringBuffer.withLock { buffer in
+                let samples = buffer
+                buffer.removeAll()
+                return samples
+            }
+            let transferred = Self.makeMicrophoneHandoffSamples(
+                retained: retained, captured: source.buffer?.drain() ?? [],
+                inputSampleRate: source.sampleRate, outputSampleRate: rate,
+                preserve: preserveCapturedAudio
+            )
+            ringBuffer.withLock { $0.append(contentsOf: transferred) }
+            source.pendingDrops = preserveCapturedAudio
+                ? source.pendingDrops + (source.buffer?.droppedSampleCount ?? 0) : 0
+            source.buffer = input.buffer
+            source.sampleRate = rate
+        }
+        observeEngineConfigChange(input)
+        logger.info("Microphone engine prepared without I/O: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz")
+        return verdict
     }
 
-    private func teardownUnadoptedEngine(_ engine: AVAudioEngine) {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        retireEngine(engine)
-    }
-
-    /// Prepare, start, and verify an engine bound to `target`. Runs entirely on the
-    /// engine-init queue; the tap is installed only after the transaction's verify step
-    /// passes, so a reverted or mismatched binding can never reach `installTap`.
-    nonisolated
-    private func performNativeInit(target: MicrophoneService.AudioDevice) -> NativeEngineInitResult {
-        let engine = AVAudioEngine()
-        let coreAudioID = MicrophoneService.shared.getCoreAudioDeviceID(for: target)
-
-        guard let coreAudioID else {
-            logger.error("Engine init: cannot resolve CoreAudio ID for \(target.displayName, privacy: .public)")
-            return Self.failedNativeInit(
-                engine: engine,
-                observation: EngineInitObservation(
-                    engineRunning: false,
-                    startErrorDescription: nil,
-                    boundDeviceID: nil,
-                    targetDeviceID: nil,
-                    deviceSideFormat: nil
-                )
-            )
+    nonisolated private func performNativeInit(target: MicrophoneService.AudioDevice) -> NativeEngineInitResult {
+        guard let deviceID = MicrophoneService.shared.getCoreAudioDeviceID(for: target) else {
+            return NativeEngineInitResult(input: nil, verdict: .failExplicit(.deviceUnresolvable))
         }
-
-        let inputNode = engine.inputNode
-        warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "warm-up before engine.start")
-
-        var deviceID = coreAudioID
-        let bindStatus: OSStatus
-        if let audioUnit = inputNode.audioUnit {
-            bindStatus = AudioUnitSetProperty(
-                audioUnit,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global, 0,
-                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
-        } else {
-            bindStatus = OSStatus(kAudioUnitErr_InvalidParameter)
-        }
-        guard bindStatus == noErr else {
-            logger.error("Engine init: failed to bind \(target.displayName, privacy: .public) status=\(bindStatus, privacy: .public)")
-            return Self.failedNativeInit(
-                engine: engine,
-                observation: EngineInitObservation(
-                    engineRunning: false,
-                    startErrorDescription: nil,
-                    boundDeviceID: nil,
-                    targetDeviceID: coreAudioID,
-                    deviceSideFormat: nil,
-                    bindFailedStatus: bindStatus
-                )
-            )
-        }
-
         do {
-            try engine.start()
+            let input = try PreparedMicrophoneInput(targetDeviceID: deviceID)
+            let verdict = input.prepare()
+            return NativeEngineInitResult(input: input, verdict: verdict)
+        } catch let failure as EngineInitFailure {
+            logger.error("Microphone preparation failed: \(String(describing: failure), privacy: .public)")
+            return NativeEngineInitResult(input: nil, verdict: .failExplicit(failure))
         } catch {
-            logger.error("Engine init: start failed for \(target.displayName, privacy: .public): \(String(describing: error), privacy: .public)")
-            return Self.failedNativeInit(
-                engine: engine,
-                observation: EngineInitObservation(
-                    engineRunning: engine.isRunning,
-                    startErrorDescription: String(describing: error),
-                    boundDeviceID: Self.boundInputDeviceID(of: engine),
-                    targetDeviceID: coreAudioID,
-                    deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
-                )
-            )
+            return NativeEngineInitResult(input: nil, verdict: .failExplicit(.engineStartFailed(String(describing: error))))
         }
-
-        // Verify BEFORE installing the tap: the bound device must still be the target
-        // and the device-side format must be sane. AVAudioEngine re-routes to the
-        // system default on start in the failed case, which is exactly the state a tap
-        // must never be installed into.
-        let observation = EngineInitObservation(
-            engineRunning: engine.isRunning,
-            startErrorDescription: nil,
-            boundDeviceID: Self.boundInputDeviceID(of: engine),
-            targetDeviceID: coreAudioID,
-            deviceSideFormat: Self.initFormat(engine.inputNode.inputFormat(forBus: 0))
-        )
-        let verdict = EngineInitTransaction.evaluate(observation)
-        guard case .commit(let rate) = verdict else {
-            logger.error("Engine init transaction failed for \(target.displayName, privacy: .public): \(String(describing: verdict), privacy: .public)")
-            engine.stop()
-            return Self.failedNativeInit(engine: engine, observation: observation)
-        }
-
-        let tapFormat = currentPlainMicTapFormat(for: inputNode, in: engine)
-        installRingBufferTap(on: inputNode, format: tapFormat)
-        logger.info("Engine init committed: device=\(target.displayName, privacy: .public) rate=\(Int(rate), privacy: .public)Hz tap=\(Int(tapFormat.sampleRate), privacy: .public)Hz")
-        return NativeEngineInitResult(
-            observation: observation,
-            engine: engine,
-            deviceSideFormat: tapFormat,
-            tapInstalled: true
-        )
-    }
-
-    nonisolated private static func failedNativeInit(
-        engine: AVAudioEngine,
-        observation: EngineInitObservation
-    ) -> NativeEngineInitResult {
-        NativeEngineInitResult(
-            observation: observation,
-            engine: engine,
-            deviceSideFormat: nil,
-            tapInstalled: false
-        )
-    }
-
-    nonisolated private static func initFormat(_ format: AVAudioFormat) -> EngineInitFormat {
-        EngineInitFormat(
-            sampleRate: format.sampleRate,
-            channelCount: Int(format.channelCount),
-            isInterleaved: format.isInterleaved
-        )
     }
 
     /// Read back the device the engine's input AU is actually bound to — the verify
@@ -649,13 +541,13 @@ class StreamingAudioService: ObservableObject {
         return status == noErr ? deviceID : nil
     }
 
-    private func observeEngineConfigChange(_ engine: AVAudioEngine) {
+    private func observeEngineConfigChange(_ engine: PreparedMicrophoneInput) {
         if let old = configChangeObserver {
             NotificationCenter.default.removeObserver(old)
         }
         configChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
-            object: engine,
+            object: engine.configurationObject,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -663,7 +555,7 @@ class StreamingAudioService: ObservableObject {
                 self.configDebounceTask?.cancel()
                 self.configDebounceTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(200))
-                    guard !Task.isCancelled, let self, self.isStreaming else { return }
+                    guard !Task.isCancelled, let self else { return }
                     await self.handleConfigChange()
                 }
             }
@@ -674,86 +566,76 @@ class StreamingAudioService: ObservableObject {
     /// trigger condition for `.AVAudioEngineConfigurationChange`. This eliminates the
     /// hot-swap feedback loop that bounded `feedAudio` to 500–1300ms.
     private func handleConfigChange() async {
-        guard !isHandlingConfigChange else {
-            logger.info("Skipping nested configChange handler re-entry")
-            return
-        }
+        guard !isHandlingConfigChange, let input = microphoneInput else { return }
         isHandlingConfigChange = true
         defer { isHandlingConfigChange = false }
 
-        guard let engine = audioEngine else { return }
-        let liveFormat = currentPlainMicTapFormat(for: engine.inputNode, in: engine)
-        // Compare against the device the engine is *bound* to, not the system default —
-        // with a pinned non-default mic, default-input churn is irrelevant to this engine.
-        let liveDeviceID = Self.boundInputDeviceID(of: engine)
-
-        let formatChanged: Bool = {
-            guard let cached = lastKnownInputFormat else { return true }
-            return cached.sampleRate != liveFormat.sampleRate
-                || cached.channelCount != liveFormat.channelCount
-        }()
-        let deviceChanged = liveDeviceID != lastKnownInputDeviceID
-
-        switch (deviceChanged, formatChanged) {
-        case (false, false):
-            logger.info("configChange: nothing changed, dropping")
-        case (false, true):
-            logger.warning("configChange: format-only change — reinstalling tap on same engine")
-            reinstallTap(format: liveFormat)
-        case (true, _):
-            logger.warning("configChange: input device changed — full hot-swap")
-            await hotSwapMicrophone()
-            // Force the cache to reflect what we observed at handler entry, regardless of
-            // whether warmUp succeeded inside hotSwap. If warm-up threw, the engine is
-            // gone but the bound-device/format reads still return the observed values;
-            // without this update we'd loop on the next configChange comparing stale
-            // cache vs the already-swapped live state.
-            lastKnownInputFormat = liveFormat
-            lastKnownInputDeviceID = liveDeviceID
+        let changed = input.boundDeviceID != lastKnownInputDeviceID || input.format != lastKnownInputFormat
+        if changed {
+            if isStreaming {
+                await hotSwapMicrophone()
+            } else if !isStreaming && pendingStreamStarts == 0 {
+                coolDown()
+                await warmUp()
+            }
+        } else if captureIsRequested && !input.isRunning {
+            logger.warning("Microphone configuration stopped the engine; resuming the existing input")
+            let verdict = await resumeInput(input)
+            if case .commit = verdict { return }
+            logger.error("Microphone resume failed: \(String(describing: verdict), privacy: .public)")
         }
     }
 
-    /// Re-tap on the same engine without stopping it. Critically, this does NOT call
-    /// `engine.stop()` and does NOT write `kAudioOutputUnitProperty_CurrentDevice`,
-    /// so it does not satisfy the documented trigger condition for
-    /// `.AVAudioEngineConfigurationChange` — the loop cannot form by construction.
-    private func reinstallTap(format: AVAudioFormat) {
-        guard let engine = audioEngine else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        installRingBufferTap(on: engine.inputNode, format: format)
-        nativeSampleRate = format.sampleRate
-        // Self-update the cache so callers don't need to (matches warmUp's invariant
-        // and prevents the next configChange from re-firing on the same format).
-        lastKnownInputFormat = format
-        logger.info("Tap reinstalled at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
-    }
-
-    /// Install the standard tap that drains audio into `ringBuffer`. Used by both
-    /// engine init (background queue) and `reinstallTap` (main actor). Only touches
-    /// lock-backed state and weak actor reads, so it is safe from any thread.
-    nonisolated private func installRingBufferTap(on inputNode: AVAudioInputNode, format: AVAudioFormat) {
-        let ringBufferLock = self.ringBuffer
-        let tapState = self.tapState
-        let rmsLock = self.rmsLock
-        logger.info("Installing input tap at \(format.sampleRate, privacy: .public)Hz x\(format.channelCount, privacy: .public)ch")
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            // Always meter so the popover VU reflects real mic level even when
-            // idle (warmed-but-not-streaming). The lock write is cheap.
-            let rms = Self.computeRMS(buffer)
-            rmsLock.withLock { $0 = rms }
-
-            guard self?.isStreaming ?? false else { return }
-            tapState.withLock { state in
-                state.recordCallback()
-            }
-            let floats = Array(UnsafeBufferPointer(
-                start: buffer.floatChannelData![0],
-                count: Int(buffer.frameLength)
-            ))
-            ringBufferLock.withLock { buf in
-                buf.append(contentsOf: floats)
+    private func resumeInput(_ input: PreparedMicrophoneInput, restart: Bool = false) async -> EngineInitVerdict {
+        guard captureIsRequested, let generation = captureRequestGeneration else { return .abandon }
+        let gate = captureStartGate
+        let source = microphoneSource
+        let priorDelivery = input.buffer.lastBufferDeliveryHostTime
+        isCaptureReady = false
+        let verdict: EngineInitVerdict = await withCheckedContinuation { continuation in
+            Self.engineInitQueue.async {
+                guard gate.shouldCommit(generation: generation, targetUID: "recording"),
+                      source.withLock({ $0.buffer === input.buffer }) else {
+                    continuation.resume(returning: .abandon)
+                    return
+                }
+                let resumed = restart ? input.restart() : input.resume()
+                if !gate.shouldCommit(generation: generation, targetUID: "recording")
+                    || !source.withLock({ $0.buffer === input.buffer }) {
+                    input.pause()
+                    continuation.resume(returning: .abandon)
+                } else {
+                    continuation.resume(returning: resumed)
+                }
             }
         }
+        guard case .commit = verdict else { return verdict }
+        let deadline = ContinuousClock.now + .milliseconds(900)
+        while input.buffer.lastBufferDeliveryHostTime <= priorDelivery && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+            guard captureIsRequested, captureRequestGeneration == generation,
+                  microphoneInput === input, !Task.isCancelled else { return .abandon }
+        }
+        guard input.isRunning, input.buffer.lastBufferDeliveryHostTime > priorDelivery else {
+            return .failExplicit(.engineStartFailed("Microphone delivery did not resume"))
+        }
+        isCaptureReady = true
+        return verdict
+    }
+
+    private func drainMicrophoneSamples() -> [Float] {
+        microphoneSource.withLock { $0.buffer?.drain() ?? [] }
+    }
+
+    nonisolated static func makeMicrophoneHandoffSamples(
+        retained: [Float], captured: [Float],
+        inputSampleRate: Double, outputSampleRate: Double,
+        preserve: Bool
+    ) -> [Float] {
+        guard preserve else { return [] }
+        return AudioMixer(inputSampleRate: inputSampleRate).micOnly(
+            retained + captured, inputSampleRate: inputSampleRate, outputSampleRate: outputSampleRate
+        )
     }
 
     struct PlainMicGraphStatus: Equatable {
@@ -777,136 +659,80 @@ class StreamingAudioService: ObservableObject {
         )
     }
 
-    nonisolated private func currentPlainMicTapFormat(for inputNode: AVAudioInputNode, in engine: AVAudioEngine) -> AVAudioFormat {
-        warnIfNonPlainMicGraph(engine: engine, inputNode: inputNode, context: "plain mic tap format")
-
-        let inputFormat = inputNode.inputFormat(forBus: 0)
-        let outputFormat = inputNode.outputFormat(forBus: 0)
-
-        // This resolver is intentionally scoped to the current mic-only engine: no
-        // output node, no mixer/converter, and no voice-processing path. In that graph,
-        // the tap should use the microphone's enabled input format. If a future change
-        // adds nodes or connections, revisit this resolver instead of reusing this rule.
-        if inputFormat.sampleRate > 0, inputFormat.channelCount > 0 {
-            if inputFormat.sampleRate != outputFormat.sampleRate
-                || inputFormat.channelCount != outputFormat.channelCount
-                || inputFormat.commonFormat != outputFormat.commonFormat
-                || inputFormat.isInterleaved != outputFormat.isInterleaved {
-                logger.warning("Plain mic input/output format mismatch: input=\(self.describe(format: inputFormat), privacy: .public) output=\(self.describe(format: outputFormat), privacy: .public); using input format")
-            }
-            return inputFormat
-        }
-
-        logger.warning("Input format invalid for plain mic tap; falling back to output format \(self.describe(format: outputFormat), privacy: .public)")
-        return outputFormat
-    }
-
-    nonisolated private func warnIfNonPlainMicGraph(engine: AVAudioEngine, inputNode: AVAudioInputNode, context: String) {
-        let graphStatus = Self.plainMicGraphStatus(engine: engine, inputNode: inputNode)
-        guard !graphStatus.isPlainMicGraph else { return }
-
-        assertionFailure("Plain mic graph invariant violated")
-        logger.error("Plain mic graph invariant violated: context=\(context, privacy: .public) unexpectedNodes=\(graphStatus.unexpectedNodeTypes.joined(separator: ","), privacy: .public) outputConnections=\(graphStatus.outputConnectionCount, privacy: .public)")
-    }
-
-    nonisolated private func describe(format: AVAudioFormat) -> String {
-        "\(format.sampleRate)Hz x\(format.channelCount) \(format.commonFormat) interleaved=\(format.isInterleaved)"
-    }
-
-    private func resetTapHealth() {
-        tapState.withLock { $0 = StreamingTapHealth() }
-    }
-
     private func resetCaptureHealth() {
         captureState.withLock { $0 = StreamingCaptureHealth() }
     }
 
-    private func cancelTapHealthCheck() {
-        tapHealthTask?.cancel()
-        tapHealthTask = nil
+    private func cancelInputHealthCheck() {
+        inputHealthTask?.cancel()
+        inputHealthTask = nil
     }
 
     private func resetHealthForNewRecording() {
-        cancelTapHealthCheck()
-        tapRecoveryAttempts = 0
-        resetTapHealth()
+        cancelInputHealthCheck()
+        inputRecoveryAttempts = 0
         resetCaptureHealth()
     }
 
-    private func scheduleTapHealthCheck(afterMilliseconds delay: Int = 900) {
-        cancelTapHealthCheck()
-        tapHealthTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(delay))
-            guard !Task.isCancelled, let self, self.isStreaming else { return }
-            let needsRecovery = self.tapState.withLock { $0.needsRecovery }
-            guard needsRecovery else { return }
-            await self.recoverSilentTap()
+    private func scheduleInputHealthCheck(afterMilliseconds delay: Int = 900) {
+        cancelInputHealthCheck()
+        inputHealthTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard !Task.isCancelled, let self, self.isStreaming else { return }
+                guard let input = self.microphoneInput else { return }
+                let last = input.buffer.lastBufferDeliveryHostTime
+                let now = DispatchTime.now().uptimeNanoseconds
+                if !input.isRunning || last == 0 || now - last > 900_000_000 {
+                    await self.recoverInputStall()
+                } else {
+                    self.inputRecoveryAttempts = 0
+                }
+            }
         }
     }
 
-    private func recoverSilentTap() async {
-        guard isStreaming else { return }
-        guard tapRecoveryAttempts < 2 else {
-            logger.error("Audio tap produced no buffers after retry")
-            ErrorToastManager.shared.show("Microphone audio did not start. Try recording again.")
+    private func recoverInputStall() async {
+        guard isStreaming, captureIsRequested, let input = microphoneInput else { return }
+        guard inputRecoveryAttempts < 2 else {
+            cancelInputHealthCheck()
+            isCaptureReady = false
+            logger.error("Microphone input did not resume after retry")
+            ErrorToastManager.shared.show("Microphone audio stopped. Try recording again.")
             return
         }
-
-        tapRecoveryAttempts += 1
-        logger.warning("Audio tap produced no buffers - restarting audio engine (attempt \(self.tapRecoveryAttempts, privacy: .public))")
-        resetEngineForTapRecovery()
-        try? await Task.sleep(for: .milliseconds(500))
-        guard isStreaming else { return }
-
-        lastWarmUpTime = .distantPast
-        await warmUp()
-        if isEngineWarmed {
-            scheduleTapHealthCheck()
-        } else {
-            logger.error("Audio tap recovery failed: engine did not warm up")
-            ErrorToastManager.shared.show("Microphone audio could not start.")
-        }
+        inputRecoveryAttempts += 1
+        let verdict = await resumeInput(input, restart: input.isRunning)
+        if case .commit = verdict { return }
+        await hotSwapMicrophone()
     }
 
-    private func resetEngineForTapRecovery() {
-        invalidatePendingEngineInit()
-        if let observer = configChangeObserver {
-            NotificationCenter.default.removeObserver(observer)
-            configChangeObserver = nil
-        }
-        configDebounceTask?.cancel()
-        configDebounceTask = nil
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        retireEngine(audioEngine)
-        audioEngine = nil
-        isEngineWarmed = false
-        ringBuffer.withLock { $0.removeAll() }
-        rmsLock.withLock { $0 = 0 }
-        resetTapHealth()
-    }
+    private var retiredInputs: [PreparedMicrophoneInput] = []
 
-    private var retiredEngines: [AVAudioEngine] = []
-
-    func coolDown() {
+    func coolDown(preservingCapturedAudio: Bool = false) {
         stopRMSTimer()
-        cancelTapHealthCheck()
-        tapRecoveryAttempts = 0
+        if !preservingCapturedAudio {
+            cancelInputHealthCheck()
+            inputRecoveryAttempts = 0
+            microphoneSource.withLock { $0.discard() }
+            ringBuffer.withLock { $0.removeAll() }
+        }
         invalidatePendingEngineInit()
-        guard isEngineWarmed else { return }
+        guard isEnginePrepared else { return }
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             configChangeObserver = nil
         }
-        configDebounceTask?.cancel()
-        configDebounceTask = nil
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        retireEngine(audioEngine)
-        audioEngine = nil
-        isEngineWarmed = false
+        if !preservingCapturedAudio {
+            configDebounceTask?.cancel()
+            configDebounceTask = nil
+        }
+        microphoneInput?.stop()
+        retireInput(microphoneInput)
+        microphoneInput = nil
+        isCaptureReady = false
+        isEnginePrepared = false
         sessionClassification = nil
-        ringBuffer.withLock { $0.removeAll() }
         logger.info("Audio engine cooled down")
     }
 
@@ -922,64 +748,88 @@ class StreamingAudioService: ObservableObject {
     /// on after the caller already stopped or cancelled.
     func abortPendingStart() {
         startGeneration += 1
+        captureIsRequested = false
+        captureStartGate.cancelInFlight()
+        captureRequestGeneration = nil
         invalidatePendingEngineInit()
+        if let input = microphoneInput {
+            input.buffer.close()
+            Self.engineInitQueue.async { input.pause() }
+        }
+        isCaptureReady = false
     }
 
     private func throwIfStartAborted(_ generation: Int, reason: String) throws {
-        guard startGeneration == generation else {
+        guard startGeneration == generation, !Task.isCancelled else {
             PipelineTrace.shared.log("STREAM", reason)
             throw StreamingAudioError.startAborted
         }
     }
 
-    private func retireEngine(_ engine: AVAudioEngine?) {
+    private func retireInput(_ engine: PreparedMicrophoneInput?) {
         guard let engine else { return }
-        retiredEngines.append(engine)
+        retiredInputs.append(engine)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.retiredEngines.removeAll { $0 === engine }
+            self?.retiredInputs.removeAll { $0 === engine }
         }
     }
 
     // MARK: - Mic Hot-Swap
 
     private func hotSwapMicrophone() async {
-        guard let engine = audioEngine else { return }
-        configDebounceTask?.cancel()
-        configDebounceTask = nil
-
-        let preserved = ringBuffer.withLock { buffer -> [Float] in
-            let saved = buffer
-            buffer.removeAll(keepingCapacity: true)
-            return saved
-        }
-
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        retireEngine(engine)
-        audioEngine = nil
-        isEngineWarmed = false
-
-        // Bypass the 1s warmUp debounce — this is a same-tick recreate.
+        guard let input = microphoneInput, captureIsRequested,
+              let generation = captureRequestGeneration else { return }
+        let gate = captureStartGate
+        let source = microphoneSource
+        isCaptureReady = false
+        input.pause()
+        coolDown(preservingCapturedAudio: true)
         lastWarmUpTime = .distantPast
-        await warmUp(fromBackground: true)
-
-        if !isEngineWarmed {
-            logger.error("Hot-swap failed: audio engine did not start with new device")
+        let verdict = await beginEngineInit()
+        guard case .commit = verdict, let replacement = microphoneInput,
+              isStreaming, captureIsRequested, captureRequestGeneration == generation else { return }
+        let started: EngineInitVerdict = await withCheckedContinuation { continuation in
+            Self.engineInitQueue.async {
+                guard gate.shouldCommit(generation: generation, targetUID: "recording"),
+                      source.withLock({ $0.buffer === replacement.buffer }) else {
+                    continuation.resume(returning: .abandon)
+                    return
+                }
+                let result = replacement.start(at: DispatchTime.now().uptimeNanoseconds)
+                if !gate.shouldCommit(generation: generation, targetUID: "recording")
+                    || !source.withLock({ $0.buffer === replacement.buffer }) {
+                    replacement.pause()
+                    continuation.resume(returning: .abandon)
+                } else {
+                    continuation.resume(returning: result)
+                }
+            }
         }
-
-        ringBuffer.withLock { buffer in
-            buffer.insert(contentsOf: preserved, at: 0)
+        if case .commit = started {
+            let deadline = ContinuousClock.now + .milliseconds(900)
+            while !replacement.buffer.hasReceivedAudio && ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(5))
+                guard captureIsRequested, captureRequestGeneration == generation,
+                      microphoneInput === replacement, !Task.isCancelled else { return }
+            }
+            isCaptureReady = captureIsRequested && replacement.isRunning && replacement.buffer.hasReceivedAudio
+            if isCaptureReady {
+                scheduleInputHealthCheck()
+                startRMSTimer()
+            } else {
+                replacement.pause()
+            }
+        } else {
+            logger.error("Hot-swap failed: \(String(describing: started), privacy: .public)")
         }
-
-        logger.info("Hot-swapped microphone, preserved \(preserved.count) samples")
     }
 
     /// True when the mic that should be recording now differs from the device the warm
     /// engine is actually bound to. Default-input churn with a saved (pinned) mic
     /// resolves to the same target and must not tear down a healthy engine.
     private func activeTargetDiffersFromBoundEngine() -> Bool {
-        guard let engine = audioEngine else { return true }
-        let bound = Self.boundInputDeviceID(of: engine)
+        guard let engine = microphoneInput else { return true }
+        let bound = engine.boundDeviceID
         guard let active = MicrophoneService.shared.activateForRecording(),
               let activeID = MicrophoneService.shared.getCoreAudioDeviceID(for: active) else { return true }
         return bound != activeID
@@ -1040,7 +890,93 @@ class StreamingAudioService: ObservableObject {
 
     // MARK: - Start Streaming
 
+    func beginMicrophoneCapture(requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds) async throws {
+        if captureIsRequested && isCaptureReady { return }
+        guard !captureIsRequested else { throw StreamingAudioError.startAborted }
+        _ = resolveCurrentClassification(askIfNeeded: MicrophoneService.shared.speakerCaptureEnabled)
+        let generation = startGeneration
+        let captureGeneration = captureStartGate.beginRequest(targetUID: "recording")
+        let startGate = captureStartGate
+        let source = microphoneSource
+        source.withLock { $0.beginRequest() }
+        captureRequestGeneration = captureGeneration
+        captureIsRequested = true
+        do {
+            if !isEnginePrepared || activeTargetDiffersFromBoundEngine()
+                || microphoneInput?.format != lastKnownInputFormat {
+                coolDown()
+                let verdict = await beginEngineInit()
+                try throwIfStartAborted(generation, reason: "start cancelled during engine init")
+                guard case .commit = verdict else {
+                    PipelineTrace.shared.log("STREAM", "engine init failed: \(verdict)")
+                    throw StreamingAudioError.engineInitFailed(
+                        failure: verdict.failureDescription ?? "Engine initialization failed."
+                    )
+                }
+            }
+
+            try throwIfStartAborted(generation, reason: "start cancelled after engine init")
+
+            guard let input = microphoneInput else {
+                throw StreamingAudioError.audioFormatCreationFailed
+            }
+            let started: EngineInitVerdict = await withCheckedContinuation { continuation in
+                Self.engineInitQueue.async {
+                    guard startGate.shouldCommit(generation: captureGeneration, targetUID: "recording"),
+                          source.withLock({ $0.buffer === input.buffer }) else {
+                        continuation.resume(returning: .abandon)
+                        return
+                    }
+                    let result = input.start(at: requestedAt)
+                    if !startGate.shouldCommit(generation: captureGeneration, targetUID: "recording")
+                        || !source.withLock({ $0.buffer === input.buffer }) {
+                        input.pause()
+                        continuation.resume(returning: .abandon)
+                    } else {
+                        continuation.resume(returning: result)
+                    }
+                }
+            }
+            try throwIfStartAborted(generation, reason: "start cancelled while enabling microphone")
+            guard case .commit = started else {
+                throw StreamingAudioError.engineInitFailed(failure: started.failureDescription ?? "Microphone failed to start.")
+            }
+            let deadline = ContinuousClock.now + .milliseconds(900)
+            while !input.buffer.hasReceivedAudio && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(5))
+                try throwIfStartAborted(generation, reason: "start cancelled before microphone audio arrived")
+                if !input.isRunning {
+                    let resumed = await resumeInput(input)
+                    guard case .commit = resumed else { break }
+                }
+            }
+            guard input.isRunning, input.buffer.hasReceivedAudio,
+                  microphoneInput === input,
+                  startGate.shouldCommit(generation: captureGeneration, targetUID: "recording") else {
+                input.pause()
+                throw StreamingAudioError.engineInitFailed(failure: "Microphone audio did not start. Try recording again.")
+            }
+            isCaptureReady = true
+            captureStartedAt = Date()
+            if let latency = input.buffer.firstBufferLatencyMilliseconds {
+                logger.info("Microphone audio ready: first_delivery_ms=\(latency, privacy: .public)")
+                PipelineTrace.shared.log("MIC_READY", "first_delivery_ms=\(latency)")
+            }
+            playNotificationSound()
+        } catch {
+            if captureRequestGeneration == captureGeneration {
+                captureIsRequested = false
+                captureRequestGeneration = nil
+                captureStartGate.endRequest(generation: captureGeneration)
+                releaseEngineIfIdle()
+            }
+            throw error
+        }
+    }
+
+
     func startStreaming() async throws {
+        let requestedAt = DispatchTime.now().uptimeNanoseconds
         PipelineTrace.shared.log("STREAM", "startStreaming() called")
 
         guard !isStreaming else {
@@ -1048,10 +984,16 @@ class StreamingAudioService: ObservableObject {
             logger.warning("Already streaming, ignoring startStreaming()")
             return
         }
+        guard pendingStreamStarts == 0 else { throw StreamingAudioError.startAborted }
 
         let generation = startGeneration
         pendingStreamStarts += 1
         defer {
+            if !isStreaming, startGeneration == generation, let captureGeneration = captureRequestGeneration {
+                captureStartGate.endRequest(generation: captureGeneration)
+                captureRequestGeneration = nil
+                captureIsRequested = false
+            }
             pendingStreamStarts -= 1
             releaseEngineIfIdle()
         }
@@ -1062,31 +1004,14 @@ class StreamingAudioService: ObservableObject {
             throw StreamingAudioError.modelNotLoaded
         }
 
-        if !isEngineWarmed || audioEngine?.isRunning != true {
-            coolDown()
-            let verdict = await beginEngineInit()
-            try throwIfStartAborted(generation, reason: "start cancelled during engine init")
-            guard case .commit = verdict else {
-                PipelineTrace.shared.log("STREAM", "engine init failed: \(verdict)")
-                throw StreamingAudioError.engineInitFailed(
-                    failure: verdict.failureDescription ?? "Engine initialization failed."
-                )
-            }
-        }
-
-        try throwIfStartAborted(generation, reason: "start cancelled after engine init")
-
-        guard audioEngine != nil else {
-            throw StreamingAudioError.audioFormatCreationFailed
-        }
-
+        try await beginMicrophoneCapture(requestedAt: requestedAt)
         shouldStopFeeding.withLock { $0 = false }
         resetHealthForNewRecording()
         confirmedText = ""
         provisionalText = ""
         transcriptDisplayUpdate = nil
 
-        let startTime = Date()
+        let startTime = captureStartedAt ?? Date()
         let recordingID = UUID()
         let pendingDirectory = Recording.pendingRecordingsDirectory
         let fileName = RecordingAudioFormat.makeFileName(
@@ -1149,11 +1074,10 @@ class StreamingAudioService: ObservableObject {
         isStreaming = true
         recordingStartTime = startTime
         beginTranscriptSession(startedAt: startTime)
-        playNotificationSound()
         logger.info("Streaming started")
 
         let userSpeakerToggle = MicrophoneService.shared.speakerCaptureEnabled
-        let classification = resolveCurrentClassification(askIfNeeded: userSpeakerToggle)
+        let classification = resolveCurrentClassification(askIfNeeded: false)
         sessionClassification = classification
 
         let speakerEnabled = Self.effectiveSpeakerCaptureEnabled(
@@ -1202,11 +1126,12 @@ class StreamingAudioService: ObservableObject {
         }
 
         let ringBufferRef = self.ringBuffer
+        let microphoneSourceRef = self.microphoneSource
         let shouldStopRef = self.shouldStopFeeding
         let speakerActiveRef = self.speakerCaptureActiveLock
         let captureStateRef = self.captureState
-        let sampleRate = self.nativeSampleRate
-        feedTask = Task.detached {
+        feedTask = Task.detached { [weak self] in
+            var reportedDrops = 0
             var feedState = StreamingFeedState(archive: archive)
             var consecutiveEmptyDrains = 0
             var feedIterationCount = 0
@@ -1217,12 +1142,28 @@ class StreamingAudioService: ObservableObject {
                 shouldStop: shouldStopRef.withLock({ $0 })
             ) {
                 feedIterationCount += 1
-                let micSamples = ringBufferRef.withLock { buffer -> [Float] in
-                    guard !buffer.isEmpty else { return [] }
-                    let drained = buffer
-                    buffer.removeAll(keepingCapacity: true)
-                    return drained
+                let microphone = microphoneSourceRef.withLock { source in
+                    let retained = ringBufferRef.withLock { buffer -> [Float] in
+                        let drained = buffer
+                        buffer.removeAll(keepingCapacity: true)
+                        return drained
+                    }
+                    return (
+                        retained + (source.buffer?.drain() ?? []), source.sampleRate,
+                        source.pendingDrops + (source.buffer?.droppedSampleCount ?? 0)
+                    )
                 }
+                if microphone.2 > reportedDrops {
+                    reportedDrops = microphone.2
+                    logger.error("Microphone capture overflow: dropped_samples=\(reportedDrops, privacy: .public)")
+                    Task { @MainActor [weak self] in
+                        guard let self, self.currentRecordingID == recordingID else { return }
+                        self.hasTranscriptionGaps = true
+                        ErrorToastManager.shared.show("Some microphone audio was lost while recording was delayed.")
+                    }
+                }
+                let sampleRate = microphone.1
+                let micSamples = microphone.0
 
                 // Read routing flag fresh each iteration so popover chip flips on the
                 // current device (and outputDeviceDidChange transitions) take effect
@@ -1290,7 +1231,7 @@ class StreamingAudioService: ObservableObject {
             }
             return feedState
         }
-        scheduleTapHealthCheck()
+        scheduleInputHealthCheck()
         startRMSTimer()
     }
 
@@ -1308,6 +1249,7 @@ class StreamingAudioService: ObservableObject {
     }
 
     func stopStreaming() async -> StreamingStopResult? {
+        let stoppedAt = Date()
         PipelineTrace.shared.log("STREAM", "stopStreaming() called")
         if !isStreaming {
             abortPendingStart()
@@ -1323,8 +1265,13 @@ class StreamingAudioService: ObservableObject {
             releaseEngineIfIdle()
         }
 
+        captureIsRequested = false
+        captureStartGate.cancelInFlight()
+        captureRequestGeneration = nil
+        microphoneInput?.pause()
+        isCaptureReady = false
         stopRMSTimer()
-        cancelTapHealthCheck()
+        cancelInputHealthCheck()
         shouldStopFeeding.withLock { $0 = true }
         let completedFeedState: StreamingFeedState?
         if let feedTask {
@@ -1339,6 +1286,11 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
         audioMixer?.stopTrace()
+        if microphoneSource.withLock({ $0.pendingDrops + ($0.buffer?.droppedSampleCount ?? 0) }) > 0 {
+            hasTranscriptionGaps = true
+            logger.error("Microphone capture lost samples before final drain")
+            ErrorToastManager.shared.show("Some microphone audio was lost while recording was delayed.")
+        }
         PipelineTrace.shared.log("STREAM", "feed loop stopped")
 
         let remainingSystemSamples: [Float]
@@ -1353,7 +1305,7 @@ class StreamingAudioService: ObservableObject {
             let drained = buffer
             buffer.removeAll()
             return drained
-        }
+        } + drainMicrophoneSamples()
 
         if let mixer = audioMixer {
             let remaining16k = Self.makeFinalMixedSamples(
@@ -1407,7 +1359,7 @@ class StreamingAudioService: ObservableObject {
             return nil
         }
 
-        let elapsed = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        let elapsed = recordingStartTime.map { stoppedAt.timeIntervalSince($0) } ?? 0
         if recordingStartTime != nil, elapsed < 1.0 {
             logger.info("Recording too short (\(String(format: "%.1f", elapsed), privacy: .public)s), discarding")
             if let url = finalURL {
@@ -1469,9 +1421,14 @@ class StreamingAudioService: ObservableObject {
             releaseEngineIfIdle()
         }
 
+        captureIsRequested = false
+        captureStartGate.cancelInFlight()
+        captureRequestGeneration = nil
+        microphoneInput?.pause()
+        isCaptureReady = false
         stopRMSTimer()
-        cancelTapHealthCheck()
-        tapRecoveryAttempts = 0
+        cancelInputHealthCheck()
+        inputRecoveryAttempts = 0
         shouldStopFeeding.withLock { $0 = true }
         feedTask?.cancel()
         let completedFeedState: StreamingFeedState?
@@ -1730,6 +1687,7 @@ class StreamingAudioService: ObservableObject {
 
     private func clearState() {
         hasTranscriptionGaps = false
+        microphoneSource.withLock { $0.pendingDrops = 0 }
         hasReportedUnavailableEncoder = false
         confirmedText = ""
         provisionalText = ""
@@ -1737,7 +1695,6 @@ class StreamingAudioService: ObservableObject {
         recordingStartTime = nil
         currentRecordingID = nil
         currentRecordingFileName = nil
-        resetTapHealth()
         resetCaptureHealth()
     }
 
@@ -1774,11 +1731,11 @@ class StreamingAudioService: ObservableObject {
     }
 
     var ringBufferSampleCount: Int {
-        ringBuffer.withLock { $0.count }
+        ringBuffer.withLock { $0.count } + microphoneSource.withLock { $0.buffer?.sampleCount ?? 0 }
     }
 
     var isAudioEngineInitialized: Bool {
-        audioEngine != nil
+        microphoneInput != nil
     }
 
     func clearRingBuffer() {

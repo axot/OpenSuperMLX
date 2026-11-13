@@ -99,6 +99,21 @@ class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
+        streamingService.$isCaptureReady
+            .removeDuplicates()
+            .sink { [weak self] ready in
+                guard let self, self.isStreamingMode, self.state.isCapturing else { return }
+                self.state = self.state.afterCaptureReadiness(ready)
+                if ready {
+                    self.startBlinking()
+                    self.startDurationTimerIfNeeded()
+                } else {
+                    self.stopBlinking()
+                    self.stopDurationTimer()
+                }
+            }
+            .store(in: &cancellables)
+
         streamingService.$confirmedText
             .receive(on: RunLoop.main)
             .sink { [weak self] text in
@@ -304,11 +319,11 @@ class ContentViewModel: ObservableObject {
         liveTranscriptSnapshot = LiveTranscriptSnapshot()
         if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
-            state = .recording
-            startBlinking()
-            recordingStartTime = Date()
+            state = .connecting
+            stopBlinking()
+            recordingStartTime = nil
             recordingDuration = 0
-            startDurationTimerIfNeeded()
+            stopDurationTimer()
 
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }

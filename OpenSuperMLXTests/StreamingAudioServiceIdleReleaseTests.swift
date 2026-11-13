@@ -23,8 +23,8 @@ final class StreamingAudioServiceIdleReleaseTests: XCTestCase {
         ))
     }
 
-    func testOpenPopoverKeepsEngineForMetering() {
-        XCTAssertFalse(StreamingAudioService.shouldReleaseEngine(
+    func testOpenPopoverDoesNotKeepIdleMicrophoneRunning() {
+        XCTAssertTrue(StreamingAudioService.shouldReleaseEngine(
             isStreaming: false, hasPendingStart: false, popoverWantsMetering: true
         ))
     }
