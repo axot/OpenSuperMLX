@@ -30,6 +30,12 @@ final class Qwen3ASRFeatureLengthTests: XCTestCase {
 final class Qwen3ASRPrefillTests: XCTestCase {
     private var model: Qwen3ASRModel!
 
+    // GPU float32 matmuls differ by up to ~3e-3 between row shapes on newer chips (M5);
+    // the CPU keeps both paths within 1e-6, so the exact-match tolerance stays meaningful.
+    override func invokeTest() {
+        Device.withDefaultDevice(.cpu) { super.invokeTest() }
+    }
+
     override func setUp() {
         super.setUp()
         model = TinyQwen3ASR.make(seed: 7)

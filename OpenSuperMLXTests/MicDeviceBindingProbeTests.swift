@@ -54,14 +54,28 @@ final class MicDeviceBindingProbeTests: XCTestCase {
         return deviceID
     }
 
+    /// Virtual devices (loopback drivers, conferencing apps) accept the bind and start, then
+    /// stop running moments later, so only hardware inputs can exercise the binding.
+    private func isVirtualOrAggregate(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &transport) == noErr else { return true }
+        return transport == kAudioDeviceTransportTypeVirtual || transport == kAudioDeviceTransportTypeAggregate
+    }
+
     private func requireSecondInputDevice() throws -> AudioDeviceID {
         let inputs = inputDeviceIDs()
         guard inputs.count >= 2 else {
             throw XCTSkip("Requires at least two input devices to exercise a non-default binding")
         }
         guard let defaultID = defaultInputDeviceID(),
-              let other = inputs.first(where: { $0 != defaultID }) else {
-            throw XCTSkip("No non-default input device available")
+              let other = inputs.first(where: { $0 != defaultID && !isVirtualOrAggregate($0) }) else {
+            throw XCTSkip("No non-default hardware input device available")
         }
         return other
     }
