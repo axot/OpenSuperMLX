@@ -25,7 +25,8 @@ Activity Monitor's "Memory" column on Apple Silicon **double-counts** GPU memory
 | KV cache (decoder) | ~100-200 MB | GPU, bounded by sliding window + prefix cap |
 | Decoder prefill transient | ~1.2 MB per row, ≤ ~350 MB per 256-row pass | GPU, freed after each prefill pass |
 | Encoder transient (per window) | ~95 MB | GPU, freed after each encoder forward pass |
-| Audio samples (`[Float]`) | ~5 MB/min | CPU, proportional to input duration |
+| File-transcription audio samples (`[Float]`) | ~5 MB/min | CPU, proportional to input duration |
+| Live microphone capture ring | ~5.5 MiB per prepared input | CPU, fixed capacity; retained while paused |
 | Mel spectrogram tail | <0.4 MB | GPU, truncated each reset cycle |
 | Metal driver overhead | ~300 MB | Kernel, unavoidable framework cost |
 | Swift runtime + dylibs | ~200 MB | CPU |
@@ -98,6 +99,24 @@ If you see any of these in profiling, there is a memory regression:
 - `Memory.peakMemory` increasing across reset cycles
 - `Memory.cacheMemory` growing beyond ~200 MB between resets
 - `accumulatedMelFrameCount` exceeding `2 × resetIntervalChunks × chunkSizeMelFrames` (~18,000 frames)
+
+## Live Microphone Capture Buffer
+
+`MicrophoneCaptureBuffer` preallocates 1,440,000 mono Float32 samples per prepared
+input: 5,760,000 bytes (about 5.5 MiB), independent of recording duration. That is
+30 seconds at 48 kHz; the time capacity changes with the native sample rate.
+Paused inputs retain this allocation while hardware I/O is off.
+
+The audio callback writes into this bounded ring without array allocation or a
+blocking lock. The feed loop allocates drained arrays outside the callback.
+Overflow drops new samples, preserves accepted audio, and marks a transcription
+gap. Replacements can briefly retain the old input for three seconds and allocate
+tail/resampling copies during handoff.
+
+This startup/handoff ring is separate from the duration-proportional Int16 save
+recovery buffer below. A new capture resets the native ring only with I/O paused;
+cancelled tails and carried overflow counts are discarded before the next request.
+See [audio startup diagnostics](audio-diagnostics.md#startup-and-idle-input).
 
 ## Recording Save Recovery Buffer
 

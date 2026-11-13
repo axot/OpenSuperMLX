@@ -48,6 +48,7 @@
 **Dictation**
 - Tap the shortcut to start and stop, or hold it to record only while it's pressed. Press <kbd>Escape</kbd> to cancel.
 - Live streaming transcription.
+- The microphone is off between recordings; no idle audio is collected.
 - Switch between built-in, USB, Bluetooth, and Continuity microphones.
 - Optional system-audio capture with headphones. On speakers it records the microphone only, to avoid echo.
 

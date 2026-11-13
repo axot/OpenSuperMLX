@@ -102,3 +102,42 @@ final class IndicatorWindowManagerTests: XCTestCase {
         await body(application, mainWindow, panel)
     }
 }
+
+@MainActor
+final class IndicatorWindowManagerActivityTests: XCTestCase {
+    func testReleasedWindowClearsActivityWhenNoNewWindowTakesOver() {
+        let activity = RecordingActivity()
+        var visibility: [Bool] = []
+        let manager = IndicatorWindowManager(recordingActivity: activity) { visibility.append($0) }
+        activity.report(manager, isActive: true)
+
+        manager.releasePreviousViewModel()
+
+        XCTAssertFalse(activity.isActive)
+        XCTAssertEqual(visibility, [false])
+    }
+
+    func testReleasedWindowDoesNotClearPendingCaptureActivity() {
+        let activity = RecordingActivity()
+        let pendingCapture = NSObject()
+        let manager = IndicatorWindowManager(recordingActivity: activity) { _ in }
+        activity.report(manager, isActive: true)
+        activity.report(pendingCapture, isActive: true)
+
+        manager.releasePreviousViewModel()
+        activity.report(pendingCapture, isActive: false)
+
+        XCTAssertFalse(activity.isActive)
+    }
+
+    func testRepeatedReleaseIsSafeWithoutAWindowOrViewModel() {
+        let activity = RecordingActivity()
+        let manager = IndicatorWindowManager(recordingActivity: activity) { _ in }
+
+        manager.releasePreviousViewModel()
+        manager.releasePreviousViewModel()
+
+        XCTAssertNil(manager.viewModel)
+        XCTAssertFalse(activity.isActive)
+    }
+}

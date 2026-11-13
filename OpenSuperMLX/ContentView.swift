@@ -53,10 +53,11 @@ class ContentViewModel: ObservableObject {
     private let pageSize = 100
     private var currentSearchQuery = ""
     private var blinkTimer: Timer?
-    private var recordingStartTime: Date?
+    private var recordingClock = RecordingClock()
     private var durationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var startStreamingTask: Task<Void, Never>?
+    private var startStreamingEpoch = 0
 
     // MARK: - Init
 
@@ -99,6 +100,21 @@ class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
+        streamingService.$isCaptureReady
+            .removeDuplicates()
+            .sink { [weak self] ready in
+                guard let self, self.isStreamingMode, self.state.isCapturing else { return }
+                self.state = self.state.afterCaptureReadiness(ready)
+                if ready {
+                    self.startBlinking()
+                    self.startDurationTimerIfNeeded()
+                } else {
+                    self.stopBlinking()
+                    self.stopDurationTimer(resetClock: false)
+                }
+            }
+            .store(in: &cancellables)
+
         streamingService.$confirmedText
             .receive(on: RunLoop.main)
             .sink { [weak self] text in
@@ -168,7 +184,7 @@ class ContentViewModel: ObservableObject {
         if state == .recording {
             startDurationTimerIfNeeded()
         } else {
-            stopDurationTimer()
+            stopDurationTimer(resetClock: state != .connecting)
         }
     }
     
@@ -304,21 +320,24 @@ class ContentViewModel: ObservableObject {
         liveTranscriptSnapshot = LiveTranscriptSnapshot()
         if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
-            state = .recording
-            startBlinking()
-            recordingStartTime = Date()
+            state = .connecting
+            stopBlinking()
             recordingDuration = 0
-            startDurationTimerIfNeeded()
+            stopDurationTimer()
 
+            startStreamingEpoch += 1
+            let epoch = startStreamingEpoch
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
                 } catch {
-                    guard StreamingAudioError.shouldReportStartFailure(error) else { return }
-                    self.logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    ErrorToastManager.shared.show(error.localizedDescription)
-                    self.state = .idle
+                    guard let state = self.state.afterStartFailure(isCurrent: self.startStreamingEpoch == epoch) else { return }
+                    if StreamingAudioError.shouldReportStartFailure(error) {
+                        self.logger.error("Failed to start streaming: \(error, privacy: .public)")
+                        ErrorToastManager.shared.show(error.localizedDescription)
+                    }
+                    self.state = state
                     self.isStreamingMode = false
                     self.stopBlinking()
                     self.stopDurationTimer()
@@ -336,7 +355,7 @@ class ContentViewModel: ObservableObject {
             } else {
                 state = .recording
                 startBlinking()
-                recordingStartTime = Date()
+                recordingClock.start()
                 recordingDuration = 0
                 startDurationTimerIfNeeded()
             }
@@ -465,6 +484,7 @@ class ContentViewModel: ObservableObject {
     }
 
     func cancelRecording() {
+        startStreamingEpoch += 1
         startStreamingTask?.cancel()
         startStreamingTask = nil
         streamingService.abortPendingStart()
@@ -488,24 +508,24 @@ class ContentViewModel: ObservableObject {
 
     // MARK: - Private Helpers
 
-    private func stopDurationTimer() {
+    private func stopDurationTimer(resetClock: Bool = true) {
         durationTimer?.invalidate()
         durationTimer = nil
-        recordingStartTime = nil
+        recordingClock.stop(reset: resetClock)
     }
     
     private func startDurationTimerIfNeeded() {
         guard durationTimer == nil else { return }
-        if recordingStartTime == nil {
-            recordingStartTime = Date()
+        if recordingClock.startedAt == nil {
+            recordingClock.start()
             recordingDuration = 0
         }
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let now = Date()
             Task { @MainActor in
-                if let recordingStartTime = self.recordingStartTime {
-                    self.recordingDuration = now.timeIntervalSince(recordingStartTime)
+                if self.recordingClock.startedAt != nil {
+                    self.recordingDuration = self.recordingClock.elapsed(at: now)
                 }
             }
         }

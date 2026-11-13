@@ -94,10 +94,14 @@ class TranscriptionService: ObservableObject {
             
             do {
                 try await engine.initialize()
-                await MainActor.run {
-                    guard generation == self.loadGeneration else { return }
+                let isCurrent = await MainActor.run {
+                    guard generation == self.loadGeneration else { return false }
                     self.currentEngine = engine
                     logger.info("MLX engine loaded successfully")
+                    return true
+                }
+                if isCurrent && localModel.supportsStreaming {
+                    await StreamingAudioService.shared.warmUp()
                 }
             } catch {
                 await MainActor.run {

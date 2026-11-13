@@ -25,7 +25,7 @@ struct EngineInitObservation: Equatable {
     var cancelled: Bool = false
 }
 
-enum EngineInitFailure: Equatable {
+enum EngineInitFailure: Error, Equatable {
     case deviceUnresolvable
     case bindFailed(OSStatus)
     case engineStartFailed(String)
@@ -72,12 +72,12 @@ enum EngineInitTransaction {
     /// Decide the outcome of one engine-init attempt from its post-start observation.
     /// `.abandon` (not a failure) is for superseded/cancelled attempts: their state may
     /// be broken through no fault of the current request, so they must stay silent.
-    static func evaluate(_ observation: EngineInitObservation) -> EngineInitVerdict {
+    static func evaluate(_ observation: EngineInitObservation, requireRunning: Bool = true) -> EngineInitVerdict {
         guard !observation.cancelled else { return .abandon }
         if let status = observation.bindFailedStatus {
             return .failExplicit(.bindFailed(status))
         }
-        guard observation.engineRunning else {
+        guard !requireRunning || observation.engineRunning else {
             return .failExplicit(.engineStartFailed(observation.startErrorDescription ?? "unknown error"))
         }
         guard let target = observation.targetDeviceID else {

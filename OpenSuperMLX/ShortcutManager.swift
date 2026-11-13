@@ -16,6 +16,13 @@ class ShortcutManager {
     static let shared = ShortcutManager()
 
     private var activeVm: IndicatorViewModel?
+    private var captureStartPending = false {
+        didSet {
+            RecordingActivity.shared.report(self, isActive: captureStartPending)
+            refreshEscapeShortcut()
+        }
+    }
+    private var captureStartEpoch = 0
     private var holdWorkItem: DispatchWorkItem?
     private let holdThreshold: TimeInterval = 0.3
     private var holdMode = false
@@ -81,6 +88,11 @@ class ShortcutManager {
 
         KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
             Task { @MainActor in
+                if self?.captureStartPending == true {
+                    self?.captureStartEpoch += 1
+                    self?.captureStartPending = false
+                    StreamingAudioService.shared.abortPendingStart()
+                }
                 if self?.activeVm != nil {
                     IndicatorWindowManager.shared.stopForce()
                     self?.activeVm = nil
@@ -166,7 +178,9 @@ class ShortcutManager {
 
     @MainActor private func refreshEscapeShortcut() {
         escapeState.applicationActive = NSApp.isActive
-        if escapeState.shouldRegisterGlobalEscape {
+        var state = escapeState
+        state.indicatorVisible = state.indicatorVisible || captureStartPending
+        if state.shouldRegisterGlobalEscape {
             KeyboardShortcuts.enable(.escape)
         } else {
             KeyboardShortcuts.disable(.escape)
@@ -174,22 +188,60 @@ class ShortcutManager {
     }
     
     private func handleKeyDown(forceLLM: Bool = false) {
+        let requestedAt = DispatchTime.now().uptimeNanoseconds
         holdWorkItem?.cancel()
         holdMode = false
         
         Task { @MainActor in
             if self.activeVm == nil {
-                let cursorPosition = FocusUtils.getCurrentCursorPosition()
-                let indicatorPoint: NSPoint?
-                if let caret = FocusUtils.getCaretRect() {
-                    indicatorPoint = FocusUtils.convertAXPointToCocoa(caret.origin)
-                } else {
-                    indicatorPoint = cursorPosition
+                if self.captureStartPending {
+                    self.captureStartEpoch += 1
+                    self.captureStartPending = false
+                    StreamingAudioService.shared.abortPendingStart()
+                    return
                 }
-                let vm = IndicatorWindowManager.shared.show(nearPoint: indicatorPoint)
+                self.captureStartEpoch += 1
+                let epoch = self.captureStartEpoch
+                self.captureStartPending = true
+                defer {
+                    if self.captureStartEpoch == epoch { self.captureStartPending = false }
+                }
+                IndicatorWindowManager.shared.releasePreviousViewModel()
+                let vm = IndicatorViewModel()
+                var openedCaptureGeneration: Int?
+                if vm.canStartRecording && TranscriptionService.shared.usesStreamingTranscription {
+                    do {
+                        openedCaptureGeneration = try await StreamingAudioService.shared.beginMicrophoneCapture(requestedAt: requestedAt)
+                    } catch {
+                        if self.captureStartEpoch == epoch {
+                            if StreamingAudioError.shouldReportStartFailure(error) {
+                                ErrorToastManager.shared.show(error.localizedDescription)
+                            }
+                        }
+                        vm.cleanup()
+                        return
+                    }
+                }
+                guard self.captureStartEpoch == epoch else {
+                    vm.cleanup()
+                    return
+                }
+                let cursorPosition = FocusUtils.getCurrentCursorPosition()
+                _ = IndicatorWindowManager.shared.show(nearPoint: cursorPosition, viewModel: vm)
                 if forceLLM { vm.forceLLMCorrection = true }
-                vm.startRecording()
+                if !vm.startRecording(), let openedCaptureGeneration {
+                    StreamingAudioService.shared.abortUnclaimedCapture(generation: openedCaptureGeneration)
+                }
                 self.activeVm = vm
+                Task.detached(priority: .userInitiated) { [weak self, weak vm] in
+                    guard let caret = FocusUtils.getCaretRect() else { return }
+                    await MainActor.run {
+                        guard let self, let vm, self.activeVm === vm else { return }
+                        IndicatorWindowManager.shared.move(
+                            nearPoint: FocusUtils.convertAXPointToCocoa(caret.origin)
+                        )
+                    }
+                }
             } else if !self.holdMode {
                 IndicatorWindowManager.shared.stopRecording()
             }
@@ -210,6 +262,11 @@ class ShortcutManager {
         
         Task { @MainActor in
             if self.holdMode {
+                if self.captureStartPending {
+                    self.captureStartEpoch += 1
+                    self.captureStartPending = false
+                    StreamingAudioService.shared.abortPendingStart()
+                }
                 IndicatorWindowManager.shared.stopRecording()
                 self.holdMode = false
             }
