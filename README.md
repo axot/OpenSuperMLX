@@ -59,7 +59,7 @@
 - Optional LLM correction through AWS Bedrock or any OpenAI-compatible API. Long transcripts are split to fit the model's limits.
 - Cleanup presets: choose Raw, Clean, or any preset from **Presets** in the dropdown on the recording pill. The choice is remembered, and Raw turns LLM correction off.
 - Presets also rewrite selected text in any app: give a preset a shortcut in **Presets**, select text, and press it.
-- Voice commands: select text, press <kbd>F17</kbd>, say what to do ("translate this to Farsi", "make it more formal"), and press <kbd>F17</kbd> again. The selection is replaced. With nothing selected, the instruction writes new text at the cursor.
+- Voice commands: select text, press <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd>, say what to do ("translate this to Farsi", "make it more formal"), and press <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd> again. The selection is replaced. With nothing selected, the instruction writes new text at the cursor.
 
 **History and stats**
 - Searchable transcript history. Regenerate any transcript from its audio.
@@ -127,7 +127,7 @@ Folders with other model types are listed as unsupported.
 |---|---|
 | Tap <kbd>⌥</kbd> + <kbd>&#96;</kbd> | Start or stop recording |
 | Hold <kbd>⌥</kbd> + <kbd>&#96;</kbd> | Record only while held |
-| Tap <kbd>F17</kbd> | Start or stop a voice command on the selected text |
+| Tap <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd> | Start or stop a voice command on the selected text |
 | <kbd>Escape</kbd> | Cancel the active recording |
 
 Change them in **Settings → Shortcuts**.

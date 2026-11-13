@@ -169,6 +169,17 @@ final class PromptPresetStoreMigrationTests: XCTestCase {
         XCTAssertEqual(store.presets.count, 1)
     }
 
+    func testPromptLongerThanThePresetLimitIsKeptWhole() {
+        let long = String(repeating: "Keep every word. ", count: 1_000).trimmingCharacters(in: .whitespaces)
+        XCTAssertGreaterThan(long.count, PromptPresetValidation.maxInstructionLength)
+        defaults.set(true, forKey: "useCustomCorrectionPrompt")
+        defaults.set(long, forKey: "customCorrectionPrompt")
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        XCTAssertEqual(store.presets.first?.instruction, long)
+    }
+
     func testInactiveOrDefaultPromptIsDroppedWithoutAPreset() {
         defaults.set(false, forKey: "useCustomCorrectionPrompt")
         defaults.set("Unused draft.", forKey: "customCorrectionPrompt")

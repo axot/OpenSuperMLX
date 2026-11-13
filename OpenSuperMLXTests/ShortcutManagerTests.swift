@@ -91,6 +91,12 @@ final class BuiltInShortcutConflictTests: XCTestCase {
         XCTAssertNil(ShortcutManager.builtInShortcutOwner(of: KeyboardShortcuts.Shortcut(.f16), excluding: nil) { assigned[$0] })
     }
 
+    func testVoiceCommandDefaultYieldsToAnExistingBinding() {
+        XCTAssertTrue(ShortcutManager.shortcutCollides(f17, with: [f19, f17]))
+        XCTAssertFalse(ShortcutManager.shortcutCollides(f17, with: [f19, nil]))
+        XCTAssertFalse(ShortcutManager.shortcutCollides(nil, with: [nil]), "A cleared shortcut collides with nothing")
+    }
+
     func testPresetShortcutCannotTakeABuiltIn() {
         let assigned: [KeyboardShortcuts.Name: KeyboardShortcuts.Shortcut] = [.toggleRecord: f19, .voiceCommand: f17]
 

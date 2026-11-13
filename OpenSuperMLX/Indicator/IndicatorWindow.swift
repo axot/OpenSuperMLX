@@ -294,7 +294,7 @@ class IndicatorViewModel: ObservableObject {
     
     var commandLabel: String? {
         guard isCommandMode else { return nil }
-        return commandSelection == nil ? "New text" : "Edit selection"
+        return commandSelection?.isEmpty != false ? "New text" : "Edit selection"
     }
 
     func prepareCommand(selection: PromptPresetService.Selection?) {

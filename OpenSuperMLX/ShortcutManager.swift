@@ -3,11 +3,14 @@ import ApplicationServices
 import Cocoa
 import Foundation
 import KeyboardShortcuts
+import os.log
 import SwiftUI
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "ShortcutManager")
 
 extension KeyboardShortcuts.Name {
     static let toggleRecord = Self("toggleRecord", initial: .init(.backtick, modifiers: .option))
-    static let voiceCommand = Self("voiceCommand", initial: .init(.f17))
+    static let voiceCommand = Self("voiceCommand", initial: .init(.backtick, modifiers: [.option, .shift]))
     static let escape = Self("escape", initial: .init(.escape))
 }
 
@@ -49,6 +52,7 @@ class ShortcutManager {
         setupKeyboardShortcuts()
         setupEscapeOwnership()
         setupPresetShortcuts()
+        releaseVoiceCommandIfTaken()
         
         NotificationCenter.default.addObserver(
             self,
@@ -125,6 +129,16 @@ class ShortcutManager {
         registeredPresetIDs = currentIDs
     }
 
+    /// The voice command's default can match a key the user already gave to recording or
+    /// a preset before the command existed. Those bindings were chosen; the default yields.
+    private func releaseVoiceCommandIfTaken() {
+        let others = [KeyboardShortcuts.getShortcut(for: .toggleRecord)]
+            + PromptPresetStore.shared.presets.map { KeyboardShortcuts.getShortcut(for: $0.shortcutName) }
+        guard Self.shortcutCollides(KeyboardShortcuts.getShortcut(for: .voiceCommand), with: others) else { return }
+        KeyboardShortcuts.setShortcut(nil, for: .voiceCommand)
+        logger.info("Cleared the voice command shortcut; its key is already bound")
+    }
+
     private func runPreset(id: UUID) {
         guard let preset = PromptPresetStore.shared.presets.first(where: { $0.id == id }) else { return }
         Task {
@@ -188,7 +202,9 @@ class ShortcutManager {
                 var commandSelection: PromptPresetService.Selection?
                 if command {
                     _ = self.commandCapture.begin()
-                    let capture = await PromptPresetService.shared.captureCommandSelection()
+                    let capture = await PromptPresetService.shared.captureCommandSelection(
+                        shortcutModifiers: KeyboardShortcuts.getShortcut(for: .voiceCommand)?.modifiers ?? []
+                    )
                     guard self.commandCapture.finish() else { return }
                     switch capture {
                     case .success(let selection):
@@ -251,6 +267,14 @@ extension ShortcutManager {
             (.voiceCommand, "Voice command on selection"),
         ]
         return builtIns.first { name, _ in name != excluded && shortcutFor(name) == shortcut }?.1
+    }
+
+    nonisolated static func shortcutCollides(
+        _ shortcut: KeyboardShortcuts.Shortcut?,
+        with others: [KeyboardShortcuts.Shortcut?]
+    ) -> Bool {
+        guard let shortcut else { return false }
+        return others.contains(shortcut)
     }
 }
 

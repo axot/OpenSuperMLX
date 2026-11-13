@@ -103,9 +103,10 @@ final class PromptPresetStore: ObservableObject {
             defaults.removeObject(forKey: key)
         }
 
-        let instruction = String((custom ?? legacy ?? "").prefix(PromptPresetValidation.maxInstructionLength))
-        guard PromptPresetValidation.errorMessage(name: Self.migratedPromptName, instruction: instruction) == nil else { return }
-        let normalized = PromptPresetValidation.normalized(name: Self.migratedPromptName, instruction: instruction)
+        // The old prompt had no length limit. It is kept whole even past the preset limit,
+        // which applies only when the preset is next edited.
+        let normalized = PromptPresetValidation.normalized(name: Self.migratedPromptName, instruction: custom ?? legacy ?? "")
+        guard !normalized.instruction.isEmpty else { return }
         let preset = PromptPreset(name: normalized.name, instruction: normalized.instruction)
         presets.append(preset)
         save()

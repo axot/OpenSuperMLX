@@ -123,6 +123,17 @@ final class PromptPresetServiceTests: XCTestCase {
         XCTAssertNil(provider.receivedText)
     }
 
+    func testRewriteIdenticalToSelectionIsNotWritten() async {
+        let provider = StubLLMProvider(result: .success("Already fine."))
+        let recorder = ReplacementRecorder()
+        let service = makeService(provider: provider, text: "Already fine. ", recorder: recorder)
+
+        let outcome = await service.apply(PromptPreset(name: "Polish", instruction: "Fix grammar."))
+
+        XCTAssertEqual(outcome, .unchanged, "An identical write can collapse the selection and trigger a duplicate paste")
+        XCTAssertNil(recorder.text)
+        XCTAssertNotNil(outcome.toastMessage)
+    }
 
     // MARK: - Helpers
 
@@ -187,13 +198,41 @@ final class PromptPresetCommandTests: XCTestCase {
         let recorder = ReplacementRecorder()
         var inserted: String?
         let service = makeService(provider: provider, recorder: recorder, insertText: { inserted = $0 })
+        let empty = PromptPresetService.Selection(text: "", target: .init(processID: 42))
 
-        let outcome = await service.applyInstruction("write a polite decline", to: nil)
+        let outcome = await service.applyInstruction("write a polite decline", to: empty)
 
         XCTAssertEqual(outcome, .applied)
         XCTAssertEqual(inserted, "Thanks, but I can't make it.")
         XCTAssertNil(recorder.text)
         XCTAssertTrue(provider.receivedText?.contains("No text is selected") == true)
+    }
+
+    func testNewTextIsCopiedWhenFocusMovesToAnotherApp() async {
+        let provider = StubLLMProvider(result: .success("Thanks, but I can't make it."))
+        var focus = PromptPresetService.Target(processID: 42)
+        var inserted: String?
+        var copied: String?
+        let service = PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in nil },
+            readTarget: { _ in nil },
+            replaceSelection: { _, _ in .applied },
+            readFocus: { focus },
+            copyText: { copied = $0 },
+            insertText: { inserted = $0 },
+            isAccessibilityGranted: { true }
+        )
+
+        guard case .success(let empty) = await service.captureCommandSelection(shortcutModifiers: []) else {
+            XCTFail("Expected success"); return
+        }
+        focus.processID = 7
+        let outcome = await service.applyInstruction("write a polite decline", to: empty)
+
+        XCTAssertEqual(outcome, .copiedAfterTargetChanged)
+        XCTAssertNil(inserted)
+        XCTAssertEqual(copied, "Thanks, but I can't make it.")
     }
 
     func testCancelledCommandWritesNothing() async {
@@ -227,7 +266,7 @@ final class PromptPresetCommandTests: XCTestCase {
     func testCommandSelectionCaptureRequiresAccessibility() async {
         let service = makeService(provider: StubLLMProvider(), recorder: ReplacementRecorder(), accessibility: false)
 
-        let capture = await service.captureCommandSelection()
+        let capture = await service.captureCommandSelection(shortcutModifiers: [])
 
         guard case .failure = capture else {
             XCTFail("Expected an accessibility failure"); return
@@ -237,12 +276,19 @@ final class PromptPresetCommandTests: XCTestCase {
     func testCommandSelectionCaptureAllowsEmptySelection() async {
         let service = makeService(provider: StubLLMProvider(), recorder: ReplacementRecorder(), selectedText: nil)
 
-        let capture = await service.captureCommandSelection()
+        let capture = await service.captureCommandSelection(shortcutModifiers: [])
 
         guard case .success(let selection) = capture else {
             XCTFail("Expected success"); return
         }
-        XCTAssertNil(selection)
+        XCTAssertTrue(selection.isEmpty)
+        XCTAssertEqual(selection.target.processID, 42, "New text keeps the focus it started from")
+    }
+
+    func testCommandCopyWaitsWhileShortcutModifiersAreHeld() {
+        XCTAssertTrue(PromptPresetService.canCopyImmediately(holding: []))
+        XCTAssertTrue(PromptPresetService.canCopyImmediately(holding: .command))
+        XCTAssertFalse(PromptPresetService.canCopyImmediately(holding: [.option, .shift]))
     }
 
     // MARK: - Helpers
@@ -261,6 +307,7 @@ final class PromptPresetCommandTests: XCTestCase {
             },
             readTarget: { $0.target },
             replaceSelection: { recorder.record($0, $1) },
+            readFocus: { .init(processID: 42) },
             insertText: insertText,
             isAccessibilityGranted: { accessibility }
         )
@@ -453,6 +500,78 @@ final class PromptPresetServiceGuardTests: XCTestCase {
     }
 }
 
+// MARK: - Write Back
+
+@MainActor
+final class PromptPresetWriteBackTests: XCTestCase {
+    private let original = PromptPresetService.Target(processID: 42, selectedText: "teh cat", value: "teh cat sat")
+    private var selection: PromptPresetService.Selection { .init(text: "teh cat", target: original) }
+    private var ignored: (selectedText: String?, value: String?) { ("teh cat", "teh cat sat") }
+
+    func testWriteThatTakesEffectOnRetryIsNotPasted() async {
+        var reads = 0
+        var pasted: String?
+
+        let outcome = await PromptPresetService.writeBack(
+            selection, text: "The cat",
+            write: { true },
+            reread: { reads += 1; return reads < 2 ? self.ignored : ("The cat", "The cat sat") },
+            currentTarget: { self.original },
+            paste: { pasted = $0 }, copy: { _ in }, pause: {}
+        )
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertNil(pasted)
+    }
+
+    func testIgnoredWritePastesIntoTheUnchangedSelection() async {
+        var pasted: String?
+
+        let outcome = await PromptPresetService.writeBack(
+            selection, text: "The cat",
+            write: { true }, reread: { self.ignored },
+            currentTarget: { self.original },
+            paste: { pasted = $0 }, copy: { _ in }, pause: {}
+        )
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(pasted, "The cat")
+    }
+
+    func testIgnoredWriteIsCopiedWhenTheTargetChangedDuringTheWait() async {
+        var pasted: String?
+        var copied: String?
+        var moved = original
+        moved.processID = 7
+
+        let outcome = await PromptPresetService.writeBack(
+            selection, text: "The cat",
+            write: { true }, reread: { self.ignored },
+            currentTarget: { moved },
+            paste: { pasted = $0 }, copy: { copied = $0 }, pause: {}
+        )
+
+        XCTAssertEqual(outcome, .copiedAfterTargetChanged)
+        XCTAssertNil(pasted)
+        XCTAssertEqual(copied, "The cat")
+    }
+
+    func testCancellationDuringTheWaitPreventsThePaste() async {
+        var pasted: String?
+
+        let outcome = await PromptPresetService.writeBack(
+            selection, text: "The cat",
+            write: { true }, reread: { self.ignored },
+            currentTarget: { self.original },
+            paste: { pasted = $0 }, copy: { _ in XCTFail("A cancelled rewrite must not touch the clipboard") },
+            pause: { throw CancellationError() }
+        )
+
+        XCTAssertEqual(outcome, .ignored)
+        XCTAssertNil(pasted)
+    }
+}
+
 // MARK: - Test Doubles
 
 private final class StubLLMProvider: LLMProvider, @unchecked Sendable {
@@ -522,9 +641,11 @@ private final class ReplacementRecorder {
     private(set) var selection: PromptPresetService.Selection?
     private(set) var text: String?
 
-    func record(_ selection: PromptPresetService.Selection, _ text: String) {
+    @discardableResult
+    func record(_ selection: PromptPresetService.Selection, _ text: String) -> PresetApplyOutcome {
         self.selection = selection
         self.text = text
+        return .applied
     }
 }
 
