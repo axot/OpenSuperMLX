@@ -633,7 +633,7 @@ struct CommandChip: View {
         .frame(height: 24)
         .background(Capsule().fill(Color.purple.opacity(0.55)))
         .fixedSize()
-        .help("Say what to do with the selection, then press the shortcut again")
+        .help("Say what to do with the selection, then click Finish or press the shortcut again")
     }
 }
 
@@ -684,13 +684,30 @@ struct IndicatorWindow: View {
                     )
                 }
                 LiveWaveform(levels: viewModel.levelHistory)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .clipped()
                 if let startedAt = viewModel.recordingStartedAt {
                     TimelineView(.periodic(from: startedAt, by: 1)) { context in
                         Text(IndicatorViewModel.formatElapsed(context.date.timeIntervalSince(startedAt)))
                             .font(.system(size: 13, weight: .semibold).monospacedDigit())
                             .foregroundColor(.white.opacity(0.9))
                     }
+                }
+                if viewModel.isCommandMode {
+                    Button {
+                        viewModel.startDecoding()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(Color.white))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Finish and apply instruction")
+                    .accessibilityLabel("Finish and apply instruction")
+                    .accessibilityIdentifier("finishVoiceCommand")
                 }
             }
             .transition(.opacity)
