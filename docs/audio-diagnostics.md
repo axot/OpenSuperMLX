@@ -5,7 +5,7 @@ Quick reference for diagnosing capture quality, recording storage, and save reco
 ## Pipeline Overview
 
 ```
-Mic → AVAudioEngine tap (native rate) → ringBuffer → drain every ~100ms
+Mic → AVAudioSinkNode (native rate) → bounded capture buffer → drain every ~100ms
                                                          ↓
 Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
                                                          ↓
@@ -20,6 +20,67 @@ Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
 
 **Note on AEC:** VPIO (`setVoiceProcessingEnabled`) was removed. AEC is now handled at the routing layer via `OutputDeviceClassifier`: if the active output device is classified as a speaker AND the user enabled system-audio capture, the routing forces mic-only to avoid the speaker→mic echo path. Headphone outputs allow free mic+sys mixing.
 
+## Startup and Idle Input
+
+The app prepares the selected microphone engine without starting input I/O.
+Recording requests enable capture immediately; accepted audio waits in a bounded
+buffer while archive and transcription setup finish. Samples before the request
+are excluded. The recording indicator and start sound follow actual audio readiness.
+Shortcut capture begins before window placement and caret lookup. Startup cleanup
+belongs to its recording request; a rejected competing start or stale callback
+cannot cancel an adopted capture.
+
+Stopping or cancelling pauses the input hardware while retaining prepared resources.
+The microphone picker does not keep idle input running. Configuration events that
+stop an otherwise unchanged input resume the same engine; device or format changes
+require a prepared replacement.
+The input format is checked again after engine startup against the prepared format.
+During replacement, accepted tail audio stays available for the feed loop or final
+drain, and is resampled when the replacement rate differs. Cancelled audio and
+overflow counts cannot carry into a new recording.
+
+Recovery can rebuild a missing input and makes at most two attempts before pausing
+I/O and showing "Microphone audio stopped. Try recording again." Selecting a
+microphone again can restart monitoring with a fresh retry budget. Reconnecting
+keeps the recording clock's original start time, including for shortcut recordings.
+Releasing an indicator clears its window/activity state; a pending shortcut owns
+activity until the indicator takes over.
+
+The native capture ring holds 1,440,000 Float32 samples per prepared input: about
+5.5 MiB, or 30 seconds at 48 kHz. It drops new samples rather than overwriting
+accepted audio when full, and reports the overflow as a transcription gap.
+See [capture-buffer memory](memory.md#live-microphone-capture-buffer).
+
+`mic probe --iterations 50 --json` measures the prepared capture backend's
+pause-to-first-buffer delivery and rejects trials at or above 100 ms or with
+observed idle input activity. It does not measure the complete hotkey/UI flow or
+cold device preparation. Unified logs include `first_delivery_ms`; the first
+frame's timestamp is distinct from the later callback delivery time.
+See [probe fields and observation window](cli.md#microphone-startup-probe).
+
+### Capture Regression Tests
+
+These tests use synthetic samples and mock engines rather than microphone hardware
+or model loading:
+
+```bash
+xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages \
+  -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
+  -only-testing:OpenSuperMLXTests/MicrophoneCaptureBufferTests \
+  -only-testing:OpenSuperMLXTests/PreparedMicrophoneInputTests \
+  -only-testing:OpenSuperMLXTests/MicrophoneCaptureRecoveryTests \
+  -only-testing:OpenSuperMLXTests/StreamingAudioServiceStartupTests \
+  -only-testing:OpenSuperMLXTests/StreamingAudioServiceHandoffTests \
+  -only-testing:OpenSuperMLXTests/RecordingClockTests \
+  -only-testing:OpenSuperMLXTests/IndicatorWindowTests \
+  -only-testing:OpenSuperMLXTests/IndicatorWindowManagerActivityTests \
+  -only-testing:OpenSuperMLXTests/MicProbeCommandTests
+```
+
+Use the hardware probe separately to verify delivery latency on the selected
+microphone. Mock tests establish lifecycle behavior, not device performance.
+
 ## Enable Pipeline Trace
 
 1. Turn on **Debug Mode** in Settings
@@ -30,6 +91,7 @@ Sys → ScreenCaptureKit (48kHz requested) → accumulatedSamples → drain
 
 ```
 [UI]     ContentView.startRecording()           ← entry point
+[MIC_READY] first_delivery_ms=...               ← actual first-buffer arrival
 [STREAM] streaming started speakerEnabled=true  ← speaker capture on?
 [SCK]    capture started                        ← ScreenCaptureKit active
 [FEED]   mic=4800 sys=4800 out=1600             ← per-cycle: raw counts + output

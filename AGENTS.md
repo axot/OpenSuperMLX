@@ -216,6 +216,10 @@ OpenSuperMLX/                    # Main app target
 ├── RecordingAudioFormat.swift   # Recording codec settings and collision-safe names
 ├── RecordingSaveCoordinator.swift # Atomic install, persistence, Retry/Cancel lifecycle
 ├── StreamingAudioService.swift  # Real-time streaming via AVAudioEngine (singleton)
+├── MicrophoneCaptureBuffer.swift # Bounded native-rate Float32 capture ring
+├── PreparedMicrophoneInput.swift # Prepared input graph, paused I/O, live startup validation
+├── MicrophoneCaptureRecovery.swift # Bounded resume/rebuild retries, stale-result suppression
+├── RecordingClock.swift         # Recording duration across temporary input reconnects
 ├── TranscriptionService.swift   # Transcription orchestration (singleton)
 ├── TranscriptionQueue.swift     # File queue processing (singleton)
 ├── MLXModelManager.swift        # Built-in model (Qwen3-ASR-1.7B-5bit), models-directory discovery + selection
@@ -230,7 +234,7 @@ OpenSuperMLX/                    # Main app target
 ├── CLI/
 │   ├── CLIRoot.swift              # Root ParsableCommand + GlobalOptions + runAsync helper
 │   ├── CLIOutput.swift            # JSON/text output formatting, stdout/stderr separation
-│   ├── CLIError.swift             # 13 enumerated error codes
+│   ├── CLIError.swift             # 14 enumerated error codes
 │   └── Commands/                  # 10 subcommand implementations
 │       ├── TranscribeCommand.swift
 │       ├── StreamSimulateCommand.swift
@@ -239,6 +243,7 @@ OpenSuperMLX/                    # Main app target
 │       ├── RecordingsCommand.swift
 │       ├── QueueCommand.swift
 │       ├── MicCommand.swift
+│       ├── MicProbeCommand.swift  # Native pause/resume latency and idle-I/O checks
 │       ├── ModelCommand.swift
 │       ├── BenchmarkCommand.swift
 │       └── DiagnoseCommand.swift
@@ -434,7 +439,7 @@ GitHub Actions on `master` branch and PRs (`.github/workflows/build.yml`):
 
 1. `./run.sh build` — full build
 2. Unit tests (hostless): `-only-testing:OpenSuperMLXUnitTests`
-3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `StreamingE2ETests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `StreamingAudioServiceGraphTests`, `KeyboardLayoutProviderTests`
+3. Integration tests (hosted): `-only-testing:OpenSuperMLXTests` with skips: `BenchmarkTests`, `StreamingE2ETests`, `JapaneseGarblingRegressionTests`, `MicrophoneInventoryTests`, `StreamingAudioServiceGraphTests`, `MicDeviceBindingProbeTests`, `KeyboardLayoutProviderTests`
 
 The default test plan (`OpenSuperMLX.xctestplan`) passes `--skip-model-load` and skips `BenchmarkTests` + `JapaneseGarblingRegressionTests`. Separate `OpenSuperMLXBenchmarks.xctestplan` exists for benchmark runs.
 

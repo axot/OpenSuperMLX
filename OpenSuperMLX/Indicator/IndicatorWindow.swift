@@ -15,6 +15,20 @@ enum RecordingState: Equatable {
     var isCapturing: Bool { self == .connecting || self == .recording }
     var isProcessing: Bool { self == .decoding || self == .correcting }
     var hasRecordingSession: Bool { isCapturing || isProcessing }
+
+    static func allowsCaptureStart(saveBlocked: Bool, busy: Bool) -> Bool {
+        !saveBlocked && !busy
+    }
+
+    func afterCaptureReadiness(_ isReady: Bool) -> RecordingState {
+        guard isCapturing else { return self }
+        return isReady ? .recording : .connecting
+    }
+
+    func afterStartFailure(isCurrent: Bool) -> RecordingState? {
+        guard isCurrent else { return nil }
+        return isCapturing ? .idle : self
+    }
 }
 
 @MainActor
@@ -54,6 +68,7 @@ class IndicatorViewModel: ObservableObject {
     private var correctionTask: Task<Void, Never>?
     private var decodingTask: Task<Void, Never>?
     private var startStreamingTask: Task<Void, Never>?
+    private var startStreamingEpoch = 0
     private var micDisconnectObserver: NSObjectProtocol?
 
     init(
@@ -70,6 +85,15 @@ class IndicatorViewModel: ObservableObject {
         }
         self.textInserter = textInserter ?? { ClipboardUtil.insertText($0) }
         self.commandRunner = commandRunner ?? { await PromptPresetService.shared.applyInstruction($0, to: $1) }
+
+        streamingService.$isCaptureReady
+            .removeDuplicates()
+            .sink { [weak self] ready in
+                guard let self, self.isStreamingMode, self.state.isCapturing else { return }
+                self.state = self.state.afterCaptureReadiness(ready)
+                if ready { self.startLevelMetering() } else { self.stopLevelMetering() }
+            }
+            .store(in: &cancellables)
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -122,10 +146,17 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    func startRecording() {
+    var canStartRecording: Bool {
+        RecordingState.allowsCaptureStart(
+            saveBlocked: saveCoordinator.blocksNewRecording, busy: isTranscriptionBusy
+        )
+    }
+
+    @discardableResult
+    func startRecording() -> Bool {
         guard !saveCoordinator.blocksNewRecording else {
             recoveryPresenter()
-            return
+            return false
         }
         if AppPreferences.shared.debugMode {
             let traceDir = FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
@@ -135,24 +166,28 @@ class IndicatorViewModel: ObservableObject {
         PipelineTrace.shared.log("UI", "IndicatorWindow.startRecording()")
         if isTranscriptionBusy {
             showBusyMessage()
-            return
+            return false
         }
         dictationCleanup = isCommandMode ? .raw : .current
 
         if transcriptionService.usesStreamingTranscription {
             isStreamingMode = true
-            state = .recording
-            startLevelMetering()
+            state = streamingService.isCaptureReady ? .recording : .connecting
+            if state == .recording { startLevelMetering() } else { stopLevelMetering() }
 
+            startStreamingEpoch += 1
+            let epoch = startStreamingEpoch
             startStreamingTask = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.streamingService.startStreaming()
                 } catch {
-                    guard StreamingAudioError.shouldReportStartFailure(error) else { return }
-                    self.logger.error("Failed to start streaming: \(error, privacy: .public)")
-                    ErrorToastManager.shared.show(error.localizedDescription)
-                    self.state = .idle
+                    guard let state = self.state.afterStartFailure(isCurrent: self.startStreamingEpoch == epoch) else { return }
+                    if StreamingAudioError.shouldReportStartFailure(error) {
+                        self.logger.error("Failed to start streaming: \(error, privacy: .public)")
+                        ErrorToastManager.shared.show(error.localizedDescription)
+                    }
+                    self.state = state
                     self.isStreamingMode = false
                     self.stopLevelMetering()
                 }
@@ -177,13 +212,14 @@ class IndicatorViewModel: ObservableObject {
                 }
             }
         }
+        return true
     }
     
     /// `coolDownOnFinish` is for the mic-disconnect path: the engine holds a dead
     /// device and must be released, but only after the finalize Task drained the ring
     /// buffer — tearing it down before that would drop the recording's tail audio.
     func startDecoding(coolDownOnFinish: Bool = false) {
-        guard state == .recording else {
+        guard state.isCapturing else {
             logger.warning("startDecoding() called but state is \(String(describing: self.state), privacy: .public), ignoring")
             return
         }
@@ -365,6 +401,7 @@ class IndicatorViewModel: ObservableObject {
     // MARK: - Task Cleanup
     
     private func cancelActiveTasks() {
+        startStreamingEpoch += 1
         startStreamingTask?.cancel()
         startStreamingTask = nil
         decodingTask?.cancel()
@@ -424,8 +461,8 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = nil
         cancelActiveTasks()
-        streamingService.abortPendingStart()
         if isStreamingMode {
+            streamingService.abortPendingStart()
             Task { await streamingService.cancelStreaming() }
             isStreamingMode = false
         }

@@ -3,18 +3,19 @@ import XCTest
 
 final class StreamingTapHealthTests: XCTestCase {
     func testFreshTapStateNeedsRecovery() {
-        let health = StreamingTapHealth()
+        let health = MicrophoneCaptureBuffer(capacity: 8)
 
-        XCTAssertTrue(health.needsRecovery)
+        XCTAssertFalse(health.hasReceivedAudio)
     }
 
     func testCallbackClearsRecoveryNeed() {
-        var health = StreamingTapHealth()
-
-        health.recordCallback()
-
-        XCTAssertFalse(health.needsRecovery)
-        XCTAssertEqual(health.callbacks, 1)
+        let health = MicrophoneCaptureBuffer(capacity: 8)
+        health.begin(at: 10)
+        [Float(0)].withUnsafeBufferPointer {
+            health.receive($0, hostTime: 10, sampleRate: 48000, deliveredAt: 20)
+        }
+        XCTAssertTrue(health.hasReceivedAudio)
+        XCTAssertEqual(health.callbackCount, 1)
     }
 
     func testRecordedSamplesMarkSessionCaptureAvailable() {
@@ -28,14 +29,15 @@ final class StreamingTapHealthTests: XCTestCase {
     }
 
     func testTapResetDoesNotEraseSessionCaptureState() {
-        var tapHealth = StreamingTapHealth()
+        let tapHealth = MicrophoneCaptureBuffer(capacity: 8)
         var captureHealth = StreamingCaptureHealth()
 
-        tapHealth.recordCallback()
+        tapHealth.begin(at: 10)
         captureHealth.recordSamplesCaptured(1600)
-        tapHealth = StreamingTapHealth()
+        tapHealth.close()
+        tapHealth.begin(at: 30)
 
-        XCTAssertTrue(tapHealth.needsRecovery)
+        XCTAssertFalse(tapHealth.hasReceivedAudio)
         XCTAssertTrue(captureHealth.hasCapturedSamples)
     }
 

@@ -19,6 +19,13 @@ class ShortcutManager {
     static let shared = ShortcutManager()
 
     private var activeVm: IndicatorViewModel?
+    private var captureStartPending = false {
+        didSet {
+            RecordingActivity.shared.report(self, isActive: captureStartPending)
+            refreshEscapeShortcut()
+        }
+    }
+    private var captureStartEpoch = 0
     private var holdWorkItem: DispatchWorkItem?
     private let holdThreshold: TimeInterval = 0.3
     private var holdMode = false
@@ -86,6 +93,11 @@ class ShortcutManager {
 
         KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
             Task { @MainActor in
+                if self?.captureStartPending == true {
+                    self?.captureStartEpoch += 1
+                    self?.captureStartPending = false
+                    StreamingAudioService.shared.abortPendingStart()
+                }
                 if self?.activeVm != nil {
                     IndicatorWindowManager.shared.stopForce()
                     self?.activeVm = nil
@@ -181,7 +193,9 @@ class ShortcutManager {
 
     @MainActor private func refreshEscapeShortcut() {
         escapeState.applicationActive = NSApp.isActive
-        if escapeState.shouldRegisterGlobalEscape {
+        var state = escapeState
+        state.indicatorVisible = state.indicatorVisible || captureStartPending
+        if state.shouldRegisterGlobalEscape {
             KeyboardShortcuts.enable(.escape)
         } else {
             KeyboardShortcuts.disable(.escape)
@@ -189,6 +203,7 @@ class ShortcutManager {
     }
     
     private func handleKeyDown(command: Bool = false) {
+        let requestedAt = DispatchTime.now().uptimeNanoseconds
         holdWorkItem?.cancel()
         holdMode = false
         
@@ -199,13 +214,25 @@ class ShortcutManager {
                     if command { _ = self.commandCapture.requestStop() }
                     return
                 }
+                if self.captureStartPending {
+                    self.captureStartEpoch += 1
+                    self.captureStartPending = false
+                    StreamingAudioService.shared.abortPendingStart()
+                    return
+                }
+                self.captureStartEpoch += 1
+                let epoch = self.captureStartEpoch
+                self.captureStartPending = true
+                defer {
+                    if self.captureStartEpoch == epoch { self.captureStartPending = false }
+                }
                 var commandSelection: PromptPresetService.Selection?
                 if command {
                     _ = self.commandCapture.begin()
                     let capture = await PromptPresetService.shared.captureCommandSelection(
                         shortcutModifiers: KeyboardShortcuts.getShortcut(for: .voiceCommand)?.modifiers ?? []
                     )
-                    guard self.commandCapture.finish() else { return }
+                    guard self.commandCapture.finish(), self.captureStartEpoch == epoch else { return }
                     switch capture {
                     case .success(let selection):
                         commandSelection = selection
@@ -214,17 +241,42 @@ class ShortcutManager {
                         return
                     }
                 }
-                let cursorPosition = FocusUtils.getCurrentCursorPosition()
-                let indicatorPoint: NSPoint?
-                if let caret = FocusUtils.getCaretRect() {
-                    indicatorPoint = FocusUtils.convertAXPointToCocoa(caret.origin)
-                } else {
-                    indicatorPoint = cursorPosition
-                }
-                let vm = IndicatorWindowManager.shared.show(onScreenContaining: indicatorPoint)
+                IndicatorWindowManager.shared.releasePreviousViewModel()
+                let vm = IndicatorViewModel()
                 if command { vm.prepareCommand(selection: commandSelection) }
-                vm.startRecording()
+                var openedCaptureGeneration: Int?
+                if vm.canStartRecording && TranscriptionService.shared.usesStreamingTranscription {
+                    do {
+                        openedCaptureGeneration = try await StreamingAudioService.shared.beginMicrophoneCapture(requestedAt: requestedAt)
+                    } catch {
+                        if self.captureStartEpoch == epoch {
+                            if StreamingAudioError.shouldReportStartFailure(error) {
+                                ErrorToastManager.shared.show(error.localizedDescription)
+                            }
+                        }
+                        vm.cleanup()
+                        return
+                    }
+                }
+                guard self.captureStartEpoch == epoch else {
+                    vm.cleanup()
+                    return
+                }
+                let cursorPosition = FocusUtils.getCurrentCursorPosition()
+                _ = IndicatorWindowManager.shared.show(onScreenContaining: cursorPosition, viewModel: vm)
+                if !vm.startRecording(), let openedCaptureGeneration {
+                    StreamingAudioService.shared.abortUnclaimedCapture(generation: openedCaptureGeneration)
+                }
                 self.activeVm = vm
+                Task.detached(priority: .userInitiated) { [weak self, weak vm] in
+                    guard let caret = FocusUtils.getCaretRect() else { return }
+                    await MainActor.run {
+                        guard let self, let vm, self.activeVm === vm else { return }
+                        IndicatorWindowManager.shared.move(
+                            onScreenContaining: FocusUtils.convertAXPointToCocoa(caret.origin)
+                        )
+                    }
+                }
             } else if !self.holdMode {
                 IndicatorWindowManager.shared.stopRecording()
             }
@@ -246,6 +298,11 @@ class ShortcutManager {
         Task { @MainActor in
             if self.holdMode {
                 if !self.commandCapture.requestStop() {
+                    if self.captureStartPending {
+                        self.captureStartEpoch += 1
+                        self.captureStartPending = false
+                        StreamingAudioService.shared.abortPendingStart()
+                    }
                     IndicatorWindowManager.shared.stopRecording()
                 }
                 self.holdMode = false

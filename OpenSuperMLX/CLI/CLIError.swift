@@ -17,6 +17,7 @@ enum CLIError: String, Error, CustomStringConvertible {
     case invalidConfigKey = "invalid_config_key"
     case invalidConfigValue = "invalid_config_value"
     case presetNotFound = "preset_not_found"
+    case microphoneUnavailable = "microphone_unavailable"
 
     var description: String {
         switch self {
@@ -33,6 +34,7 @@ enum CLIError: String, Error, CustomStringConvertible {
         case .invalidConfigKey: return "Unknown configuration key"
         case .invalidConfigValue: return "Invalid value for configuration key"
         case .presetNotFound: return "No preset with that name"
+        case .microphoneUnavailable: return "Microphone unavailable or permission not granted"
         }
     }
 

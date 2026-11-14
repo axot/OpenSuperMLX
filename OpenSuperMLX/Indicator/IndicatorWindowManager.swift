@@ -10,18 +10,40 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
 
     private var window: NSWindow?
     @Published private(set) var viewModel: IndicatorViewModel?
-    
-    private init() {}
+
+    private let recordingActivity: RecordingActivity
+    private let visibilityChanged: (Bool) -> Void
+
+    private convenience init() {
+        self.init(recordingActivity: .shared) { ShortcutManager.shared.indicatorVisible = $0 }
+    }
+
+    init(recordingActivity: RecordingActivity, visibilityChanged: @escaping (Bool) -> Void) {
+        self.recordingActivity = recordingActivity
+        self.visibilityChanged = visibilityChanged
+    }
     
     static let panelSize = NSSize(width: 380, height: 88)
     static let bottomMargin: CGFloat = 16
 
-    func show(onScreenContaining point: NSPoint? = nil) -> IndicatorViewModel {
-        ShortcutManager.shared.indicatorVisible = true
-        RecordingActivity.shared.report(self, isActive: true)
+    func releasePreviousViewModel() {
+        viewModel?.cleanup()
+        viewModel = nil
+        window?.contentView = nil
+        window?.orderOut(nil)
+        visibilityChanged(false)
+        recordingActivity.report(self, isActive: false)
+    }
+
+    func show(
+        onScreenContaining point: NSPoint? = nil,
+        viewModel providedViewModel: IndicatorViewModel? = nil
+    ) -> IndicatorViewModel {
+        visibilityChanged(true)
+        recordingActivity.report(self, isActive: true)
 
         viewModel?.cleanup()
-        let newViewModel = IndicatorViewModel()
+        let newViewModel = providedViewModel ?? IndicatorViewModel()
         newViewModel.delegate = self
         viewModel = newViewModel
 
@@ -50,6 +72,14 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
             x: visibleFrame.midX - windowSize.width / 2,
             y: visibleFrame.minY + bottomMargin
         )
+    }
+
+    func move(onScreenContaining point: NSPoint) {
+        guard let window, let screen = FocusUtils.screenContaining(point: point) ?? NSScreen.main else { return }
+        window.setFrameOrigin(Self.indicatorOrigin(
+            windowSize: window.frame.size,
+            visibleFrame: screen.visibleFrame
+        ))
     }
 
     static func makePanel() -> NSPanel {
@@ -83,7 +113,7 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
     }
 
     func hide() {
-        ShortcutManager.shared.indicatorVisible = false
+        visibilityChanged(false)
         
         Task {
             guard let viewModel = self.viewModel else { return }
@@ -96,7 +126,7 @@ class IndicatorWindowManager: ObservableObject, IndicatorViewDelegate {
             self.window?.contentView = nil
             self.window?.orderOut(nil)
             self.viewModel = nil
-            RecordingActivity.shared.report(self, isActive: false)
+            self.recordingActivity.report(self, isActive: false)
             
             NotificationCenter.default.post(name: .indicatorWindowDidHide, object: nil)
         }
