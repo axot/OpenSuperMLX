@@ -21,7 +21,6 @@ final class LLMCorrectionServiceTests: XCTestCase {
         sut = LLMCorrectionService(providerFactory: { [mockProvider] in mockProvider! })
         defaults.set(true, forKey: "llmCorrectionEnabled")
         defaults.set("bedrock", forKey: "llmProvider")
-        defaults.set(false, forKey: "useCustomCorrectionPrompt")
     }
 
     override func tearDown() async throws {
@@ -112,12 +111,24 @@ final class LLMCorrectionServiceTests: XCTestCase {
     }
 
     func testCorrectTranscription_PassesBuiltSystemPrompt() async {
-        defaults.set(true, forKey: "useCustomCorrectionPrompt")
-        defaults.set("Test custom prompt", forKey: "customCorrectionPrompt")
         mockProvider.correctResult = "corrected"
         _ = await sut.correctTranscription("hello")
-        let expectedPrompt = LLMCorrectionService.buildSystemPrompt(userPrompt: "Test custom prompt")
+        let expectedPrompt = LLMCorrectionService.buildSystemPrompt(userPrompt: LLMCorrectionService.defaultCorrectionPrompt)
         XCTAssertEqual(mockProvider.lastSystemPrompt, expectedPrompt)
+    }
+
+    func testCorrect_WithPreset_UsesDictationPresetPrompt() async {
+        let preset = PromptPreset(name: "Email", instruction: "Write an email body.")
+        mockProvider.correctResult = "Hi Dana, the demo moved to Friday."
+
+        let outcome = await sut.correct("tell dana the demo moved to friday", preset: preset)
+
+        XCTAssertEqual(outcome.text, "Hi Dana, the demo moved to Friday.")
+        let expected = LLMCorrectionService.buildSystemPrompt(
+            userPrompt: LLMCorrectionService.dictationPresetPrompt(for: preset)
+        )
+        XCTAssertEqual(mockProvider.lastSystemPrompt, expected)
+        XCTAssertTrue(expected.contains("Write an email body."))
     }
 
     func testCorrectTranscription_PassesWrappedText() async {
@@ -348,7 +359,7 @@ final class LLMCorrectionServiceLimitTests: XCTestCase {
         XCTAssertNil(outcome.errorMessage)
     }
 
-    func testCorrect_OutputGuardAppliesOnlyToTheDefaultPrompt() async {
+    func testCorrect_OutputGuardAppliesOnlyWithoutAPreset() async {
         let text = String(repeating: "長い文章です。", count: 40)
         mockProvider.correctResult = "短い。"
 
@@ -356,11 +367,10 @@ final class LLMCorrectionServiceLimitTests: XCTestCase {
         XCTAssertEqual(guarded.text, text)
         XCTAssertEqual(guarded.errorMessage, LLMCorrectionService.suspiciousOutputMessage)
 
-        defaults.set(true, forKey: "useCustomCorrectionPrompt")
-        defaults.set("Summarize the transcript.", forKey: "customCorrectionPrompt")
-        let custom = await sut.correct(text)
-        XCTAssertEqual(custom.text, "短い。")
-        XCTAssertNil(custom.errorMessage)
+        let summary = PromptPreset(name: "Summarize", instruction: "Summarize the transcript.")
+        let preset = await sut.correct(text, preset: summary)
+        XCTAssertEqual(preset.text, "短い。")
+        XCTAssertNil(preset.errorMessage)
     }
 
     func testLimitsNotice_ExplainsCapacityAndFlagsUnusableOrSmallSettings() {

@@ -12,6 +12,8 @@ protocol AudioRecordingBackend: AnyObject {
     func prepareToRecord() -> Bool
     func record() -> Bool
     func stop()
+    func updateMeters()
+    func averagePower(forChannel channelNumber: Int) -> Float
 }
 
 extension AVAudioRecorder: AudioRecordingBackend {
@@ -212,7 +214,7 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             let recorder = try recorderFactory(fileURL, RecordingAudioFormat.aacSettings)
             recorder.delegate = self
-            recorder.isMeteringEnabled = monitorConnection
+            recorder.isMeteringEnabled = true
             guard recorder.prepareToRecord(), recorder.record() else {
                 throw CocoaError(.fileWriteUnknown)
             }
@@ -341,6 +343,16 @@ class AudioRecorder: NSObject, ObservableObject {
         currentlyPlayingURL = nil
     }
     
+    func meteredLevel() -> Float {
+        completionLock.lock()
+        let recorder = lifecycle == .recording ? audioRecorder : nil
+        completionLock.unlock()
+        guard let recorder else { return 0 }
+        recorder.updateMeters()
+        let level = powf(10, recorder.averagePower(forChannel: 0) / 20)
+        return level.isFinite ? min(1, level) : 0
+    }
+
     private func updateRecordingState(isRecording: Bool, isConnecting: Bool) {
         DispatchQueue.main.async {
             self.isRecording = isRecording

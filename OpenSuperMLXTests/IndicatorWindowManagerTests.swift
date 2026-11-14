@@ -45,6 +45,28 @@ final class IndicatorWindowManagerTests: XCTestCase {
         }
     }
 
+    // MARK: - Placement
+
+    func testIndicatorIsCenteredAtBottomOfVisibleFrame() {
+        let origin = IndicatorWindowManager.indicatorOrigin(
+            windowSize: NSSize(width: 300, height: 80),
+            visibleFrame: NSRect(x: 0, y: 70, width: 1440, height: 800)
+        )
+
+        XCTAssertEqual(origin.x, 570)
+        XCTAssertEqual(origin.y, 70 + IndicatorWindowManager.bottomMargin)
+    }
+
+    func testIndicatorPlacementFollowsOffsetSecondaryScreen() {
+        let origin = IndicatorWindowManager.indicatorOrigin(
+            windowSize: NSSize(width: 300, height: 80),
+            visibleFrame: NSRect(x: -1920, y: -200, width: 1920, height: 1080)
+        )
+
+        XCTAssertEqual(origin.x, -1920 + 810)
+        XCTAssertEqual(origin.y, -200 + IndicatorWindowManager.bottomMargin)
+    }
+
     // MARK: - Helpers
 
     private func showAndCheckApplicationStaysHidden(

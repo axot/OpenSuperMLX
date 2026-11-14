@@ -136,22 +136,37 @@ final class CorrectCommandTests: XCTestCase {
         }
     }
 
-    func testCorrectWithCustomPrompt() async throws {
+    func testCorrectWithPresetUsesPresetPrompt() async throws {
         let mockProvider = MockLLMProvider()
-        mockProvider.correctResult = "fixed"
+        mockProvider.correctResult = "- one\n- two"
+        let service = LLMCorrectionService(providerFactory: { mockProvider })
+        let preset = PromptPreset(name: "Bullet points", instruction: "Make bullets.")
+
+        let command = try OpenSuperMLXCLI.parseAsRoot(
+            ["correct", "one and two", "--preset", "bullet POINTS"]
+        ) as! CorrectCommand
+
+        guard case .success(let data) = await command.executeCorrection(service: service, presets: [preset]) else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertEqual(data.correctedText, "- one\n- two")
+        XCTAssertEqual(data.preset, "Bullet points")
+        XCTAssertTrue(mockProvider.lastSystemPrompt?.contains("Make bullets.") == true)
+    }
+
+    func testCorrectWithUnknownPresetFails() async throws {
+        let mockProvider = MockLLMProvider()
         let service = LLMCorrectionService(providerFactory: { mockProvider })
 
         let command = try OpenSuperMLXCLI.parseAsRoot(
-            ["correct", "test input", "--prompt", "Fix grammar only"]
+            ["correct", "text", "--preset", "Nope"]
         ) as! CorrectCommand
 
-        let result = await command.executeCorrection(service: service)
-
-        guard case .success = result else {
-            XCTFail("Expected success"); return
+        guard case .failure(let error) = await command.executeCorrection(service: service, presets: []) else {
+            XCTFail("Expected failure"); return
         }
-        XCTAssertTrue(AppPreferences.shared.useCustomCorrectionPrompt)
-        XCTAssertEqual(AppPreferences.shared.customCorrectionPrompt, "Fix grammar only")
+        XCTAssertEqual(error, .presetNotFound)
+        XCTAssertEqual(mockProvider.correctCallCount, 0)
     }
 
     func testCorrectLongText_PartialChunkFailure_SucceedsWithWarning() async throws {

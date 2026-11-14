@@ -45,7 +45,6 @@ final class AppPreferences {
             defaults.set(oldLanguage, forKey: "mlxLanguage")
         }
         
-        migrateCorrectionPrompt(defaults: defaults)
         migrateLLMOutputLimit(defaults: defaults)
         
         if !defaults.bool(forKey: "llmMigrationCompleted") {
@@ -73,6 +72,7 @@ final class AppPreferences {
         defaults.removeObject(forKey: "suppressBlankAudio")
         defaults.removeObject(forKey: "useChineseITN")
         defaults.removeObject(forKey: "useEnglishITN")
+        defaults.removeObject(forKey: "KeyboardShortcuts_toggleRecordWithLLM")
     }
     
     // Existing OpenAI-compatible setups ran with a 4096-token output cap; keep it so models with
@@ -83,16 +83,6 @@ final class AppPreferences {
         defaults.set(4096, forKey: "openAIMaxOutputTokens")
     }
 
-    static func migrateCorrectionPrompt(defaults: UserDefaults) {
-        if let oldPrompt = defaults.string(forKey: "bedrockCorrectionPrompt") {
-            if oldPrompt != LLMCorrectionService.defaultCorrectionPrompt {
-                defaults.set(oldPrompt, forKey: "customCorrectionPrompt")
-                defaults.set(true, forKey: "useCustomCorrectionPrompt")
-            }
-            defaults.removeObject(forKey: "bedrockCorrectionPrompt")
-        }
-    }
-    
     @UserDefault(key: "useNeuralEngineAudioTower", defaultValue: true)
     var useNeuralEngineAudioTower: Bool
 
@@ -159,21 +149,6 @@ final class AppPreferences {
     @UserDefault(key: "bedrockMaxOutputTokens", defaultValue: 4096)
     var bedrockMaxOutputTokens: Int
     
-    // MARK: - Correction Prompt
-    
-    @UserDefault(key: "useCustomCorrectionPrompt", defaultValue: false)
-    var useCustomCorrectionPrompt: Bool
-    
-    @OptionalUserDefault(key: "customCorrectionPrompt")
-    var customCorrectionPrompt: String?
-    
-    var effectiveCorrectionPrompt: String {
-        if useCustomCorrectionPrompt, let custom = customCorrectionPrompt, !custom.isEmpty {
-            return custom
-        }
-        return LLMCorrectionService.defaultCorrectionPrompt
-    }
-
     @UserDefault(key: "useStreamingTranscription", defaultValue: true)
     var useStreamingTranscription: Bool
 
@@ -184,6 +159,9 @@ final class AppPreferences {
 
     @UserDefault(key: "llmCorrectionEnabled", defaultValue: false)
     var llmCorrectionEnabled: Bool
+
+    @OptionalUserDefault(key: "dictationCleanupPresetID")
+    var dictationCleanupPresetID: String?
 
     // MARK: - OpenAI-Compatible LLM
 

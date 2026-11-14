@@ -109,3 +109,86 @@ final class PromptPresetStoreTests: XCTestCase {
         )
     }
 }
+
+// MARK: - Retired Correction Prompt
+
+@MainActor
+final class PromptPresetStoreMigrationTests: XCTestCase {
+
+    private var suiteName: String!
+    private var defaults: UserDefaults!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        suiteName = "PromptPresetStoreMigrationTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        try await super.tearDown()
+    }
+
+    func testActiveCustomPromptBecomesTheSelectedPreset() {
+        defaults.set(true, forKey: "llmCorrectionEnabled")
+        defaults.set(true, forKey: "useCustomCorrectionPrompt")
+        defaults.set("Fix spelling only.", forKey: "customCorrectionPrompt")
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        let migrated = store.presets.first { $0.name == PromptPresetStore.migratedPromptName }
+        XCTAssertEqual(migrated?.instruction, "Fix spelling only.")
+        XCTAssertEqual(defaults.string(forKey: "dictationCleanupPresetID"), migrated?.id.uuidString)
+        XCTAssertNil(defaults.object(forKey: "useCustomCorrectionPrompt"))
+        XCTAssertNil(defaults.object(forKey: "customCorrectionPrompt"))
+    }
+
+    func testLegacyBedrockPromptBecomesAPresetWithoutOverridingAChosenPreset() {
+        defaults.set(true, forKey: "llmCorrectionEnabled")
+        defaults.set("chosen-id", forKey: "dictationCleanupPresetID")
+        defaults.set("Old Bedrock prompt.", forKey: "bedrockCorrectionPrompt")
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        XCTAssertEqual(store.presets.map(\.instruction), ["Old Bedrock prompt."])
+        XCTAssertEqual(defaults.string(forKey: "dictationCleanupPresetID"), "chosen-id")
+        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
+    }
+
+    func testMigrationDoesNotPostChangeNotificationDuringInit() async {
+        defaults.set(true, forKey: "useCustomCorrectionPrompt")
+        defaults.set("Fix spelling only.", forKey: "customCorrectionPrompt")
+        let posted = expectation(forNotification: .promptPresetsDidChange, object: nil)
+        posted.isInverted = true
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        await fulfillment(of: [posted], timeout: 0.1)
+        XCTAssertEqual(store.presets.count, 1)
+    }
+
+    func testPromptLongerThanThePresetLimitIsKeptWhole() {
+        let long = String(repeating: "Keep every word. ", count: 1_000).trimmingCharacters(in: .whitespaces)
+        XCTAssertGreaterThan(long.count, PromptPresetValidation.maxInstructionLength)
+        defaults.set(true, forKey: "useCustomCorrectionPrompt")
+        defaults.set(long, forKey: "customCorrectionPrompt")
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        XCTAssertEqual(store.presets.first?.instruction, long)
+    }
+
+    func testInactiveOrDefaultPromptIsDroppedWithoutAPreset() {
+        defaults.set(false, forKey: "useCustomCorrectionPrompt")
+        defaults.set("Unused draft.", forKey: "customCorrectionPrompt")
+        defaults.set(LLMCorrectionService.defaultCorrectionPrompt, forKey: "bedrockCorrectionPrompt")
+
+        let store = PromptPresetStore(defaults: defaults, seedExamples: false)
+
+        XCTAssertTrue(store.presets.isEmpty)
+        XCTAssertNil(defaults.object(forKey: "customCorrectionPrompt"))
+        XCTAssertNil(defaults.object(forKey: "bedrockCorrectionPrompt"))
+    }
+}

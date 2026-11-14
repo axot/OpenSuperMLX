@@ -176,12 +176,12 @@ final class ConfigCommandTests: XCTestCase {
     }
 
     func testConfigSetOptionalToNull() throws {
-        testDefaults.set("custom prompt", forKey: "customCorrectionPrompt")
+        testDefaults.set("F8C4B65F-FB90-4B70-A335-65048CA20C34", forKey: "dictationCleanupPresetID")
 
-        let result = ConfigSetCommand.executeSet(key: "customCorrectionPrompt", value: "null")
+        let result = ConfigSetCommand.executeSet(key: "dictationCleanupPresetID", value: "null")
         guard case .success = result else {
             XCTFail("Expected success"); return
         }
-        XCTAssertNil(testDefaults.string(forKey: "customCorrectionPrompt"))
+        XCTAssertNil(testDefaults.string(forKey: "dictationCleanupPresetID"))
     }
 }

@@ -34,7 +34,7 @@ All commands accept `--json` (structured output to stdout), `--quiet` (suppress 
 |---|---|---|
 | `transcribe <file>` | Transcribe one audio file | `--language`, `--no-correction`, `--temperature` |
 | `stream-simulate <file>` | Feed a file through the streaming pipeline | `--language`, `--chunk-duration`, `--disable-repetition-recovery` |
-| `correct <text>` | Apply configured LLM correction (pass `""` as `<text>` with `--file`) | `--file`, `--provider`, `--prompt` |
+| `correct <text>` | Apply configured LLM correction (pass `""` as `<text>` with `--file`) | `--file`, `--provider`, `--preset` |
 | `config` | Read or change application settings | `list`, `get <key>`, `set <key> <value>` |
 | `recordings` | Inspect and manage recording history | `list`, `search <query>`, `show <id>`, `delete <id>`, `regenerate <id>` |
 | `queue` | Manage imported-file transcription | `add <files>...`, `status`, `process` |
@@ -90,7 +90,7 @@ decide how much text one request can correct:
   `(context − prompt − thinking reserve) / 2.1`, times 0.8.
 - A transcript within capacity is corrected in one request (`mode: "single"`). A longer one is split at
   sentence ends into the fewest balanced chunks that fit and corrected one by one (`mode: "chunked"`).
-  A custom prompt runs once per chunk.
+  A preset runs once per chunk.
 - If a single request is truncated, times out, returns suspiciously short output, or hits a token-limit
   error, a transcript of at least 1,000 tokens is retried in at least two chunks.
 - A failed chunk keeps its original text. Network errors stop the remaining chunks; a token-limit error on
@@ -211,6 +211,7 @@ With `--json`, command failures are written to stderr as `{"status":"error","com
 | `audio_file_missing` | A history entry no longer has usable audio |
 | `invalid_config_key` | The configuration key is unknown |
 | `invalid_config_value` | The value does not match the key's type |
+| `preset_not_found` | `correct --preset` named no preset in Settings → Presets |
 | `microphone_unavailable` | The microphone could not be prepared or permission is missing |
 
 ## Running CLI Tests
@@ -235,7 +236,7 @@ xcodebuild test -scheme OpenSuperMLX -destination 'platform=macOS,arch=arm64' \
 |---|---|
 | Transcription, model, ITN | `transcribe <audio> --json` |
 | Streaming pipeline | `stream-simulate <audio> --json` |
-| LLM correction | `correct "text" --json`; long text: `correct "" --file transcript.txt --json` |
+| LLM correction | `correct "text" --json`; long text: `correct "" --file transcript.txt --json`; dictation presets: `correct "text" --preset "Email" --json` |
 | Settings / AppPreferences | `config get <key>` |
 | Recordings DB | `recordings list --json` |
 | Audio devices | `mic list --json` |

@@ -388,7 +388,10 @@ class ContentViewModel: ObservableObject {
                 guard let self = self else { return }
                 await self.awaitStartStreamingIfNeeded()
 
-                guard let result = await self.streamingService.finalizeRecording(duration: self.recordingDuration) else {
+                guard let result = await self.streamingService.finalizeRecording(
+                    duration: self.recordingDuration,
+                    cleanupPreset: DictationCleanup.current.preset
+                ) else {
                     self.state = .idle
                     self.recordingDuration = 0
                     self.isStreamingMode = false
@@ -432,7 +435,11 @@ class ContentViewModel: ObservableObject {
                 }
 
                 do {
-                    let text = try await self.transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                    let text = try await self.transcriptionService.transcribeAudio(
+                        url: tempURL,
+                        settings: Settings(),
+                        cleanupPreset: DictationCleanup.current.preset
+                    )
 
                     let timestamp = Date()
                     let id = UUID()

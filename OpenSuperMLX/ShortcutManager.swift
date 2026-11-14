@@ -3,11 +3,14 @@ import ApplicationServices
 import Cocoa
 import Foundation
 import KeyboardShortcuts
+import os.log
 import SwiftUI
+
+private let logger = Logger(subsystem: "OpenSuperMLX", category: "ShortcutManager")
 
 extension KeyboardShortcuts.Name {
     static let toggleRecord = Self("toggleRecord", initial: .init(.backtick, modifiers: .option))
-    static let toggleRecordWithLLM = Self("toggleRecordWithLLM", initial: .init(.backtick, modifiers: [.option, .shift]))
+    static let voiceCommand = Self("voiceCommand", initial: .init(.backtick, modifiers: [.option, .shift]))
     static let escape = Self("escape", initial: .init(.escape))
 }
 
@@ -26,6 +29,7 @@ class ShortcutManager {
     private var holdWorkItem: DispatchWorkItem?
     private let holdThreshold: TimeInterval = 0.3
     private var holdMode = false
+    private var commandCapture = CommandCaptureGate()
     @MainActor private var escapeState = EscapeShortcutState()
     @MainActor private var escapeReleaseTask: Task<Void, Never>?
     private var escapeMonitor: Any?
@@ -55,6 +59,7 @@ class ShortcutManager {
         setupKeyboardShortcuts()
         setupEscapeOwnership()
         setupPresetShortcuts()
+        releaseVoiceCommandIfTaken()
         
         NotificationCenter.default.addObserver(
             self,
@@ -78,11 +83,11 @@ class ShortcutManager {
             self?.handleKeyUp()
         }
 
-        KeyboardShortcuts.onKeyDown(for: .toggleRecordWithLLM) { [weak self] in
-            self?.handleKeyDown(forceLLM: true)
+        KeyboardShortcuts.onKeyDown(for: .voiceCommand) { [weak self] in
+            self?.handleKeyDown(command: true)
         }
 
-        KeyboardShortcuts.onKeyUp(for: .toggleRecordWithLLM) { [weak self] in
+        KeyboardShortcuts.onKeyUp(for: .voiceCommand) { [weak self] in
             self?.handleKeyUp()
         }
 
@@ -136,6 +141,16 @@ class ShortcutManager {
         registeredPresetIDs = currentIDs
     }
 
+    /// The voice command's default can match a key the user already gave to recording or
+    /// a preset before the command existed. Those bindings were chosen; the default yields.
+    private func releaseVoiceCommandIfTaken() {
+        let others = [KeyboardShortcuts.getShortcut(for: .toggleRecord)]
+            + PromptPresetStore.shared.presets.map { KeyboardShortcuts.getShortcut(for: $0.shortcutName) }
+        guard Self.shortcutCollides(KeyboardShortcuts.getShortcut(for: .voiceCommand), with: others) else { return }
+        KeyboardShortcuts.setShortcut(nil, for: .voiceCommand)
+        logger.info("Cleared the voice command shortcut; its key is already bound")
+    }
+
     private func runPreset(id: UUID) {
         guard let preset = PromptPresetStore.shared.presets.first(where: { $0.id == id }) else { return }
         Task {
@@ -187,13 +202,18 @@ class ShortcutManager {
         }
     }
     
-    private func handleKeyDown(forceLLM: Bool = false) {
+    private func handleKeyDown(command: Bool = false) {
         let requestedAt = DispatchTime.now().uptimeNanoseconds
         holdWorkItem?.cancel()
         holdMode = false
         
         Task { @MainActor in
             if self.activeVm == nil {
+                guard !self.commandCapture.isCapturing else {
+                    // A second press while the selection is still being read means "stop".
+                    if command { _ = self.commandCapture.requestStop() }
+                    return
+                }
                 if self.captureStartPending {
                     self.captureStartEpoch += 1
                     self.captureStartPending = false
@@ -206,8 +226,24 @@ class ShortcutManager {
                 defer {
                     if self.captureStartEpoch == epoch { self.captureStartPending = false }
                 }
+                var commandSelection: PromptPresetService.Selection?
+                if command {
+                    _ = self.commandCapture.begin()
+                    let capture = await PromptPresetService.shared.captureCommandSelection(
+                        shortcutModifiers: KeyboardShortcuts.getShortcut(for: .voiceCommand)?.modifiers ?? []
+                    )
+                    guard self.commandCapture.finish(), self.captureStartEpoch == epoch else { return }
+                    switch capture {
+                    case .success(let selection):
+                        commandSelection = selection
+                    case .failure(let error):
+                        ErrorToastManager.shared.show(error.message)
+                        return
+                    }
+                }
                 IndicatorWindowManager.shared.releasePreviousViewModel()
                 let vm = IndicatorViewModel()
+                if command { vm.prepareCommand(selection: commandSelection) }
                 var openedCaptureGeneration: Int?
                 if vm.canStartRecording && TranscriptionService.shared.usesStreamingTranscription {
                     do {
@@ -227,8 +263,7 @@ class ShortcutManager {
                     return
                 }
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()
-                _ = IndicatorWindowManager.shared.show(nearPoint: cursorPosition, viewModel: vm)
-                if forceLLM { vm.forceLLMCorrection = true }
+                _ = IndicatorWindowManager.shared.show(onScreenContaining: cursorPosition, viewModel: vm)
                 if !vm.startRecording(), let openedCaptureGeneration {
                     StreamingAudioService.shared.abortUnclaimedCapture(generation: openedCaptureGeneration)
                 }
@@ -238,7 +273,7 @@ class ShortcutManager {
                     await MainActor.run {
                         guard let self, let vm, self.activeVm === vm else { return }
                         IndicatorWindowManager.shared.move(
-                            nearPoint: FocusUtils.convertAXPointToCocoa(caret.origin)
+                            onScreenContaining: FocusUtils.convertAXPointToCocoa(caret.origin)
                         )
                     }
                 }
@@ -262,15 +297,67 @@ class ShortcutManager {
         
         Task { @MainActor in
             if self.holdMode {
-                if self.captureStartPending {
-                    self.captureStartEpoch += 1
-                    self.captureStartPending = false
-                    StreamingAudioService.shared.abortPendingStart()
+                if !self.commandCapture.requestStop() {
+                    if self.captureStartPending {
+                        self.captureStartEpoch += 1
+                        self.captureStartPending = false
+                        StreamingAudioService.shared.abortPendingStart()
+                    }
+                    IndicatorWindowManager.shared.stopRecording()
                 }
-                IndicatorWindowManager.shared.stopRecording()
                 self.holdMode = false
             }
         }
+    }
+}
+
+// MARK: - Built-in Shortcut Conflicts
+
+extension ShortcutManager {
+    static func builtInShortcutOwner(
+        of shortcut: KeyboardShortcuts.Shortcut,
+        excluding excluded: KeyboardShortcuts.Name?,
+        shortcutFor: @MainActor (KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut? = { KeyboardShortcuts.getShortcut(for: $0) }
+    ) -> String? {
+        let builtIns: [(KeyboardShortcuts.Name, String)] = [
+            (.toggleRecord, "Toggle record"),
+            (.voiceCommand, "Voice command on selection"),
+        ]
+        return builtIns.first { name, _ in name != excluded && shortcutFor(name) == shortcut }?.1
+    }
+
+    nonisolated static func shortcutCollides(
+        _ shortcut: KeyboardShortcuts.Shortcut?,
+        with others: [KeyboardShortcuts.Shortcut?]
+    ) -> Bool {
+        guard let shortcut else { return false }
+        return others.contains(shortcut)
+    }
+}
+
+/// The voice command reads the selection before recording starts. A stop that arrives
+/// during that read (a second tap, or releasing a held key) cancels the command instead
+/// of being lost and leaving a recording running.
+struct CommandCaptureGate {
+    private(set) var isCapturing = false
+    private var stopRequested = false
+
+    mutating func begin() -> Bool {
+        guard !isCapturing else { return false }
+        isCapturing = true
+        stopRequested = false
+        return true
+    }
+
+    mutating func requestStop() -> Bool {
+        guard isCapturing else { return false }
+        stopRequested = true
+        return true
+    }
+
+    mutating func finish() -> Bool {
+        isCapturing = false
+        return !stopRequested
     }
 }
 

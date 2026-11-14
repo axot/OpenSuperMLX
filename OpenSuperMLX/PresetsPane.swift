@@ -309,11 +309,8 @@ struct PresetsView: View {
         }) {
             return .disallow(reason: "Already used by “\(other.name)”.")
         }
-        if KeyboardShortcuts.getShortcut(for: .toggleRecord) == shortcut {
-            return .disallow(reason: "Already used by Toggle record.")
-        }
-        if KeyboardShortcuts.getShortcut(for: .toggleRecordWithLLM) == shortcut {
-            return .disallow(reason: "Already used by Record with LLM cleanup.")
+        if let owner = ShortcutManager.builtInShortcutOwner(of: shortcut, excluding: nil) {
+            return .disallow(reason: "Already used by \(owner).")
         }
         return .allow
     }

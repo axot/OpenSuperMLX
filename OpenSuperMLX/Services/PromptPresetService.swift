@@ -10,7 +10,9 @@ private let logger = Logger(subsystem: "OpenSuperMLX", category: "PromptPresetSe
 
 enum PresetApplyOutcome: Equatable {
     case applied
+    case unchanged
     case copiedToClipboard
+    case copiedAfterTargetChanged
     case ignored
     case failed(String)
 
@@ -18,12 +20,20 @@ enum PresetApplyOutcome: Equatable {
         switch self {
         case .applied, .ignored:
             return nil
+        case .unchanged:
+            return "The result matched your text, so nothing was changed."
+        case .copiedAfterTargetChanged:
+            return "The app, text field or selection changed before the result was ready, so it wasn't inserted. It's on the clipboard. Press ⌘V to paste it."
         case .copiedToClipboard:
             return "Couldn't check that your text is still selected in this app, so it wasn't replaced. The rewrite is on the clipboard. Press ⌘V to paste it."
         case .failed(let message):
             return message
         }
     }
+}
+
+struct PresetCommandUnavailable: Error, Equatable {
+    let message: String
 }
 
 @MainActor
@@ -58,11 +68,26 @@ final class PromptPresetService {
             if let value, value != current.value { return false }
             return true
         }
+
+        /// New text goes where the cursor was when the command started, so the app and,
+        /// when Accessibility exposed it, the focused field must still be the same.
+        func hasSameFocus(as current: Target) -> Bool {
+            guard let processID, processID == current.processID else { return false }
+            if let element {
+                guard let other = current.element, CFEqual(element, other) else { return false }
+            }
+            return true
+        }
     }
 
+    /// An empty `text` means nothing was selected; `target` still records where new text goes.
     struct Selection {
         let text: String
         let target: Target
+
+        var isEmpty: Bool {
+            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     private enum CopyResult {
@@ -74,8 +99,10 @@ final class PromptPresetService {
     private let providerFactory: @Sendable () -> LLMProvider
     private let captureSelection: @MainActor (Bool) async -> Selection?
     private let readTarget: @MainActor (Selection) async -> Target?
-    private let replaceSelection: @MainActor (Selection, String) async -> Void
+    private let replaceSelection: @MainActor (Selection, String) async -> PresetApplyOutcome
+    private let readFocus: @MainActor () -> Target
     private let copyText: @MainActor (String) -> Void
+    private let insertText: @MainActor (String) -> Void
     private let alwaysReplace: @MainActor () -> Bool
     private let isAccessibilityGranted: @MainActor () -> Bool
     private var isRunning = false
@@ -84,11 +111,13 @@ final class PromptPresetService {
         providerFactory: @escaping @Sendable () -> LLMProvider = { LLMCorrectionService.resolveProvider() },
         captureSelection: @escaping @MainActor (Bool) async -> Selection? = { await PromptPresetService.captureFrontmostSelection(canCopyImmediately: $0) },
         readTarget: @escaping @MainActor (Selection) async -> Target? = { await PromptPresetService.reactivateTarget(of: $0) },
-        replaceSelection: @escaping @MainActor (Selection, String) async -> Void = { PromptPresetService.replace($0, with: $1) },
+        replaceSelection: @escaping @MainActor (Selection, String) async -> PresetApplyOutcome = { await PromptPresetService.replace($0, with: $1) },
+        readFocus: @escaping @MainActor () -> Target = { PromptPresetService.readFrontmostTarget() },
         copyText: @escaping @MainActor (String) -> Void = { text in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         },
+        insertText: @escaping @MainActor (String) -> Void = { ClipboardUtil.insertText($0) },
         alwaysReplace: @escaping @MainActor () -> Bool = { AppPreferences.shared.presetsAlwaysReplace },
         isAccessibilityGranted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
@@ -96,7 +125,9 @@ final class PromptPresetService {
         self.captureSelection = captureSelection
         self.readTarget = readTarget
         self.replaceSelection = replaceSelection
+        self.readFocus = readFocus
         self.copyText = copyText
+        self.insertText = insertText
         self.alwaysReplace = alwaysReplace
         self.isAccessibilityGranted = isAccessibilityGranted
     }
@@ -111,11 +142,7 @@ final class PromptPresetService {
             return .failed("Enable OpenSuperMLX in System Settings → Privacy & Security → Accessibility to rewrite selected text.")
         }
 
-        let heldModifiers = preset.shortcutName.shortcut?.modifiers ?? []
-        let canCopyImmediately = heldModifiers
-            .intersection([.option, .control, .shift])
-            .isEmpty
-
+        let canCopyImmediately = Self.canCopyImmediately(holding: preset.shortcutName.shortcut?.modifiers ?? [])
         guard let selection = await captureSelection(canCopyImmediately) else {
             return .failed("Select some text first, then press the preset shortcut.")
         }
@@ -128,38 +155,153 @@ final class PromptPresetService {
             return .failed("The selection is too long. Select up to \(Self.maximumSelectionLength.formatted()) characters.")
         }
 
+        return await rewrite(
+            selection,
+            systemPrompt: Self.buildSystemPrompt(for: preset),
+            userMessage: text,
+            label: preset.name
+        )
+    }
+
+    // MARK: - Voice Command
+
+    static let noInstructionMessage = "Didn't catch an instruction. Nothing was changed."
+
+    static let commandSystemPrompt = """
+        You are a precise text-editing assistant inside a dictation tool. The user spoke an instruction. Apply it to the provided text and return ONLY the resulting text — no preamble, no explanation, no closing remarks, no code fences, and do not wrap the result in quotes. The output replaces the user's selection verbatim.
+
+        Rules:
+        - Follow the instruction literally (e.g. "make this bullet points" → "- " bullets, one idea per line; "make it formal" → rewrite tone only; "fix grammar" → minimal edits).
+        - Keep the original language unless the instruction asks to translate.
+        - Preserve meaning, names, numbers, links and line breaks that the instruction does not ask you to change. Plain text or light markdown only.
+        - If no text is provided, write the text the instruction asks for.
+        - If the instruction is unclear, return the text unchanged.
+        """
+
+    static func commandUserMessage(instruction: String, text: String?) -> String {
+        let instruction = instruction.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Instruction: \(instruction)\n\n(No text is selected — write the requested text.)"
+        }
+        return "Instruction: \(instruction)\n\nText:\n<<<\n\(text)\n>>>"
+    }
+
+    /// While the shortcut's Option, Control or Shift is held, a synthesized ⌘C would arrive
+    /// as a different chord, so the copy waits for those keys to be released.
+    nonisolated static func canCopyImmediately(holding modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.intersection([.option, .control, .shift]).isEmpty
+    }
+
+    /// Captured when the command shortcut is first pressed, before the user speaks.
+    /// An empty selection means the instruction writes new text at the captured focus.
+    func captureCommandSelection(shortcutModifiers: NSEvent.ModifierFlags) async -> Result<Selection, PresetCommandUnavailable> {
+        guard isAccessibilityGranted() else {
+            return .failure(.init(message: "Enable OpenSuperMLX in System Settings → Privacy & Security → Accessibility to edit selected text by voice."))
+        }
+        guard let selection = await captureSelection(Self.canCopyImmediately(holding: shortcutModifiers)),
+              !selection.isEmpty
+        else {
+            return .success(Selection(text: "", target: readFocus()))
+        }
+        guard selection.text.count <= Self.maximumSelectionLength else {
+            return .failure(.init(message: "The selection is too long. Select up to \(Self.maximumSelectionLength.formatted()) characters."))
+        }
+        return .success(selection)
+    }
+
+    func applyInstruction(_ instruction: String, to selection: Selection?) async -> PresetApplyOutcome {
+        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty, !instruction.contains("No speech detected") else {
+            return .failed(Self.noInstructionMessage)
+        }
+        guard !isRunning else { return .ignored }
+        isRunning = true
+        defer { isRunning = false }
+
+        let userMessage = Self.commandUserMessage(instruction: instruction, text: selection?.text)
+        guard let selection, !selection.isEmpty else {
+            return await generate(userMessage: userMessage, at: selection?.target ?? Target())
+        }
+        return await rewrite(selection, systemPrompt: Self.commandSystemPrompt, userMessage: userMessage, label: "voice command")
+    }
+
+    // MARK: - Rewrite
+
+    private func generate(userMessage: String, at target: Target) async -> PresetApplyOutcome {
+        let provider = providerFactory()
+        guard provider.isConfigured else {
+            return .failed(LLMProviderError.notConfigured(provider: provider.displayName).userFacingMessage)
+        }
+        do {
+            let output = try await Self.withTimeout(Self.requestTimeout) {
+                try await provider.correctTranscription(userMessage, systemPrompt: Self.commandSystemPrompt)
+            }
+            guard !Task.isCancelled else { return .ignored }
+            let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !result.isEmpty else {
+                return .failed("The model returned an empty result. Nothing was inserted.")
+            }
+            guard target.hasSameFocus(as: readFocus()) else {
+                copyText(result)
+                logger.info("Voice command result copied; the focus changed while it ran")
+                return .copiedAfterTargetChanged
+            }
+            insertText(result)
+            return .applied
+        } catch {
+            guard !Task.isCancelled else { return .ignored }
+            logger.error("Voice command failed: \(error, privacy: .public)")
+            return .failed((error as? LLMProviderError)?.userFacingMessage
+                ?? "The voice command failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func rewrite(
+        _ selection: Selection,
+        systemPrompt: String,
+        userMessage: String,
+        label: String
+    ) async -> PresetApplyOutcome {
         let provider = providerFactory()
         guard provider.isConfigured else {
             return .failed(LLMProviderError.notConfigured(provider: provider.displayName).userFacingMessage)
         }
 
-        let systemPrompt = Self.buildSystemPrompt(for: preset)
         do {
             let output = try await Self.withTimeout(Self.requestTimeout) {
-                try await provider.correctTranscription(text, systemPrompt: systemPrompt)
+                try await provider.correctTranscription(userMessage, systemPrompt: systemPrompt)
             }
+            guard !Task.isCancelled else { return .ignored }
             let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !result.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
             }
+            // Writing identical text can collapse the selection without changing the
+            // document, which would read as an ignored write and paste a duplicate.
+            guard result != selection.text.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                return .unchanged
+            }
             guard selection.target.canVerifySelection || alwaysReplace() else {
                 copyText(result)
-                logger.info("Preset \(preset.name, privacy: .public) result copied; the selection can't be verified")
+                logger.info("\(label, privacy: .public) result copied; the selection can't be verified")
                 return .copiedToClipboard
             }
-            guard let current = await readTarget(selection) else {
-                return .failed("Couldn't return to the app with the selection. Nothing was replaced.")
+            guard let current = await readTarget(selection), !Task.isCancelled else {
+                return Task.isCancelled
+                    ? .ignored
+                    : .failed("Couldn't return to the app with the selection. Nothing was replaced.")
             }
             guard selection.target.isUnchanged(in: current) else {
                 return .failed("The selection changed while the preset was running. Nothing was replaced.")
             }
-            await replaceSelection(selection, result)
+            let outcome = await replaceSelection(selection, result)
             logger.info(
-                "Applied preset \(preset.name, privacy: .public): inputLength=\(text.count, privacy: .public), outputLength=\(result.count, privacy: .public)"
+                "\(label, privacy: .public) finished: outcome=\(String(describing: outcome), privacy: .public), inputLength=\(selection.text.count, privacy: .public), outputLength=\(result.count, privacy: .public)"
             )
-            return .applied
+            return outcome
         } catch {
-            logger.error("Preset \(preset.name, privacy: .public) failed: \(error, privacy: .public)")
+            guard !Task.isCancelled else { return .ignored }
+            logger.error("\(label, privacy: .public) failed: \(error, privacy: .public)")
             let message = (error as? LLMProviderError)?.userFacingMessage
                 ?? "The preset request failed: \(error.localizedDescription)"
             return .failed(message)
@@ -209,7 +351,7 @@ final class PromptPresetService {
         return nil
     }
 
-    private static func readFrontmostTarget() -> Target {
+    static func readFrontmostTarget() -> Target {
         let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
@@ -304,12 +446,93 @@ final class PromptPresetService {
         return readFrontmostTarget()
     }
 
-    private static func replace(_ selection: Selection, with text: String) {
-        if let element = selection.target.element,
-           AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success {
-            return
+    enum SelectionWriteOutcome: Equatable {
+        case applied
+        case ignored
+    }
+
+    /// Some apps (Outlook) report success for the Accessibility write and leave the text
+    /// untouched, so trust the success only when nothing readable proves it was ignored.
+    nonisolated static func selectionWriteOutcome(
+        original: Target,
+        newText: String,
+        selectedTextAfter: String?,
+        valueAfter: String?
+    ) -> SelectionWriteOutcome {
+        if selectedTextAfter == newText { return .applied }
+        if let value = original.value, let after = valueAfter, value != after { return .applied }
+        if let value = original.value, let after = valueAfter, value == after { return .ignored }
+        if let before = original.selectedText, !before.isEmpty, selectedTextAfter == before { return .ignored }
+        return .applied
+    }
+
+    private static func replace(_ selection: Selection, with text: String) async -> PresetApplyOutcome {
+        let element = selection.target.element
+        return await writeBack(
+            selection,
+            text: text,
+            write: {
+                guard let element else { return false }
+                return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success
+            },
+            reread: { element.map(attributes(of:)) ?? (nil, nil) },
+            currentTarget: { readFrontmostTarget() },
+            paste: { ClipboardUtil.insertText($0) },
+            copy: { text in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            },
+            pause: { try await Task.sleep(for: .milliseconds(80)) }
+        )
+    }
+
+    /// Writes through Accessibility and pastes only when the write failed or was ignored.
+    /// The paste goes to whatever is focused, so it happens only if the task is still live
+    /// and the original selection is still in place; otherwise the result is copied.
+    static func writeBack(
+        _ selection: Selection,
+        text: String,
+        write: () -> Bool,
+        reread: () -> (selectedText: String?, value: String?),
+        currentTarget: () -> Target,
+        paste: (String) -> Void,
+        copy: (String) -> Void,
+        pause: () async throws -> Void
+    ) async -> PresetApplyOutcome {
+        let original = selection.target
+        func wasIgnored() -> Bool {
+            let after = reread()
+            return selectionWriteOutcome(
+                original: original, newText: text,
+                selectedTextAfter: after.selectedText, valueAfter: after.value
+            ) == .ignored
         }
-        ClipboardUtil.insertText(text)
+
+        if write() {
+            guard wasIgnored() else { return .applied }
+            // The app may commit the write on its next run-loop pass.
+            for _ in 0..<3 {
+                do { try await pause() } catch { return .ignored }
+                guard wasIgnored() else { return .applied }
+            }
+            logger.info("Accessibility write had no effect; pasting instead")
+        }
+
+        guard !Task.isCancelled else { return .ignored }
+        guard original.isUnchanged(in: currentTarget()) else {
+            copy(text)
+            logger.info("Selection moved before the paste fallback; result copied")
+            return .copiedAfterTargetChanged
+        }
+        paste(text)
+        return .applied
+    }
+
+    private static func attributes(of element: AXUIElement) -> (selectedText: String?, value: String?) {
+        (
+            stringAttribute(kAXSelectedTextAttribute, of: element),
+            stringAttribute(kAXValueAttribute, of: element)
+        )
     }
 
     private static func waitForModifiersUp(timeout: Duration) async {

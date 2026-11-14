@@ -47,6 +47,7 @@ final class PromptPresetStore: ObservableObject {
     init(defaults: UserDefaults = .standard, seedExamples: Bool = true) {
         self.defaults = defaults
         load()
+        migrateRetiredCorrectionPrompt()
         if seedExamples {
             installExamplePresetsIfNeeded()
         }
@@ -82,6 +83,37 @@ final class PromptPresetStore: ObservableObject {
         guard let index = presets.firstIndex(where: { $0.id == id }) else { return }
         presets.remove(at: index)
         persist()
+    }
+
+    // MARK: - Retired Correction Prompt
+
+    static let migratedPromptName = "My cleanup prompt"
+
+    /// The LLM tab's custom correction prompt was replaced by presets. An active prompt
+    /// becomes a preset and, when no other preset was chosen, the dictation cleanup.
+    /// Saves without posting `promptPresetsDidChange`: this runs inside `shared`'s
+    /// initializer, and observers that read `shared` would re-enter it.
+    private func migrateRetiredCorrectionPrompt() {
+        let custom = defaults.bool(forKey: "useCustomCorrectionPrompt")
+            ? defaults.string(forKey: "customCorrectionPrompt")
+            : nil
+        let legacy = defaults.string(forKey: "bedrockCorrectionPrompt")
+            .flatMap { $0 == LLMCorrectionService.defaultCorrectionPrompt ? nil : $0 }
+        for key in ["useCustomCorrectionPrompt", "customCorrectionPrompt", "bedrockCorrectionPrompt"] {
+            defaults.removeObject(forKey: key)
+        }
+
+        // The old prompt had no length limit. It is kept whole even past the preset limit,
+        // which applies only when the preset is next edited.
+        let normalized = PromptPresetValidation.normalized(name: Self.migratedPromptName, instruction: custom ?? legacy ?? "")
+        guard !normalized.instruction.isEmpty else { return }
+        let preset = PromptPreset(name: normalized.name, instruction: normalized.instruction)
+        presets.append(preset)
+        save()
+        if defaults.bool(forKey: "llmCorrectionEnabled"), defaults.string(forKey: "dictationCleanupPresetID") == nil {
+            defaults.set(preset.id.uuidString, forKey: "dictationCleanupPresetID")
+        }
+        logger.info("Migrated the custom correction prompt to preset \(Self.migratedPromptName, privacy: .public)")
     }
 
     // MARK: - Persistence

@@ -39,6 +39,30 @@ final class TranscriptionServiceTests: XCTestCase {
         XCTAssertFalse(sut.isTranscribing)
     }
 
+    func testTranscribe_AppliesCleanupPresetWhenCorrecting() async throws {
+        let suite = "TranscriptionServiceTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        AppPreferences.store = defaults
+        defer {
+            AppPreferences.store = .standard
+            defaults.removePersistentDomain(forName: suite)
+        }
+        defaults.set(true, forKey: "llmCorrectionEnabled")
+        let provider = MockLLMProvider()
+        provider.correctResult = "Hi Dana, the demo moved to Friday."
+        let service = TranscriptionService(
+            engine: mockEngine,
+            corrector: LLMCorrectionService(providerFactory: { provider })
+        )
+        mockEngine.transcribeResult = "tell dana the demo moved to friday"
+        let email = PromptPreset(name: "Email", instruction: "Write an email body.")
+
+        let result = try await service.transcribeAudio(url: dummyURL, settings: Settings(), cleanupPreset: email)
+
+        XCTAssertEqual(result, "Hi Dana, the demo moved to Friday.")
+        XCTAssertTrue(provider.lastSystemPrompt?.contains("Write an email body.") == true)
+    }
+
     // MARK: - Error Handling
 
     func testTranscribe_EngineThrows_PropagatesError() async {
