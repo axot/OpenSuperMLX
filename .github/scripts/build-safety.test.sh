@@ -85,6 +85,23 @@ assert_spm_resolution_is_reproducible() {
     fi
 }
 
+assert_wetext_dependencies_are_static() {
+    local build_file="$1"
+    local configure_command
+
+    configure_command="$(awk '
+        /cmake -B WeTextProcessing\/build -S WeTextProcessing\/runtime/ {
+            print
+            while ($0 ~ /\\[[:space:]]*$/ && getline) print
+            exit
+        }
+    ' "$build_file")"
+    if [[ ! "$configure_command" =~ -DBUILD_SHARED_LIBS=OFF([[:space:]]|$) ]]; then
+        printf '%s must statically link WeTextProcessing dependencies\n' "$build_file" >&2
+        return 1
+    fi
+}
+
 assert_bridging_header_compiles() {
     clang -fsyntax-only -x c -include "$REPOSITORY_ROOT/Bridge.h" /dev/null
 }
@@ -274,6 +291,10 @@ run_case "integration tests allow declared Swift package plug-ins" \
     assert_test_step_skips_package_validation "Run integration tests (hosted)"
 run_case "SPM resolution must leave Package.resolved unchanged" \
     assert_spm_resolution_is_reproducible
+run_case "local ITN build statically links native dependencies" \
+    assert_wetext_dependencies_are_static "$RUN_SCRIPT"
+run_case "release ITN build statically links native dependencies" \
+    assert_wetext_dependencies_are_static "$REPOSITORY_ROOT/.github/workflows/release.yml"
 run_case "native bridging header compiles against checked-out submodules" \
     assert_bridging_header_compiles
 run_case "Nemo wrapper typechecks against the native FFI" \

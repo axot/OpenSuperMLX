@@ -122,7 +122,7 @@ fi
 # Build WeTextProcessing ITN processor
 if [ ! -f ./build/processor_main ] || [ ! -f ./build/zh_itn_tagger.fst ] || [ ! -f ./build/zh_itn_verbalizer.fst ]; then
     echo "Building WeTextProcessing ITN processor..."
-    cmake -B WeTextProcessing/build -S WeTextProcessing/runtime -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 2>&1 | tail -3
+    cmake -B WeTextProcessing/build -S WeTextProcessing/runtime -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_SHARED_LIBS=OFF 2>&1 | tail -3
     # Apply OpenFst patch if needed (idempotent via -N, glob handles compiler-specific dir name)
     patch -p1 -N -d WeTextProcessing/runtime/fc_base-*/openfst-src < patches/WeTextProcessing/001-fix-openfst-bi-table-copy-ctor.patch 2>/dev/null || true
     cmake --build WeTextProcessing/build -j8 2>&1 | tail -5
