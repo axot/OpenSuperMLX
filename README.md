@@ -60,7 +60,7 @@
 - Optional LLM correction through AWS Bedrock or any OpenAI-compatible API. Long transcripts are split to fit the model's limits.
 - Cleanup presets: choose Raw, Clean, or any preset from **Presets** in the dropdown on the recording pill. The choice is remembered, and Raw turns LLM correction off.
 - Presets also rewrite selected text in any app: give a preset a shortcut in **Presets**, select text, and press it.
-- Voice commands: select text, press <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd>, say what to do ("translate this to Farsi", "make it more formal"), and press <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd> again. The selection is replaced. With nothing selected, the instruction writes new text at the cursor.
+- Voice commands: select text, press <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>&#96;</kbd>, say what to do ("translate this to Farsi", "make it more formal"), then click the checkmark on the recording pill or press the shortcut again to finish and apply the instruction. Press <kbd>Escape</kbd> to cancel. The selection is replaced. With nothing selected, the instruction writes new text at the cursor.
 
 **History and stats**
 - Searchable transcript history. Regenerate any transcript from its audio.

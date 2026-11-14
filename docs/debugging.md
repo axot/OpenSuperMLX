@@ -11,6 +11,19 @@ Reproduce the issue **outside the GUI** whenever possible, in this priority orde
 
 If neither CLI nor unit test can reproduce the issue (e.g., the bug is in a GUI component itself like button rendering or shortcut capture), **stop and report to the user** — explain what was attempted, why it cannot be reproduced programmatically, and let the user decide how to proceed.
 
+## Voice-command Recorder (GUI-only)
+
+The completion button has no CLI entry point. `diagnose --json` is an environment smoke check, not proof of button clicks, tooltips, layout, or focus preservation. Existing indicator tests cover state and command delivery; do not add SwiftUI layout or hierarchy unit tests.
+
+For native verification, use an editable app such as TextEdit with Microphone and Accessibility permissions and a configured transcription model and LLM provider:
+
+1. Select text, start **Voice command on selection** with its configured shortcut (default: Option + Shift + backtick), and speak an instruction. Hover the white checkmark to see **Finish and apply instruction**, then click it once. Verify the original app stays focused and the instruction replaces the captured selection exactly once.
+2. Repeat using the shortcut again to finish. In a separate recording, press Escape and verify no instruction is applied.
+3. Start with no selection and verify checkmark completion inserts the generated text at the original cursor.
+4. Verify the checkmark appears only while a voice command is recording, not during ordinary dictation, microphone connection, or processing. Check that the waveform, elapsed time, and button do not overlap.
+
+If native app access is unavailable, report these checks as unverified rather than inferring success from a passing build, CLI smoke check, or unit tests.
+
 ## Diagnostic Logging
 
 Add targeted `Logger` statements to trace execution and verify assumptions:

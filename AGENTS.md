@@ -346,6 +346,7 @@ docs/                            # See [Reference Docs](#reference-docs) for whe
 - **Protocol abstraction**: `TranscriptionEngine` protocol, `MLXEngine` implementation
 - **Communication**: `NotificationCenter` with typed `Notification.Name` extensions
 - **Recording flow**: ShortcutManager → IndicatorViewModel.startRecording() → StreamingAudioService or AudioRecorder → RecordingSaveCoordinator
+- **Voice-command completion**: The recording pill checkmark and shortcut both call `IndicatorViewModel.startDecoding()`. Preserve the nonactivating panel and first-mouse behavior so the target app keeps focus. Do not call `hide()` or `stopForce()` when submitting; cleanup cancels decoding. See [GUI verification](docs/debugging.md#voice-command-recorder-gui-only).
 - **User-facing notifications**: `ErrorToastManager.shared.show("message")` — floating toast at top of screen. Use for any user-facing warning or status message (mic disconnected, LLM errors, etc.). Defined in `Indicator/ErrorToastManager.swift`. Auto-dismissable with close button.
 
 ### Concurrency
