@@ -18,7 +18,7 @@ final class PromptPresetServiceTests: XCTestCase {
         XCTAssertEqual(outcome, .applied)
         XCTAssertEqual(provider.receivedText, "raw text")
         XCTAssertEqual(provider.receivedSystemPrompt, PromptPresetService.buildSystemPrompt(for: preset))
-        XCTAssertEqual(recorder.text, "Polished")
+        XCTAssertEqual(recorder.text, " Polished ")
         XCTAssertEqual(recorder.selection?.text, " raw text ")
     }
 
@@ -483,6 +483,19 @@ final class PromptPresetServiceGuardTests: XCTestCase {
         XCTAssertEqual(outcome, .applied, "Without evidence the write was ignored, don't paste twice")
     }
 
+    func testWriteIsIgnoredWhenTheElementNeverExposedText() {
+        let target = PromptPresetService.Target(processID: 1)
+
+        let outcome = PromptPresetService.selectionWriteOutcome(
+            original: target,
+            newText: "The cat sat",
+            selectedTextAfter: nil,
+            valueAfter: nil
+        )
+
+        XCTAssertEqual(outcome, .ignored, "Word's document split group reports success for a write it can't perform")
+    }
+
     func testCopyOwnsPasteboardOnlyForASingleWrite() {
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 10))
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 11))
@@ -569,6 +582,187 @@ final class PromptPresetWriteBackTests: XCTestCase {
 
         XCTAssertEqual(outcome, .ignored)
         XCTAssertNil(pasted)
+    }
+}
+
+// MARK: - Native Word Replacement
+
+@MainActor
+final class PromptPresetWordRangeTests: XCTestCase {
+    private let snapshot = WordSelectionReplacement.Selection(document: "Document1", start: 7, end: 16, text: "Original\r", isList: true)
+
+    func testPresetAndVoiceCommandUseTheSavedWordRangeWithoutPasting() async {
+        for voiceCommand in [false, true] {
+            let target = PromptPresetService.Target(processID: 42, bundleIdentifier: "com.microsoft.Word", wordSelection: snapshot)
+            var nativeCalls = 0
+            let service = PromptPresetService(
+                providerFactory: { StubLLMProvider(result: .success("Rewritten")) },
+                captureSelection: { _ in .init(text: self.snapshot.text, target: target) },
+                readTarget: { _ in target },
+                replaceSelection: { _, _ in XCTFail("Word must never use generic paste"); return .applied },
+                replaceWordSelection: { selection, text in
+                    nativeCalls += 1
+                    XCTAssertEqual(selection, self.snapshot)
+                    XCTAssertEqual(text, "Rewritten\r")
+                    return true
+                },
+                copyText: { _ in XCTFail("A verified Word range can be replaced") },
+                alwaysReplace: { false },
+                isAccessibilityGranted: { true }
+            )
+
+            let outcome = voiceCommand
+                ? await service.applyInstruction("Rewrite", to: .init(text: snapshot.text, target: target))
+                : await service.apply(PromptPreset(name: "Rewrite", instruction: "Rewrite"))
+
+            XCTAssertTrue(target.canVerifySelection)
+            XCTAssertEqual(outcome, .applied)
+            XCTAssertEqual(nativeCalls, 1)
+        }
+    }
+
+    func testFailedNativeReplacementCopiesWithoutPasteFallback() async {
+        let target = PromptPresetService.Target(processID: 42, bundleIdentifier: "com.microsoft.Word", wordSelection: snapshot)
+        var nativeCalls = 0
+        var copied: String?
+        let service = PromptPresetService(
+            providerFactory: { StubLLMProvider(result: .success("Rewritten")) },
+            captureSelection: { _ in .init(text: self.snapshot.text, target: target) },
+            readTarget: { _ in target },
+            replaceSelection: { _, _ in XCTFail("A failed Word range must never fall back to paste"); return .applied },
+            replaceWordSelection: { _, _ in nativeCalls += 1; return false },
+            copyText: { copied = $0 },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Rewrite", instruction: "Rewrite"))
+
+        XCTAssertEqual(outcome, .copiedToClipboard)
+        XCTAssertEqual(nativeCalls, 1)
+        XCTAssertEqual(copied, "Rewritten\r")
+    }
+
+    func testMissingWordRangeCopiesInsteadOfPastingIntoTheLiveSelection() async {
+        let target = PromptPresetService.Target(processID: 42, bundleIdentifier: "com.microsoft.Word", selectedText: "Original")
+        var copied: String?
+        let service = PromptPresetService(
+            providerFactory: { StubLLMProvider(result: .success("Rewritten")) },
+            captureSelection: { _ in .init(text: "Original", target: target) },
+            readTarget: { _ in target },
+            replaceSelection: { _, _ in XCTFail("Word needs its saved native range"); return .applied },
+            replaceWordSelection: { _, _ in XCTFail("No Word range was captured"); return false },
+            copyText: { copied = $0 },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Rewrite", instruction: "Rewrite"))
+
+        XCTAssertEqual(outcome, .copiedToClipboard)
+        XCTAssertEqual(copied, "Rewritten")
+    }
+}
+
+// MARK: - Selection Boundaries
+
+@MainActor
+final class PromptPresetSelectionBoundaryTests: XCTestCase {
+    func testSelectedParagraphMarksKeepSurroundingParagraphsSeparate() async {
+        for separator in ["\r", "\n", "\r\n", "\u{2029}"] {
+            for voiceCommand in [false, true] {
+                let selected = "teh cat" + separator
+                let document = "Before" + separator + selected + "After" + separator
+                let replacement = await rewrite(selected, output: "The cat", voiceCommand: voiceCommand)
+
+                XCTAssertEqual(replacement, "The cat" + separator)
+                XCTAssertEqual(
+                    replacement.map { document.replacingOccurrences(of: selected, with: $0) },
+                    "Before" + separator + "The cat" + separator + "After" + separator
+                )
+            }
+        }
+    }
+
+    func testLeadingBlankLinesAndIndentationStayAtTheSelectionBoundary() async {
+        for voiceCommand in [false, true] {
+            let replacement = await rewrite("\r\r\t  teh cat", output: "The cat", voiceCommand: voiceCommand)
+
+            XCTAssertEqual(replacement, "\r\r\t  The cat")
+        }
+    }
+
+    func testTrailingBlankLinesAndSpacesArePreservedExactlyOnce() async {
+        for voiceCommand in [false, true] {
+            let replacement = await rewrite("teh cat  \r\r", output: "\nThe cat\n\n", voiceCommand: voiceCommand)
+
+            XCTAssertEqual(replacement, "The cat  \r\r")
+        }
+    }
+
+    func testPartialParagraphKeepsSpacesSeparatingUnselectedWords() async {
+        for voiceCommand in [false, true] {
+            let replacement = await rewrite(" teh cat ", output: "The cat", voiceCommand: voiceCommand)
+
+            XCTAssertEqual(replacement.map { "Before" + $0 + "after." }, "Before The cat after.")
+        }
+    }
+
+    func testModelPaddingDoesNotAddParagraphsToAnUnpaddedSelection() async {
+        for voiceCommand in [false, true] {
+            let replacement = await rewrite("teh cat", output: "\n The cat \n", voiceCommand: voiceCommand)
+
+            XCTAssertEqual(replacement, "The cat")
+        }
+    }
+
+    func testInstructionCanStillChangeParagraphsInsideTheSelection() async {
+        for voiceCommand in [false, true] {
+            let replacement = await rewrite("\rteh cat sat. It slept.\r", output: "- The cat sat.\n- It slept.", voiceCommand: voiceCommand)
+
+            XCTAssertEqual(replacement, "\r- The cat sat.\n- It slept.\r")
+        }
+    }
+
+    func testClipboardFallbackPreservesParagraphBoundaries() async {
+        let provider = StubLLMProvider(result: .success("The cat"))
+        var copied: String?
+        let service = PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in .init(text: "\rteh cat\r", target: .init(processID: 42)) },
+            replaceSelection: { _, _ in XCTFail("An unverifiable selection must not be replaced"); return .applied },
+            copyText: { copied = $0 },
+            alwaysReplace: { false },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Polish", instruction: "Fix grammar."))
+
+        XCTAssertEqual(outcome, .copiedToClipboard)
+        XCTAssertEqual(copied, "\rThe cat\r")
+    }
+
+    // MARK: - Helpers
+
+    private func rewrite(_ text: String, output: String, voiceCommand: Bool) async -> String? {
+        let provider = StubLLMProvider(result: .success(output))
+        let target = PromptPresetService.Target(selectedText: text)
+        let selection = PromptPresetService.Selection(text: text, target: target)
+        var replacement: String?
+        let service = PromptPresetService(
+            providerFactory: { provider },
+            captureSelection: { _ in selection },
+            readTarget: { _ in target },
+            replaceSelection: { _, text in replacement = text; return .applied },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome: PresetApplyOutcome
+        if voiceCommand {
+            outcome = await service.applyInstruction("Fix grammar.", to: selection)
+        } else {
+            outcome = await service.apply(PromptPreset(name: "Polish", instruction: "Fix grammar."))
+        }
+        XCTAssertEqual(outcome, .applied)
+        return replacement
     }
 }
 

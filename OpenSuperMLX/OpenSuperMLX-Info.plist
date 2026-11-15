@@ -24,7 +24,7 @@
 	<key>NSAccessibilityUsageDescription</key>
 	<string>OpenSuperMLX needs accessibility access to provide system-wide functionality.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>OpenSuperMLX needs accessibility access to provide system-wide functionality.</string>
+	<string>OpenSuperMLX uses Microsoft Word automation to replace selected text while preserving paragraph and list formatting.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

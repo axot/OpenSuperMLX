@@ -45,15 +45,18 @@ final class PromptPresetService {
 
     struct Target {
         var processID: pid_t?
+        var bundleIdentifier: String?
         var element: AXUIElement?
         var selectedText: String?
         var selectedRange: NSRange?
         var value: String?
+        var wordSelection: WordSelectionReplacement.Selection?
 
-        /// A matching process alone can't tell the original selection from a new one in the
-        /// same app, so a write-back is safe only when Accessibility exposed the selection itself.
+        /// A matching process alone cannot verify a selection. Word supplies a native
+        /// range; other applications expose selected text or a range through Accessibility.
         var canVerifySelection: Bool {
-            selectedText?.isEmpty == false || (selectedRange?.length ?? 0) > 0
+            wordSelection.map { $0.end > $0.start } == true
+                || selectedText?.isEmpty == false || (selectedRange?.length ?? 0) > 0
         }
 
         /// Every attribute readable at capture time must read back unchanged, so a moved
@@ -100,6 +103,7 @@ final class PromptPresetService {
     private let captureSelection: @MainActor (Bool) async -> Selection?
     private let readTarget: @MainActor (Selection) async -> Target?
     private let replaceSelection: @MainActor (Selection, String) async -> PresetApplyOutcome
+    private let replaceWordSelection: @MainActor (WordSelectionReplacement.Selection, String) async -> Bool
     private let readFocus: @MainActor () -> Target
     private let copyText: @MainActor (String) -> Void
     private let insertText: @MainActor (String) -> Void
@@ -112,6 +116,7 @@ final class PromptPresetService {
         captureSelection: @escaping @MainActor (Bool) async -> Selection? = { await PromptPresetService.captureFrontmostSelection(canCopyImmediately: $0) },
         readTarget: @escaping @MainActor (Selection) async -> Target? = { await PromptPresetService.reactivateTarget(of: $0) },
         replaceSelection: @escaping @MainActor (Selection, String) async -> PresetApplyOutcome = { await PromptPresetService.replace($0, with: $1) },
+        replaceWordSelection: @escaping @MainActor (WordSelectionReplacement.Selection, String) async -> Bool = { await WordSelectionReplacement.replace($0, with: $1) },
         readFocus: @escaping @MainActor () -> Target = { PromptPresetService.readFrontmostTarget() },
         copyText: @escaping @MainActor (String) -> Void = { text in
             NSPasteboard.general.clearContents()
@@ -125,6 +130,7 @@ final class PromptPresetService {
         self.captureSelection = captureSelection
         self.readTarget = readTarget
         self.replaceSelection = replaceSelection
+        self.replaceWordSelection = replaceWordSelection
         self.readFocus = readFocus
         self.copyText = copyText
         self.insertText = insertText
@@ -272,15 +278,20 @@ final class PromptPresetService {
                 try await provider.correctTranscription(userMessage, systemPrompt: systemPrompt)
             }
             guard !Task.isCancelled else { return .ignored }
-            let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !result.isEmpty else {
+            let rewrittenText = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rewrittenText.isEmpty else {
                 return .failed("The model returned an empty result. The selection was left unchanged.")
             }
             // Writing identical text can collapse the selection without changing the
             // document, which would read as an ignored write and paste a duplicate.
-            guard result != selection.text.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            guard rewrittenText != selection.text.trimmingCharacters(in: .whitespacesAndNewlines) else {
                 return .unchanged
             }
+            // A selected paragraph mark separates unselected text too; the model's
+            // trimmed response must not remove that boundary when replacing the selection.
+            let leadingWhitespace = selection.text.prefix(while: \.isWhitespace)
+            let trailingWhitespace = selection.text.reversed().prefix(while: \.isWhitespace).reversed()
+            let result = String(leadingWhitespace) + rewrittenText + String(trailingWhitespace)
             guard selection.target.canVerifySelection || alwaysReplace() else {
                 copyText(result)
                 logger.info("\(label, privacy: .public) result copied; the selection can't be verified")
@@ -293,6 +304,16 @@ final class PromptPresetService {
             }
             guard selection.target.isUnchanged(in: current) else {
                 return .failed("The selection changed while the preset was running. Nothing was replaced.")
+            }
+            if selection.target.bundleIdentifier == "com.microsoft.Word" {
+                guard let wordSelection = selection.target.wordSelection else {
+                    copyText(result)
+                    return .copiedToClipboard
+                }
+                if await replaceWordSelection(wordSelection, result) { return .applied }
+                guard !Task.isCancelled else { return .ignored }
+                copyText(result)
+                return .copiedToClipboard
             }
             let outcome = await replaceSelection(selection, result)
             logger.info(
@@ -328,7 +349,15 @@ final class PromptPresetService {
     // MARK: - Selection
 
     private static func captureFrontmostSelection(canCopyImmediately: Bool) async -> Selection? {
-        let target = readFrontmostTarget()
+        var target = readFrontmostTarget()
+        if target.bundleIdentifier == "com.microsoft.Word", let native = await WordSelectionReplacement.capture() {
+            // Word can drop its live highlight; the saved range is checked again when written.
+            target.selectedText = nil
+            target.selectedRange = nil
+            target.value = nil
+            target.wordSelection = native
+            return Selection(text: native.text, target: target)
+        }
         if let text = target.selectedText,
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return Selection(text: text, target: target)
@@ -352,17 +381,19 @@ final class PromptPresetService {
     }
 
     static func readFrontmostTarget() -> Target {
-        let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let application = NSWorkspace.shared.frontmostApplication
+        let processID = application?.processIdentifier
         let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused
         else {
-            return Target(processID: processID)
+            return Target(processID: processID, bundleIdentifier: application?.bundleIdentifier)
         }
         let element = focused as! AXUIElement
         return Target(
             processID: processID,
+            bundleIdentifier: application?.bundleIdentifier,
             element: element,
             selectedText: stringAttribute(kAXSelectedTextAttribute, of: element),
             selectedRange: selectedTextRange(of: element),
@@ -440,7 +471,7 @@ final class PromptPresetService {
                 try? await Task.sleep(for: .milliseconds(30))
             }
         }
-        if let element = selection.target.element {
+        if selection.target.bundleIdentifier != "com.microsoft.Word", let element = selection.target.element {
             _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         }
         return readFrontmostTarget()
@@ -453,6 +484,8 @@ final class PromptPresetService {
 
     /// Some apps (Outlook) report success for the Accessibility write and leave the text
     /// untouched, so trust the success only when nothing readable proves it was ignored.
+    /// Word's document split group exposes no text at all yet still reports success, so a
+    /// write to an element that never exposed its selection or value counts as ignored.
     nonisolated static func selectionWriteOutcome(
         original: Target,
         newText: String,
@@ -460,6 +493,7 @@ final class PromptPresetService {
         valueAfter: String?
     ) -> SelectionWriteOutcome {
         if selectedTextAfter == newText { return .applied }
+        if original.selectedText == nil, original.value == nil { return .ignored }
         if let value = original.value, let after = valueAfter, value != after { return .applied }
         if let value = original.value, let after = valueAfter, value == after { return .ignored }
         if let before = original.selectedText, !before.isEmpty, selectedTextAfter == before { return .ignored }

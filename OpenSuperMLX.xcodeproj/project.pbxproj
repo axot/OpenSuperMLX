@@ -646,7 +646,7 @@
 				INFOPLIST_FILE = "OpenSuperMLX/OpenSuperMLX-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "OpenSuperMLX Debug";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX needs accessibility access to provide system-wide functionality.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX uses Microsoft Word automation to replace selected text while preserving paragraph and list formatting.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenSuperMLX needs microphone access to record audio for transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -703,7 +703,7 @@
 				HEADER_SEARCH_PATHS = "$(inherited)";
 				INFOPLIST_FILE = "OpenSuperMLX/OpenSuperMLX-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX needs accessibility access to provide system-wide functionality.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperMLX uses Microsoft Word automation to replace selected text while preserving paragraph and list formatting.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OpenSuperMLX needs microphone access to record audio for transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
