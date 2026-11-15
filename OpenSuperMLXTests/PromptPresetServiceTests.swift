@@ -483,19 +483,6 @@ final class PromptPresetServiceGuardTests: XCTestCase {
         XCTAssertEqual(outcome, .applied, "Without evidence the write was ignored, don't paste twice")
     }
 
-    func testWriteIsIgnoredWhenTheElementNeverExposedText() {
-        let target = PromptPresetService.Target(processID: 1)
-
-        let outcome = PromptPresetService.selectionWriteOutcome(
-            original: target,
-            newText: "The cat sat",
-            selectedTextAfter: nil,
-            valueAfter: nil
-        )
-
-        XCTAssertEqual(outcome, .ignored, "Word's document split group reports success for a write it can't perform")
-    }
-
     func testCopyOwnsPasteboardOnlyForASingleWrite() {
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 10))
         XCTAssertTrue(PromptPresetService.isCopyOnlyPasteboardWrite(changeCountAfterClear: 10, current: 11))
@@ -659,6 +646,49 @@ final class PromptPresetWordRangeTests: XCTestCase {
 
         XCTAssertEqual(outcome, .copiedToClipboard)
         XCTAssertEqual(copied, "Rewritten")
+    }
+
+    func testSavedWordRangeIsWrittenWhenAccessibilityCannotReadTheTarget() async {
+        let target = PromptPresetService.Target(processID: 42, bundleIdentifier: "com.microsoft.Word", wordSelection: snapshot)
+        var nativeCalls = 0
+        let service = PromptPresetService(
+            providerFactory: { StubLLMProvider(result: .success("Rewritten")) },
+            captureSelection: { _ in .init(text: self.snapshot.text, target: target) },
+            readTarget: { _ in XCTFail("Word's saved range does not need Accessibility"); return nil },
+            replaceSelection: { _, _ in XCTFail("Word must never use generic paste"); return .applied },
+            replaceWordSelection: { selection, text in
+                nativeCalls += 1
+                XCTAssertEqual(selection, self.snapshot)
+                XCTAssertEqual(text, "Rewritten\r")
+                return true
+            },
+            copyText: { _ in XCTFail("The saved range can be verified through Word") },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Rewrite", instruction: "Rewrite"))
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(nativeCalls, 1)
+    }
+
+    func testUnavailableWordRangeCopiesInsteadOfReportingFailure() async {
+        let target = PromptPresetService.Target(processID: 42, bundleIdentifier: "com.microsoft.Word", wordSelection: snapshot)
+        var copied: String?
+        let service = PromptPresetService(
+            providerFactory: { StubLLMProvider(result: .success("Rewritten")) },
+            captureSelection: { _ in .init(text: self.snapshot.text, target: target) },
+            readTarget: { _ in XCTFail("A failed native write must not depend on Accessibility"); return nil },
+            replaceSelection: { _, _ in XCTFail("A failed Word range must never fall back to paste"); return .applied },
+            replaceWordSelection: { _, _ in false },
+            copyText: { copied = $0 },
+            isAccessibilityGranted: { true }
+        )
+
+        let outcome = await service.apply(PromptPreset(name: "Rewrite", instruction: "Rewrite"))
+
+        XCTAssertEqual(outcome, .copiedToClipboard)
+        XCTAssertEqual(copied, "Rewritten\r")
     }
 }
 

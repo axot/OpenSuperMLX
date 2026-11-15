@@ -292,6 +292,16 @@ final class PromptPresetService {
             let leadingWhitespace = selection.text.prefix(while: \.isWhitespace)
             let trailingWhitespace = selection.text.reversed().prefix(while: \.isWhitespace).reversed()
             let result = String(leadingWhitespace) + rewrittenText + String(trailingWhitespace)
+            if selection.target.bundleIdentifier == "com.microsoft.Word" {
+                guard let wordSelection = selection.target.wordSelection else {
+                    copyText(result)
+                    return .copiedToClipboard
+                }
+                if await replaceWordSelection(wordSelection, result) { return .applied }
+                guard !Task.isCancelled else { return .ignored }
+                copyText(result)
+                return .copiedToClipboard
+            }
             guard selection.target.canVerifySelection || alwaysReplace() else {
                 copyText(result)
                 logger.info("\(label, privacy: .public) result copied; the selection can't be verified")
@@ -304,16 +314,6 @@ final class PromptPresetService {
             }
             guard selection.target.isUnchanged(in: current) else {
                 return .failed("The selection changed while the preset was running. Nothing was replaced.")
-            }
-            if selection.target.bundleIdentifier == "com.microsoft.Word" {
-                guard let wordSelection = selection.target.wordSelection else {
-                    copyText(result)
-                    return .copiedToClipboard
-                }
-                if await replaceWordSelection(wordSelection, result) { return .applied }
-                guard !Task.isCancelled else { return .ignored }
-                copyText(result)
-                return .copiedToClipboard
             }
             let outcome = await replaceSelection(selection, result)
             logger.info(
@@ -484,8 +484,6 @@ final class PromptPresetService {
 
     /// Some apps (Outlook) report success for the Accessibility write and leave the text
     /// untouched, so trust the success only when nothing readable proves it was ignored.
-    /// Word's document split group exposes no text at all yet still reports success, so a
-    /// write to an element that never exposed its selection or value counts as ignored.
     nonisolated static func selectionWriteOutcome(
         original: Target,
         newText: String,
@@ -493,7 +491,6 @@ final class PromptPresetService {
         valueAfter: String?
     ) -> SelectionWriteOutcome {
         if selectedTextAfter == newText { return .applied }
-        if original.selectedText == nil, original.value == nil { return .ignored }
         if let value = original.value, let after = valueAfter, value != after { return .applied }
         if let value = original.value, let after = valueAfter, value == after { return .ignored }
         if let before = original.selectedText, !before.isEmpty, selectedTextAfter == before { return .ignored }

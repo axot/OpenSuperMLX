@@ -35,18 +35,29 @@ struct WordSelectionReplacement {
         if selection.isList {
             let leading = replacement.prefix { $0 == " " || $0 == "\t" }
             let content = replacement.dropFirst(leading.count)
-            if let first = content.first, "•·‣∙●○".contains(first) {
+            if let first = content.first, isLiteralBullet(first, followedBy: content.dropFirst()) {
                 replacement = String(leading) + content.dropFirst().drop { $0 == " " || $0 == "\t" }
             }
         }
         return Plan(start: selection.start, end: end, text: replacement)
     }
 
+    /// A native list renders its own bullet, so a literal one would be duplicated.
+    /// ASCII glyphs are only markers when followed by whitespace; `-dash` and
+    /// `*emphasis*` are text.
+    private static func isLiteralBullet(_ first: Character, followedBy rest: Substring) -> Bool {
+        if "•·‣∙●○".contains(first) { return true }
+        guard first == "-" || first == "*" else { return false }
+        return rest.first == " " || rest.first == "\t"
+    }
+
     // MARK: - Word Automation
 
-    static func capture() async -> Selection? {
+    static func capture(
+        run: @escaping @Sendable (String) -> NSAppleEventDescriptor? = { execute($0) }
+    ) async -> Selection? {
         await Task.detached(priority: .userInitiated) {
-            guard let result = execute("""
+            guard let result = run("""
                 with timeout of 5 seconds
                     tell application id "com.microsoft.Word"
                         if not (exists active document) then return {}

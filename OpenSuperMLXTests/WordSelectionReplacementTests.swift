@@ -41,6 +41,31 @@ final class WordSelectionReplacementTests: XCTestCase {
         }
     }
 
+    func testNativeListRemovesASCIIDashAndAsteriskMarkers() throws {
+        for marker in ["- ", "* "] {
+            let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 9, text: "Original\r", isList: true)
+            let plan = try XCTUnwrap(WordSelectionReplacement.plan(for: selection, text: "\(marker)Rewritten\r"))
+
+            XCTAssertEqual(plan.text, "Rewritten")
+        }
+    }
+
+    func testNativeListKeepsASCIITextThatIsNotABulletMarker() throws {
+        for text in ["-dash", "*emphasis*"] {
+            let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 9, text: "Original\r", isList: true)
+            let plan = try XCTUnwrap(WordSelectionReplacement.plan(for: selection, text: text))
+
+            XCTAssertEqual(plan.text, text)
+        }
+    }
+
+    func testPlainParagraphKeepsIntentionalASCIIDashBullet() throws {
+        let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 9, text: "Original\r", isList: false)
+        let plan = try XCTUnwrap(WordSelectionReplacement.plan(for: selection, text: "- Rewritten"))
+
+        XCTAssertEqual(plan.text, "- Rewritten")
+    }
+
     func testPlainParagraphKeepsIntentionalBulletTextAndUnicode() throws {
         let selection = WordSelectionReplacement.Selection(document: "Document1", start: 100, end: 109, text: "متن 😀\r", isList: false)
         let plan = try XCTUnwrap(WordSelectionReplacement.plan(for: selection, text: "• متن تازه 😀\r"))
@@ -78,13 +103,25 @@ final class WordSelectionReplacementTests: XCTestCase {
             XCTAssertFalse(applied)
         }
     }
+
+    func testCancelledReplacementNeverRunsTheScript() async {
+        let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 9, text: "Original\r", isList: false)
+        let task = Task { () -> Bool in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await WordSelectionReplacement.replace(selection, with: "Rewritten", run: { _ in "applied" })
+        }
+        task.cancel()
+        let applied = await task.value
+
+        XCTAssertFalse(applied)
+    }
 }
 
 // MARK: - Native Capture
 
 final class WordSelectionCaptureTests: XCTestCase {
     func testCapturePreservesNativeTextAndRangeOffsets() throws {
-        let result = descriptor(start: 20, end: 29, text: "متن 😀\r", isList: true)
+        let result = Self.descriptor(start: 20, end: 29, text: "متن 😀\r", isList: true)
         let selection = try XCTUnwrap(WordSelectionReplacement.selection(from: result))
 
         XCTAssertEqual(selection.document, "Document1")
@@ -96,21 +133,43 @@ final class WordSelectionCaptureTests: XCTestCase {
 
     func testMissingOrInvalidNativeRangeIsRejected() {
         XCTAssertNil(WordSelectionReplacement.selection(from: .list()))
-        XCTAssertNil(WordSelectionReplacement.selection(from: descriptor(start: -1, end: 3, text: "Text", isList: false)))
-        XCTAssertNil(WordSelectionReplacement.selection(from: descriptor(start: 9, end: 3, text: "Text", isList: false)))
+        XCTAssertNil(WordSelectionReplacement.selection(from: Self.descriptor(start: -1, end: 3, text: "Text", isList: false)))
+        XCTAssertNil(WordSelectionReplacement.selection(from: Self.descriptor(start: 9, end: 3, text: "Text", isList: false)))
     }
 
     func testInsertionPointIsCapturedWithoutInventingASelection() throws {
-        let selection = try XCTUnwrap(WordSelectionReplacement.selection(from: descriptor(start: 3, end: 3, text: "", isList: false)))
+        let selection = try XCTUnwrap(WordSelectionReplacement.selection(from: Self.descriptor(start: 3, end: 3, text: "", isList: false)))
 
         XCTAssertEqual(selection.start, selection.end)
         XCTAssertEqual(selection.text, "")
         XCTAssertNil(WordSelectionReplacement.plan(for: selection, text: "Rewritten"))
     }
 
+    func testCaptureUsesTheInjectedScriptResult() async throws {
+        let captured = await WordSelectionReplacement.capture(run: { script in
+            XCTAssertTrue(script.contains("story type of r is not main text story"))
+            return Self.descriptor(start: 20, end: 29, text: "متن 😀\r", isList: true)
+        })
+        let selection = try XCTUnwrap(captured)
+
+        XCTAssertEqual(selection.document, "Document1")
+        XCTAssertEqual(selection.start, 20)
+        XCTAssertEqual(selection.end, 29)
+        XCTAssertEqual(selection.text, "متن 😀\r")
+        XCTAssertTrue(selection.isList)
+    }
+
+    func testCaptureReturnsNilWhenTheScriptFailsOrRejectsTheStory() async {
+        let failed = await WordSelectionReplacement.capture(run: { _ in nil })
+        XCTAssertNil(failed)
+
+        let notMainText = await WordSelectionReplacement.capture(run: { _ in .list() })
+        XCTAssertNil(notMainText)
+    }
+
     // MARK: - Helpers
 
-    private func descriptor(start: Int32, end: Int32, text: String, isList: Bool) -> NSAppleEventDescriptor {
+    private static func descriptor(start: Int32, end: Int32, text: String, isList: Bool) -> NSAppleEventDescriptor {
         let result = NSAppleEventDescriptor.list()
         result.insert(NSAppleEventDescriptor(string: "Document1"), at: 1)
         result.insert(NSAppleEventDescriptor(int32: start), at: 2)
