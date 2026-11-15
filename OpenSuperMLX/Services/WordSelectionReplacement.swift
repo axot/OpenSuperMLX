@@ -33,13 +33,32 @@ struct WordSelectionReplacement {
         }
         guard end > selection.start else { return nil }
         if selection.isList {
-            let leading = replacement.prefix { $0 == " " || $0 == "\t" }
-            let content = replacement.dropFirst(leading.count)
-            if let first = content.first, isLiteralBullet(first, followedBy: content.dropFirst()) {
-                replacement = String(leading) + content.dropFirst().drop { $0 == " " || $0 == "\t" }
-            }
+            replacement = removingLiteralBullets(from: replacement)
         }
         return Plan(start: selection.start, end: end, text: replacement)
+    }
+
+    /// Paragraphs inserted into a native list inherit its formatting, so every line's
+    /// literal marker would be duplicated, not just the first.
+    private static func removingLiteralBullets(from text: String) -> String {
+        var result = ""
+        var rest = Substring(text)
+        while true {
+            let lineEnd = rest.firstIndex(where: \.isNewline) ?? rest.endIndex
+            result += removingLiteralBullet(from: rest[..<lineEnd])
+            guard lineEnd < rest.endIndex else { return result }
+            result.append(rest[lineEnd])
+            rest = rest[rest.index(after: lineEnd)...]
+        }
+    }
+
+    private static func removingLiteralBullet(from line: Substring) -> String {
+        let leading = line.prefix { $0 == " " || $0 == "\t" }
+        let content = line.dropFirst(leading.count)
+        guard let first = content.first, isLiteralBullet(first, followedBy: content.dropFirst()) else {
+            return String(line)
+        }
+        return String(leading) + content.dropFirst().drop { $0 == " " || $0 == "\t" }
     }
 
     /// A native list renders its own bullet, so a literal one would be duplicated.

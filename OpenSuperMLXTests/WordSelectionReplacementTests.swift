@@ -50,6 +50,13 @@ final class WordSelectionReplacementTests: XCTestCase {
         }
     }
 
+    func testNativeListRemovesMarkersFromEveryParagraph() throws {
+        let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 8, text: "One\rTwo\r", isList: true)
+        let plan = try XCTUnwrap(WordSelectionReplacement.plan(for: selection, text: "- First\r  • Second\n* -dash\r"))
+
+        XCTAssertEqual(plan.text, "First\r  Second\n-dash")
+    }
+
     func testNativeListKeepsASCIITextThatIsNotABulletMarker() throws {
         for text in ["-dash", "*emphasis*"] {
             let selection = WordSelectionReplacement.Selection(document: "Document1", start: 0, end: 9, text: "Original\r", isList: true)
