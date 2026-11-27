@@ -20,10 +20,10 @@ enum SidebarTab: Int, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .recordings: return "Recordings"
-        case .stats: return "Stats"
-        case .presets: return "Presets"
-        case .settings: return "Settings"
+        case .recordings: return String(localized: "Recordings")
+        case .stats: return String(localized: "Stats")
+        case .presets: return String(localized: "Presets")
+        case .settings: return String(localized: "Settings")
         }
     }
 
@@ -100,7 +100,7 @@ struct SidebarLayout<Content: View>: View {
             Spacer()
 
             VStack(alignment: .leading, spacing: 1) {
-                SidebarToolLink(label: "Send feedback", systemImage: "bubble.left") {
+                SidebarToolLink(label: String(localized: "Send feedback"), systemImage: "bubble.left") {
                     NSWorkspace.shared.open(SidebarLinks.feedback)
                 }
                 SidebarToolLink(label: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right") {

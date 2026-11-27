@@ -71,17 +71,17 @@ enum ShareCardModel {
         let topPercentile = s.heroes.map(\.percentile).max()
         let topValue = topPercentile.map { UsageStats.formatTop(100 - $0) } ?? "—"
         return [
-            Bubble(label: "SESSIONS", value: s.sessions.formatted(), sub: "recorded",
+            Bubble(label: String(localized: "SESSIONS"), value: s.sessions.formatted(), sub: String(localized: "recorded"),
                    size: .lg, anchor: UnitPoint(x: 0.5, y: 0.5), phase: 0),
-            Bubble(label: "TOP", value: "\(topValue)%", sub: "generic baseline",
+            Bubble(label: String(localized: "TOP"), value: "\(topValue)%", sub: String(localized: "generic baseline"),
                    size: .sm, anchor: UnitPoint(x: 0.5, y: 0.14), phase: 1),
-            Bubble(label: "STREAK", value: "\(s.streak)", sub: "days",
+            Bubble(label: String(localized: "STREAK"), value: "\(s.streak)", sub: String(localized: "days"),
                    size: .sm, anchor: UnitPoint(x: 0.82, y: 0.2), phase: 2),
-            Bubble(label: "SAVED", value: StatsFormat.shortDuration(s.timeSavedSeconds), sub: "vs typing",
+            Bubble(label: String(localized: "SAVED"), value: StatsFormat.shortDuration(s.timeSavedSeconds), sub: String(localized: "vs typing"),
                    size: .sm, anchor: UnitPoint(x: 0.18, y: 0.2), phase: 3),
-            Bubble(label: "WORDS", value: StatsFormat.compactCount(s.totalUnits), sub: "transcribed",
+            Bubble(label: String(localized: "WORDS"), value: StatsFormat.compactCount(s.totalUnits), sub: String(localized: "transcribed"),
                    size: .md, anchor: UnitPoint(x: 0.78, y: 0.82), phase: 4),
-            Bubble(label: "BUSIEST", value: StatsFormat.shortDay(s.busiestDay), sub: "day",
+            Bubble(label: String(localized: "BUSIEST"), value: StatsFormat.shortDay(s.busiestDay), sub: String(localized: "day"),
                    size: .md, anchor: UnitPoint(x: 0.22, y: 0.82), phase: 5)
         ]
     }
@@ -301,12 +301,12 @@ private struct StatsGrid: View {
             HeroPanel(heroes: snapshot.heroes)
             ContributionGraph(daily: snapshot.dailyActivity)
             LazyVGrid(columns: columns, spacing: 12) {
-                StatTile(icon: "flame", value: "\(snapshot.streak) days", label: "Current streak")
-                StatTile(icon: "text.alignleft", value: StatsFormat.fullCount(snapshot.totalUnits), label: "Total words")
-                StatTile(icon: "clock", value: StatsFormat.hoursMinutes(snapshot.spokenSeconds), label: "Spoken time")
-                StatTile(icon: "clock.arrow.circlepath", value: StatsFormat.hoursMinutes(snapshot.timeSavedSeconds), label: "Time saved vs typing")
-                StatTile(icon: "mic", value: StatsFormat.fullCount(snapshot.sessions), label: "Total sessions")
-                StatTile(icon: "chart.bar", value: StatsFormat.shortDay(snapshot.busiestDay), label: "Busiest day")
+                StatTile(icon: "flame", value: String(localized: "\(snapshot.streak) days"), label: String(localized: "Current streak"))
+                StatTile(icon: "text.alignleft", value: StatsFormat.fullCount(snapshot.totalUnits), label: String(localized: "Total words"))
+                StatTile(icon: "clock", value: StatsFormat.hoursMinutes(snapshot.spokenSeconds), label: String(localized: "Spoken time"))
+                StatTile(icon: "clock.arrow.circlepath", value: StatsFormat.hoursMinutes(snapshot.timeSavedSeconds), label: String(localized: "Time saved vs typing"))
+                StatTile(icon: "mic", value: StatsFormat.fullCount(snapshot.sessions), label: String(localized: "Total sessions"))
+                StatTile(icon: "chart.bar", value: StatsFormat.shortDay(snapshot.busiestDay), label: String(localized: "Busiest day"))
             }
         }
     }
@@ -321,13 +321,13 @@ private struct HeroPanel: View {
 
     var body: some View {
         if heroes.isEmpty {
-            HeroCard(tag: "KEEP GOING", topText: "—", caption: "Not enough data yet", emphasized: true)
+            HeroCard(tag: String(localized: "KEEP GOING"), topText: "—", caption: String(localized: "Not enough data yet"), emphasized: true)
         } else {
             HStack(spacing: 12) {
                 ForEach(Array(heroes.enumerated()), id: \.offset) { idx, h in
                     HeroCard(tag: h.language.displayName.uppercased(),
                              topText: UsageStats.formatTop(100 - h.percentile),
-                             caption: "Estimated vs generic typing baseline",
+                             caption: String(localized: "Estimated vs generic typing baseline"),
                              emphasized: idx == 0)
                         .frame(maxWidth: .infinity)
                 }
@@ -562,7 +562,7 @@ private struct ContributionGraph: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DesignTokens.txt2)
             } else {
-                Text("\(totalSessions) sessions · \(activeDays) active days")
+                Text(String(localized: "\(totalSessions) sessions · \(activeDays) active days"))
                     .font(.system(size: 12))
                     .foregroundStyle(DesignTokens.txt3)
             }

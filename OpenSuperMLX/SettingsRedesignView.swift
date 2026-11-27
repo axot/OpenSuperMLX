@@ -17,11 +17,11 @@ enum SettingsSubtab: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var label: String {
         switch self {
-        case .shortcuts: return "Shortcuts"
-        case .model: return "Model"
-        case .transcription: return "Transcription"
-        case .advanced: return "Advanced"
-        case .llm: return "LLM"
+        case .shortcuts: return String(localized: "Shortcuts")
+        case .model: return String(localized: "Model")
+        case .transcription: return String(localized: "Transcription")
+        case .advanced: return String(localized: "Advanced")
+        case .llm: return String(localized: "LLM")
         }
     }
     var systemImage: String {
@@ -119,8 +119,8 @@ struct SettingsRedesignView: View {
 
     private var shortcutsTab: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "Recording Trigger") {
-                SettingsField(label: "Toggle record shortcut") {
+            SettingsGroup(title: String(localized: "Recording Trigger")) {
+                SettingsField(label: String(localized: "Toggle record shortcut")) {
                     KeyboardShortcuts.Recorder("", name: .toggleRecord)
                         .shortcutValidation { shortcut in
                             MainActor.assumeIsolated { shortcutConflict(for: shortcut, excluding: .toggleRecord) }
@@ -129,8 +129,8 @@ struct SettingsRedesignView: View {
                 }
                 SettingsFieldDivider()
                 SettingsField(
-                    label: "Voice command on selection",
-                    detail: "Select text, press, say what to do, press again"
+                    label: String(localized: "Voice command on selection"),
+                    detail: String(localized: "Select text, press, say what to do, press again")
                 ) {
                     KeyboardShortcuts.Recorder("", name: .voiceCommand)
                         .shortcutValidation { shortcut in
@@ -139,13 +139,13 @@ struct SettingsRedesignView: View {
                         .frame(width: 150)
                 }
             }
-            SettingsGroup(title: "Recording Behavior") {
-                SettingsField(label: "Play sound when recording starts") {
+            SettingsGroup(title: String(localized: "Recording Behavior")) {
+                SettingsField(label: String(localized: "Play sound when recording starts")) {
                     DesignToggle(isOn: $viewModel.playSoundOnRecordStart)
                 }
             }
-            SettingsGroup(title: "Privacy") {
-                SettingsField(label: "On-device transcription", detail: "Audio never leaves your Mac") {
+            SettingsGroup(title: String(localized: "Privacy")) {
+                SettingsField(label: String(localized: "On-device transcription"), detail: String(localized: "Audio never leaves your Mac")) {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold))
                         Text("Always on").font(.system(size: 12.5, weight: .semibold))
@@ -162,12 +162,12 @@ struct SettingsRedesignView: View {
     ) -> KeyboardShortcuts.ValidationResult {
         MainActor.assumeIsolated {
             if let owner = ShortcutManager.builtInShortcutOwner(of: shortcut, excluding: name) {
-                return .disallow(reason: "Already used by \(owner).")
+                return .disallow(reason: String(localized: "Already used by \(owner)."))
             }
             if let preset = PromptPresetStore.shared.presets.first(where: {
                 $0.shortcutName.shortcut == shortcut
             }) {
-                return .disallow(reason: "Already used by preset “\(preset.name)”.")
+                return .disallow(reason: String(localized: "Already used by preset “\(preset.name)”."))
             }
             return .allow
         }
@@ -181,7 +181,7 @@ struct SettingsRedesignView: View {
 
     private var modelTab: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "Speech Recognition Model") {
+            SettingsGroup(title: String(localized: "Speech Recognition Model")) {
                 ForEach(Array(viewModel.availableModels.enumerated()), id: \.element.id) { index, model in
                     if index > 0 {
                         SettingsFieldDivider()
@@ -191,15 +191,15 @@ struct SettingsRedesignView: View {
                 if viewModel.availableModels.first(where: { $0.id == viewModel.selectedModelID })?.architecture == .qwen3ASR {
                     SettingsFieldDivider()
                     SettingsField(
-                        label: "Neural Engine audio encoder",
-                        detail: "Run the audio encoder on the Neural Engine to free the GPU"
+                        label: String(localized: "Neural Engine audio encoder"),
+                        detail: String(localized: "Run the audio encoder on the Neural Engine to free the GPU")
                     ) {
                         DesignToggle(isOn: $viewModel.useNeuralEngineAudioTower)
                             .disabled(isModelBusy)
                     }
                 }
             }
-            SettingsGroup(title: "Models Directory") {
+            SettingsGroup(title: String(localized: "Models Directory")) {
                 SettingsField(label: directoryDisplay(MLXModelManager.installedModelsDirectory)) {
                     HStack(spacing: 8) {
                         Button(action: viewModel.refreshModels) {
@@ -252,18 +252,18 @@ struct SettingsRedesignView: View {
         .buttonStyle(.plain)
         .disabled(!model.isSupported || isModelBusy)
         .opacity(model.isSupported ? 1 : 0.5)
-        .help(model.isSupported ? "Use \(model.name)" : "This model type is not supported")
+        .help(model.isSupported ? String(localized: "Use \(model.name)") : String(localized: "This model type is not supported"))
     }
 
     // MARK: - Transcription
 
     private var transcriptionTab: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "Language") {
-                SettingsField(label: "Transcription language") {
+            SettingsGroup(title: String(localized: "Language")) {
+                SettingsField(label: String(localized: "Transcription language")) {
                     Picker("", selection: $viewModel.selectedLanguage) {
                         ForEach(LanguageUtil.availableLanguages, id: \.self) { code in
-                            Text(LanguageUtil.languageNames[code] ?? code).tag(code)
+                            Text(LanguageUtil.displayName(for: code)).tag(code)
                         }
                     }
                     .labelsHidden()
@@ -271,27 +271,27 @@ struct SettingsRedesignView: View {
                     .fixedSize()
                 }
                 SettingsFieldDivider()
-                SettingsField(label: "Translate to English") {
+                SettingsField(label: String(localized: "Translate to English")) {
                     DesignToggle(isOn: $viewModel.translateToEnglish)
                 }
                 if Settings.asianLanguages.contains(viewModel.selectedLanguage) {
                     SettingsFieldDivider()
-                    SettingsField(label: "Asian autocorrect", detail: "Fix spacing & punctuation") {
+                    SettingsField(label: String(localized: "Asian autocorrect"), detail: String(localized: "Fix spacing & punctuation")) {
                         DesignToggle(isOn: $viewModel.useAsianAutocorrect)
                     }
                 }
             }
-            SettingsGroup(title: "Streaming") {
+            SettingsGroup(title: String(localized: "Streaming")) {
                 SettingsField(
-                    label: "Streaming transcription",
+                    label: String(localized: "Streaming transcription"),
                     detail: transcriptionService.activeModel?.supportsStreaming == false
                         ? "Not available with \(transcriptionService.activeModel?.name ?? "this model"); transcribes when recording stops"
-                        : "Transcribe in real-time while recording"
+                        : String(localized: "Transcribe in real-time while recording")
                 ) {
                     DesignToggle(isOn: $viewModel.useStreamingTranscription)
                 }
             }
-            SettingsGroup(title: "Transcriptions Directory") {
+            SettingsGroup(title: String(localized: "Transcriptions Directory")) {
                 SettingsField(label: directoryDisplay(Recording.recordingsDirectory)) {
                     OpenFolderButton { NSWorkspace.shared.open(Recording.recordingsDirectory) }
                 }
@@ -304,8 +304,8 @@ struct SettingsRedesignView: View {
     private var advancedTab: some View {
         VStack(spacing: 22) {
             PermissionsCard()
-            SettingsGroup(title: "Model Parameters") {
-                SettingsField(label: "Temperature") {
+            SettingsGroup(title: String(localized: "Model Parameters")) {
+                SettingsField(label: String(localized: "Temperature")) {
                     HStack(spacing: 12) {
                         Slider(value: $viewModel.temperature, in: 0...1, step: 0.1)
                             .frame(width: 160)
@@ -316,12 +316,12 @@ struct SettingsRedesignView: View {
                 }
             }
             if AppUpdater.isEnabled {
-                SettingsGroup(title: "Updates") {
-                    SettingsField(label: "Check for updates automatically", detail: "Once a day from GitHub") {
+                SettingsGroup(title: String(localized: "Updates")) {
+                    SettingsField(label: String(localized: "Check for updates automatically"), detail: String(localized: "Once a day from GitHub")) {
                         DesignToggle(isOn: $viewModel.automaticallyChecksForUpdates)
                     }
                     SettingsFieldDivider()
-                    SettingsField(label: "Check for updates") {
+                    SettingsField(label: String(localized: "Check for updates")) {
                         Button("Check now") {
                             AppUpdater.shared.controller.checkForUpdates(nil)
                         }
@@ -334,8 +334,8 @@ struct SettingsRedesignView: View {
                     }
                 }
             }
-            SettingsGroup(title: "Debug") {
-                SettingsField(label: "Debug mode", detail: "Extra logging") {
+            SettingsGroup(title: String(localized: "Debug")) {
+                SettingsField(label: String(localized: "Debug mode"), detail: String(localized: "Extra logging")) {
                     DesignToggle(isOn: $viewModel.debugMode)
                 }
             }
@@ -346,12 +346,12 @@ struct SettingsRedesignView: View {
 
     private var llmTab: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "LLM Correction") {
-                SettingsField(label: "Enable LLM cleanup", detail: "Use an LLM to clean up output") {
+            SettingsGroup(title: String(localized: "LLM Correction")) {
+                SettingsField(label: String(localized: "Enable LLM cleanup"), detail: String(localized: "Use an LLM to clean up output")) {
                     DesignToggle(isOn: $viewModel.llmCorrectionEnabled)
                 }
                 SettingsFieldDivider()
-                SettingsField(label: "Provider") {
+                SettingsField(label: String(localized: "Provider")) {
                     Picker("", selection: $viewModel.llmProvider) {
                         ForEach(LLMProviderType.allCases, id: \.rawValue) { type in
                             Text(type.displayName).tag(type.rawValue)
@@ -363,7 +363,7 @@ struct SettingsRedesignView: View {
                 }
                 if LLMProviderType(rawValue: viewModel.llmProvider) == .openai {
                     SettingsFieldDivider()
-                    SettingsField(label: "API Protocol") {
+                    SettingsField(label: String(localized: "API Protocol")) {
                         Picker("", selection: $viewModel.openAIAPIProtocol) {
                             ForEach(OpenAIAPIProtocol.allCases, id: \.rawValue) { apiProtocol in
                                 Text(apiProtocol.displayName).tag(apiProtocol.rawValue)
@@ -388,8 +388,8 @@ struct SettingsRedesignView: View {
 
     private var bedrockConfig: some View {
         VStack(spacing: 22) {
-            SettingsGroup(title: "Authentication") {
-                SettingsField(label: "Auth mode") {
+            SettingsGroup(title: String(localized: "Authentication")) {
+                SettingsField(label: String(localized: "Auth mode")) {
                     Picker("", selection: $viewModel.bedrockAuthMode) {
                         Text("AWS Profile").tag("profile")
                         Text("Access Key").tag("accessKey")
@@ -398,26 +398,26 @@ struct SettingsRedesignView: View {
                 }
                 if viewModel.bedrockAuthMode == "profile" {
                     SettingsFieldDivider()
-                    SettingsField(label: "Profile name") {
+                    SettingsField(label: String(localized: "Profile name")) {
                         DesignTextField(text: $viewModel.bedrockProfileName, prompt: "default")
                     }
                 } else {
                     SettingsFieldDivider()
-                    SettingsField(label: "Access key") {
+                    SettingsField(label: String(localized: "Access key")) {
                         DesignTextField(text: $viewModel.bedrockAccessKey, prompt: "AKIA…")
                     }
                     SettingsFieldDivider()
-                    SettingsField(label: "Secret key") {
+                    SettingsField(label: String(localized: "Secret key")) {
                         DesignSecureField(text: $viewModel.bedrockSecretKey, prompt: "Secret access key")
                     }
                 }
             }
-            SettingsGroup(title: "Configuration") {
-                SettingsField(label: "Region") {
+            SettingsGroup(title: String(localized: "Configuration")) {
+                SettingsField(label: String(localized: "Region")) {
                     DesignTextField(text: $viewModel.bedrockRegion, prompt: "us-east-1")
                 }
                 SettingsFieldDivider()
-                SettingsField(label: "Model ID") {
+                SettingsField(label: String(localized: "Model ID")) {
                     DesignTextField(text: $viewModel.bedrockModelId, prompt: "anthropic.claude-3-haiku…")
                 }
             }
@@ -425,8 +425,8 @@ struct SettingsRedesignView: View {
     }
 
     private var openAIConfig: some View {
-        SettingsGroup(title: "OpenAI Configuration") {
-            SettingsField(label: "Presets") {
+        SettingsGroup(title: String(localized: "OpenAI Configuration")) {
+            SettingsField(label: String(localized: "Presets")) {
                 HStack(spacing: 6) {
                     presetButton(
                         "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini",
@@ -443,24 +443,24 @@ struct SettingsRedesignView: View {
                 }
             }
             SettingsFieldDivider()
-            SettingsField(label: "API Endpoint") {
+            SettingsField(label: String(localized: "API Endpoint")) {
                 DesignTextField(text: $viewModel.openAIBaseURL, prompt: "https://api.openai.com/v1")
             }
             SettingsFieldDivider()
-            SettingsField(label: "API Key") {
+            SettingsField(label: String(localized: "API Key")) {
                 DesignSecureField(text: $viewModel.openAIAPIKey, prompt: "Optional for local")
             }
             SettingsFieldDivider()
-            SettingsField(label: "Model") {
+            SettingsField(label: String(localized: "Model")) {
                 DesignTextField(text: $viewModel.openAIModel, prompt: "gpt-4o-mini")
             }
             SettingsFieldDivider()
-            SettingsField(label: "Custom Headers") {
+            SettingsField(label: String(localized: "Custom Headers")) {
                 DesignTextField(text: $viewModel.openAICustomHeaders, prompt: "{\"key\":\"value\"}")
             }
             SettingsFieldDivider()
             SettingsField(
-                label: "Extra Body",
+                label: String(localized: "Extra Body"),
                 detail: isExtraBodyValid ? "JSON merged into every request" : "Not a valid JSON object; ignored"
             ) {
                 DesignTextField(text: $viewModel.openAIExtraBody, prompt: "{\"key\":\"value\"}")
@@ -528,13 +528,13 @@ struct SettingsRedesignView: View {
     }
 
     private var modelLimitsCard: some View {
-        SettingsGroup(title: "Model Limits") {
-            SettingsField(label: "Thinking", detail: "Skipped automatically if the model doesn't support it") {
+        SettingsGroup(title: String(localized: "Model Limits")) {
+            SettingsField(label: String(localized: "Thinking"), detail: String(localized: "Skipped automatically if the model doesn't support it")) {
                 DesignToggle(isOn: thinkingEnabled)
             }
             if thinkingEnabled.wrappedValue {
                 SettingsFieldDivider()
-                SettingsField(label: "Thinking effort") {
+                SettingsField(label: String(localized: "Thinking effort")) {
                     Picker("", selection: thinkingEffort) {
                         ForEach(LLMThinkingEffort.allCases, id: \.rawValue) { effort in
                             Text(effort.displayName).tag(effort.rawValue)
@@ -545,13 +545,13 @@ struct SettingsRedesignView: View {
             }
             SettingsFieldDivider()
             SettingsField(
-                label: "Context size",
+                label: String(localized: "Context size"),
                 detail: "Tokens. Only used to size requests; set local servers to the same value"
             ) {
                 DesignNumberField(value: contextTokens)
             }
             SettingsFieldDivider()
-            SettingsField(label: "Max output", detail: "Tokens per response, including thinking") {
+            SettingsField(label: String(localized: "Max output"), detail: String(localized: "Tokens per response, including thinking")) {
                 DesignNumberField(value: maxOutputTokens)
             }
             SettingsFieldDivider()
@@ -721,20 +721,20 @@ private struct PermissionsCard: View {
     @StateObject private var permissions = PermissionsManager()
 
     var body: some View {
-        SettingsGroup(title: "Permissions") {
+        SettingsGroup(title: String(localized: "Permissions")) {
             permRow(
-                "Microphone",
+                String(localized: "Microphone"),
                 granted: permissions.isMicrophonePermissionGranted,
                 action: { permissions.requestMicrophonePermissionOrOpenSystemPreferences() }
             )
             SettingsFieldDivider()
             permRow(
-                "Accessibility",
+                String(localized: "Accessibility"),
                 granted: permissions.isAccessibilityPermissionGranted,
                 action: { permissions.requestAccessibilityPermissionOrOpenSystemPreferences() }
             )
             SettingsFieldDivider()
-            permRow("Screen Recording", granted: permissions.isScreenRecordingPermissionGranted) {
+            permRow(String(localized: "Screen Recording"), granted: permissions.isScreenRecordingPermissionGranted) {
                 permissions.openSystemPreferences(for: .screenRecording)
             }
         }
@@ -749,7 +749,7 @@ private struct PermissionsCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: granted ? "checkmark" : "xmark")
                         .font(.system(size: 11, weight: .semibold))
-                    Text(granted ? "Granted" : "Not Granted")
+                    Text(granted ? String(localized: "Granted") : String(localized: "Not Granted"))
                         .font(.system(size: 12.5, weight: .semibold))
                 }
                 .foregroundStyle(granted ? DesignTokens.green : DesignTokens.red)

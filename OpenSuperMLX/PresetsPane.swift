@@ -61,7 +61,7 @@ struct PresetsView: View {
             AppPreferences.shared.presetsAlwaysReplace = newValue
         }
         .confirmationDialog(
-            "Delete preset?",
+            String(localized: "Delete preset?"),
             isPresented: Binding(
                 get: { pendingDeletion != nil },
                 set: { if !$0 { pendingDeletion = nil } }
@@ -69,7 +69,7 @@ struct PresetsView: View {
             titleVisibility: .visible,
             presenting: pendingDeletion
         ) { preset in
-            Button("Delete “\(preset.name)”", role: .destructive) {
+            Button(String(localized: "Delete “\(preset.name)”"), role: .destructive) {
                 store.delete(id: preset.id)
                 if editingID == preset.id {
                     endEditing()
@@ -87,7 +87,7 @@ struct PresetsView: View {
     // MARK: - Presets
 
     private var presetsGroup: some View {
-        SettingsGroup(title: "Your Presets") {
+        SettingsGroup(title: String(localized: "Your Presets")) {
             if store.presets.isEmpty {
                 Text("No presets yet. Add one below.")
                     .font(.system(size: 12.5))
@@ -102,7 +102,7 @@ struct PresetsView: View {
                 }
             }
 
-            SettingsField(label: "New preset", detail: "Name it, write the instruction, then assign a shortcut") {
+            SettingsField(label: String(localized: "New preset"), detail: String(localized: "Name it, write the instruction, then assign a shortcut")) {
                 addButton
             }
         }
@@ -130,10 +130,10 @@ struct PresetsView: View {
                 }
                 .frame(width: 150)
 
-            iconButton("pencil", help: "Edit preset") {
+            iconButton("pencil", help: String(localized: "Edit preset")) {
                 beginEditing(preset)
             }
-            iconButton("trash", help: "Delete preset") {
+            iconButton("trash", help: String(localized: "Delete preset")) {
                 pendingDeletion = preset
             }
         }
@@ -172,7 +172,7 @@ struct PresetsView: View {
     // MARK: - Editor
 
     private var editorGroup: some View {
-        SettingsGroup(title: editingID == nil ? "New Preset" : "Edit Preset") {
+        SettingsGroup(title: editingID == nil ? String(localized: "New Preset") : String(localized: "Edit Preset")) {
             VStack(alignment: .leading, spacing: 10) {
                 TextField("", text: $draftName, prompt: Text("Preset name"))
                     .textFieldStyle(.plain)
@@ -199,10 +199,10 @@ struct PresetsView: View {
 
                 HStack(spacing: 8) {
                     Spacer()
-                    secondaryButton("Cancel") {
+                    secondaryButton(String(localized: "Cancel")) {
                         endEditing()
                     }
-                    primaryButton(editingID == nil ? "Add Preset" : "Save") {
+                    primaryButton(editingID == nil ? String(localized: "Add Preset") : String(localized: "Save")) {
                         saveDraft()
                     }
                 }
@@ -237,10 +237,10 @@ struct PresetsView: View {
     }
 
     private var replacementGroup: some View {
-        SettingsGroup(title: "Replacing Text") {
+        SettingsGroup(title: String(localized: "Replacing Text")) {
             SettingsField(
-                label: "Always replace automatically",
-                detail: "Some apps don't let OpenSuperMLX check that your text is still selected. Turn this off to get the rewrite on the clipboard in those apps and paste it yourself."
+                label: String(localized: "Always replace automatically"),
+                detail: String(localized: "Some apps don't let OpenSuperMLX check that your text is still selected. Turn this off to get the rewrite on the clipboard in those apps and paste it yourself.")
             ) {
                 DesignToggle(isOn: $alwaysReplace)
             }
@@ -248,7 +248,7 @@ struct PresetsView: View {
     }
 
     private var usageGroup: some View {
-        SettingsGroup(title: "How It Works") {
+        SettingsGroup(title: String(localized: "How It Works")) {
             VStack(alignment: .leading, spacing: 7) {
                 Text("Select text in any app, then press a preset's shortcut. The model rewrites the selection in place.")
                 Text("Presets use the provider and model configured in the LLM tab. Accessibility access is required to read and replace the selection.")
@@ -307,10 +307,10 @@ struct PresetsView: View {
         if let other = store.presets.first(where: {
             $0.id != preset.id && $0.shortcutName.shortcut == shortcut
         }) {
-            return .disallow(reason: "Already used by “\(other.name)”.")
+            return .disallow(reason: String(localized: "Already used by “\(other.name)”."))
         }
         if let owner = ShortcutManager.builtInShortcutOwner(of: shortcut, excluding: nil) {
-            return .disallow(reason: "Already used by \(owner).")
+            return .disallow(reason: String(localized: "Already used by \(owner)."))
         }
         return .allow
     }

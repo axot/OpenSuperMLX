@@ -248,11 +248,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         menu.addItem(NSMenuItem(title: "OpenSuperMLX", action: #selector(openApp), keyEquivalent: "o"))
         
-        let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
+        let transcriptionLanguageItem = NSMenuItem(title: String(localized: "Language"), action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()
         
         for languageCode in LanguageUtil.availableLanguages {
-            let languageName = LanguageUtil.languageNames[languageCode] ?? languageCode
+            let languageName = LanguageUtil.displayName(for: languageCode)
             let languageItem = NSMenuItem(title: languageName, action: #selector(selectLanguage(_:)), keyEquivalent: "")
             languageItem.target = self
             languageItem.representedObject = languageCode
@@ -272,14 +272,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         menu.addItem(NSMenuItem.separator())
         
-        let microphoneMenu = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        let microphoneMenu = NSMenuItem(title: String(localized: "Microphone"), action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         
         let microphones = microphoneService.availableMicrophones
         let currentMic = microphoneService.currentMicrophone
         
         if microphones.isEmpty {
-            let noDeviceItem = NSMenuItem(title: "No microphones available", action: nil, keyEquivalent: "")
+            let noDeviceItem = NSMenuItem(title: String(localized: "No microphones available"), action: nil, keyEquivalent: "")
             noDeviceItem.isEnabled = false
             submenu.addItem(noDeviceItem)
         } else {
@@ -329,14 +329,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         menu.addItem(NSMenuItem.separator())
         if AppUpdater.isEnabled {
             let updateItem = NSMenuItem(
-                title: "Check for Updates…",
+                title: String(localized: "Check for Updates…"),
                 action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
                 keyEquivalent: ""
             )
             updateItem.target = AppUpdater.shared.controller
             menu.addItem(updateItem)
         }
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: String(localized: "Quit"), action: #selector(quitApp), keyEquivalent: "q"))
         
         statusItem?.menu = menu
     }

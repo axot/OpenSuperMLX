@@ -103,7 +103,7 @@ struct RecordingDock<Tools: View>: View {
             }
             .buttonStyle(.plain)
             .disabled(!canShowDetails)
-            .help(detailsOpen ? "Close recording details" : "Show complete transcript")
+            .help(detailsOpen ? String(localized: "Close recording details") : String(localized: "Show complete transcript"))
             tools()
         }
         .padding(.vertical, 6)
@@ -155,7 +155,7 @@ struct RecordingDock<Tools: View>: View {
         .buttonStyle(.plain)
         .disabled(isBusy)
         .onHover { hovering = $0 }
-        .help(isRecording ? "Stop & paste" : "Start recording")
+        .help(isRecording ? String(localized: "Stop & paste") : String(localized: "Start recording"))
     }
 
     // MARK: Middle (idle hints ↔ recording meta), fixed-height frame
@@ -176,7 +176,7 @@ struct RecordingDock<Tools: View>: View {
                         .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(DesignTokens.txt3)
                 }
-                TypewriterText(target: text, placeholder: "Listening…")
+                TypewriterText(target: text, placeholder: String(localized: "Listening…"))
                     .font(.system(size: 13))
                     .lineLimit(1)
                     .truncationMode(.head)
