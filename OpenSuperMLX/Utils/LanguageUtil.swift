@@ -28,4 +28,9 @@ class LanguageUtil {
         "hi": "Hindi",
         "fi": "Finnish",
     ]
+
+    static func displayName(for code: String) -> String {
+        guard let name = languageNames[code] else { return code }
+        return Bundle.main.localizedString(forKey: name, value: name, table: nil)
+    }
 }

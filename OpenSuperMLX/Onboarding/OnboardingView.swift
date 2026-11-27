@@ -152,7 +152,7 @@ struct OnboardingView: View {
                     
                     Picker("Language", selection: $viewModel.selectedLanguage) {
                         ForEach(LanguageUtil.availableLanguages, id: \.self) { code in
-                            Text(LanguageUtil.languageNames[code] ?? code)
+                            Text(LanguageUtil.displayName(for: code))
                                 .tag(code)
                         }
                     }

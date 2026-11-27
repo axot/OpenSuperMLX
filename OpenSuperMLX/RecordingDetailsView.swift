@@ -35,12 +35,12 @@ struct RecordingDetailDocument {
 
     static func live(sessionID: UUID, confirmed: String, provisional: String, deviceName: String,
                      duration: TimeInterval, isProcessing: Bool) -> Self {
-        Self(id: .live(sessionID), title: "Current recording", subtitle: deviceName,
+        Self(id: .live(sessionID), title: String(localized: "Current recording"), subtitle: deviceName,
              duration: duration, text: confirmed + provisional, phase: isProcessing ? .processing : .live)
     }
 
     @MainActor static func saved(_ recording: Recording) -> Self {
-        Self(id: .recording(recording.id), title: recording.sourceFileName ?? "Recording details",
+        Self(id: .recording(recording.id), title: recording.sourceFileName ?? String(localized: "Recording details"),
              subtitle: RecordingRow.relativeDate(recording.timestamp), duration: recording.duration,
              text: recording.transcription, phase: .completed)
     }
@@ -72,7 +72,7 @@ struct RecordingDetailsView: View {
             )
             .overlay(alignment: .topLeading) {
                 if document.text.isEmpty {
-                    Text(document.isLive ? "Listening…" : "No speech detected")
+                    Text(document.isLive ? String(localized: "Listening…") : String(localized: "No speech detected"))
                         .font(.system(size: 13))
                         .foregroundStyle(DesignTokens.txt3)
                         .padding(.horizontal, 22)
@@ -122,7 +122,7 @@ struct RecordingDetailsView: View {
                 Text("· \(StatsFormat.clock(document.duration))")
                     .fixedSize()
                 Spacer(minLength: 0)
-                Text("\(document.characterCount.formatted()) characters")
+                Text(String(localized: "\(document.characterCount.formatted()) characters"))
                     .fixedSize()
             }
             .font(.system(size: 11))
@@ -148,13 +148,13 @@ struct RecordingDetailsView: View {
             )
             .frame(maxWidth: .infinity)
             if !query.text.isEmpty {
-                Text(search.ranges.isEmpty ? "No matches" : "\(search.selectedIndex + 1)/\(search.ranges.count)")
+                Text(search.ranges.isEmpty ? String(localized: "No matches") : "\(search.selectedIndex + 1)/\(search.ranges.count)")
                     .font(.system(size: 10.5).monospacedDigit())
                     .foregroundStyle(DesignTokens.txt2)
                     .fixedSize()
             }
-            findButton("chevron.up", help: "Previous match") { moveMatch(-1) }
-            findButton("chevron.down", help: "Next match") { moveMatch(1) }
+            findButton("chevron.up", help: String(localized: "Previous match")) { moveMatch(-1) }
+            findButton("chevron.down", help: String(localized: "Next match")) { moveMatch(1) }
             if !query.text.isEmpty {
                 Button {
                     query = .init(text: "")
@@ -192,7 +192,7 @@ struct RecordingDetailsView: View {
                     query = .init(text: "")
                     followsLive.toggle()
                 } label: {
-                    Label(followsLive ? "Following live" : "Follow live", systemImage: "arrow.down")
+                    Label(followsLive ? String(localized: "Following live") : String(localized: "Follow live"), systemImage: "arrow.down")
                 }
                 .help("Follow the latest transcription")
             } else if canReturnToLive {
@@ -214,9 +214,9 @@ struct RecordingDetailsView: View {
 
     private var statusLabel: String {
         switch document.phase {
-        case .live: return "Live"
-        case .processing: return "Finishing"
-        case .completed: return "Completed"
+        case .live: return String(localized: "Live")
+        case .processing: return String(localized: "Finishing")
+        case .completed: return String(localized: "Completed")
         }
     }
 
@@ -268,7 +268,7 @@ struct TranscriptSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
-        field.placeholderString = "Search in transcript…"
+        field.placeholderString = String(localized: "Search in transcript…")
         field.font = .systemFont(ofSize: 12)
         field.textColor = NSColor(DesignTokens.txt)
         field.isBezeled = false

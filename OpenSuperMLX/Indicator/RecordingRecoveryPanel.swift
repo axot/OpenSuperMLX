@@ -39,7 +39,7 @@ final class RecordingRecoveryPanelController {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Recording Not Saved"
+        panel.title = String(localized: "Recording Not Saved")
         panel.level = .floating
         panel.isMovableByWindowBackground = true
         panel.isReleasedWhenClosed = false
@@ -71,9 +71,9 @@ private struct RecordingRecoveryView: View {
                     Spacer()
                     Button("Copy Transcript") {
                         if coordinator.copyTranscript() {
-                            ErrorToastManager.shared.show("Transcript copied.")
+                            ErrorToastManager.shared.show(String(localized: "Transcript copied."))
                         } else {
-                            ErrorToastManager.shared.show("Transcript could not be copied.")
+                            ErrorToastManager.shared.show(String(localized: "Transcript could not be copied."))
                         }
                     }
                     Button("Retry") {
@@ -108,25 +108,25 @@ private struct RecordingRecoveryView: View {
     private var progressMessage: String {
         switch coordinator.state {
         case .saving:
-            return "Preparing the recording…"
+            return String(localized: "Preparing the recording…")
         case .retrying:
-            return "Trying to save the recording…"
+            return String(localized: "Trying to save the recording…")
         case .cancelling:
-            return "Discarding the recording…"
+            return String(localized: "Discarding the recording…")
         case .idle, .awaitingUser:
-            return "Preparing the recording…"
+            return String(localized: "Preparing the recording…")
         }
     }
 
     private var message: String {
         guard case .awaitingUser(_, let error) = coordinator.state else {
-            return "OpenSuperMLX is preparing your recording."
+            return String(localized: "OpenSuperMLX is preparing your recording.")
         }
         switch error.category {
         case .outOfSpace:
-            return "There is not enough disk space to save the audio. Free some space, then choose Retry."
+            return String(localized: "There is not enough disk space to save the audio. Free some space, then choose Retry.")
         case .saveFailed:
-            return "The audio could not be saved. Fix the storage problem, then choose Retry."
+            return String(localized: "The audio could not be saved. Fix the storage problem, then choose Retry.")
         }
     }
 }

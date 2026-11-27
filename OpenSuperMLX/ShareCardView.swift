@@ -103,8 +103,8 @@ struct ShareCardSheet: View {
             ShareCardView(bubbles: bubbles, isExporting: false)
 
             HStack(spacing: 10) {
-                ShareSheetButton(title: "Close", systemImage: nil, style: .ghost) { dismiss() }
-                ShareSheetButton(title: "Copy image", systemImage: "doc.on.doc", style: .solid) {
+                ShareSheetButton(title: String(localized: "Close"), systemImage: nil, style: .ghost) { dismiss() }
+                ShareSheetButton(title: String(localized: "Copy image"), systemImage: "doc.on.doc", style: .solid) {
                     exportToClipboard()
                 }
             }
@@ -121,13 +121,13 @@ struct ShareCardSheet: View {
         let renderer = ImageRenderer(content: card)
         renderer.scale = 2.0
         guard let nsImage = renderer.nsImage else {
-            ErrorToastManager.shared.show("Export failed")
+            ErrorToastManager.shared.show(String(localized: "Export failed"))
             return
         }
         if ClipboardUtil.copyImage(nsImage) {
-            ErrorToastManager.shared.show("Copied!")
+            ErrorToastManager.shared.show(String(localized: "Copied!"))
         } else {
-            ErrorToastManager.shared.show("Export failed")
+            ErrorToastManager.shared.show(String(localized: "Export failed"))
         }
     }
 }

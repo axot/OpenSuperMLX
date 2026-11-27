@@ -796,7 +796,7 @@ struct RecordingsPane: View {
                 sessionID: detailsState.liveSessionID,
                 confirmed: viewModel.liveTranscriptSnapshot.confirmed,
                 provisional: viewModel.liveTranscriptSnapshot.provisional,
-                deviceName: viewModel.microphoneService.currentMicrophone?.displayName ?? "Microphone",
+                deviceName: viewModel.microphoneService.currentMicrophone?.displayName ?? String(localized: "Microphone"),
                 duration: liveDuration,
                 isProcessing: viewModel.isProcessing
             )
@@ -959,7 +959,7 @@ struct RecordingsPane: View {
             HStack(spacing: 8) {
                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
                 if viewModel.totalCount > 0 {
-                    DockToolButton(systemName: "trash", help: "Delete all recordings", action: onDeleteAll)
+                    DockToolButton(systemName: "trash", help: String(localized: "Delete all recordings"), action: onDeleteAll)
                 }
             }
         }
@@ -1032,8 +1032,8 @@ struct PermissionsView: View {
 
             PermissionRow(
                 isGranted: permissionsManager.isMicrophonePermissionGranted,
-                title: "Microphone Access",
-                description: "Required for audio recording",
+                title: String(localized: "Microphone Access"),
+                description: String(localized: "Required for audio recording"),
                 action: {
                     permissionsManager.requestMicrophonePermissionOrOpenSystemPreferences()
                 }
@@ -1041,8 +1041,8 @@ struct PermissionsView: View {
 
             PermissionRow(
                 isGranted: permissionsManager.isAccessibilityPermissionGranted,
-                title: "Accessibility Access",
-                description: "Required for global keyboard shortcuts",
+                title: String(localized: "Accessibility Access"),
+                description: String(localized: "Required for global keyboard shortcuts"),
                 action: { permissionsManager.requestAccessibilityPermissionOrOpenSystemPreferences() }
             )
 
@@ -1126,11 +1126,11 @@ struct RecordingRow: View {
 
     private var statusText: String {
         switch recording.status {
-        case .pending: return "In queue…"
-        case .converting: return "Converting…"
-        case .transcribing: return "Transcribing…"
+        case .pending: return String(localized: "In queue…")
+        case .converting: return String(localized: "Converting…")
+        case .transcribing: return String(localized: "Transcribing…")
         case .completed: return ""
-        case .failed: return "Failed"
+        case .failed: return String(localized: "Failed")
         }
     }
 
@@ -1160,7 +1160,7 @@ struct RecordingRow: View {
         .overlay {
             if recording.status == .completed {
                 RecordingRowClickView(
-                    label: displayText.isEmpty ? "No speech detected" : displayText,
+                    label: displayText.isEmpty ? String(localized: "No speech detected") : displayText,
                     onSelect: onSelect
                 )
             }
@@ -1328,7 +1328,7 @@ struct RecordingRow: View {
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
-            .help(isPlaying ? "Stop" : "Play")
+            .help(isPlaying ? String(localized: "Stop") : String(localized: "Play"))
             .opacity(playButtonVisible ? 1 : 0)
             .allowsHitTesting(playButtonVisible)
             .animation(.easeInOut(duration: 0.12), value: playButtonVisible)
@@ -1361,7 +1361,7 @@ struct RecordingRow: View {
                 if isPlaying { audioRecorder.stopPlaying() }
                 else { audioRecorder.playRecording(url: recording.url) }
             } label: {
-                Label(isPlaying ? "Stop" : "Play", systemImage: isPlaying ? "stop.fill" : "play.fill")
+                Label(isPlaying ? String(localized: "Stop") : String(localized: "Play"), systemImage: isPlaying ? "stop.fill" : "play.fill")
             }
             Button(action: copyTranscription) {
                 Label("Copy text", systemImage: "doc.on.doc")
@@ -1423,10 +1423,10 @@ struct RecordingRow: View {
 
     static func relativeDate(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         if calendar.isDateInToday(date) {
-            return "Today \(timeFormatter.string(from: date))"
+            return String(localized: "Today \(timeFormatter.string(from: date))")
         }
         if calendar.isDateInYesterday(date) {
-            return "Yesterday \(timeFormatter.string(from: date))"
+            return String(localized: "Yesterday \(timeFormatter.string(from: date))")
         }
         return dateTimeFormatter.string(from: date)
     }
@@ -1491,9 +1491,9 @@ struct MicrophonePickerIconView: View {
 
     private var speakerToggleTitle: String {
         if currentOutputClassification == .speaker {
-            return "Audio Output (unavailable on speaker)"
+            return String(localized: "Audio Output (unavailable on speaker)")
         }
-        return "Audio Output"
+        return String(localized: "Audio Output")
     }
 
     private var recentDevices: [(uid: String, entry: ClassificationEntry)] {
@@ -1523,7 +1523,7 @@ struct MicrophonePickerIconView: View {
                 )
         }
         .buttonStyle(.plain)
-        .help(microphoneService.currentMicrophone?.displayName ?? "Select microphone")
+        .help(microphoneService.currentMicrophone?.displayName ?? String(localized: "Select microphone"))
         .popover(isPresented: $showMenu, arrowEdge: .top) {
             popoverContent
                 .frame(width: 286)
@@ -1541,7 +1541,7 @@ struct MicrophonePickerIconView: View {
 
     private var popoverContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            popoverSectionLabel("Microphone")
+            popoverSectionLabel(String(localized: "Microphone"))
             if microphoneService.availableMicrophones.isEmpty {
                 Text("No microphones available")
                     .font(.system(size: 13))
@@ -1580,7 +1580,7 @@ struct MicrophonePickerIconView: View {
 
             if !recentDevices.isEmpty {
                 popoverDivider
-                popoverSectionLabel("Audio Output")
+                popoverSectionLabel(String(localized: "Audio Output"))
                 ForEach(recentDevices, id: \.uid) { item in
                     let displayName = item.entry.displayName.isEmpty
                         ? fallbackDisplayName(forUID: item.uid) : item.entry.displayName
@@ -1608,7 +1608,7 @@ struct MicrophonePickerIconView: View {
                             }
                             classificationsTick &+= 1
                         }) {
-                            Text(item.entry.classification == .headphone ? "Headphone" : "Speaker")
+                            Text(item.entry.classification == .headphone ? String(localized: "Headphone") : String(localized: "Speaker"))
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundStyle(DesignTokens.txt2)
                                 .padding(.horizontal, 8).padding(.vertical, 2)
@@ -1651,7 +1651,7 @@ struct MicrophonePickerIconView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PopoverRowButtonStyle())
-            .help(currentOutputClassification == .speaker ? "Unavailable on speaker output" : "Capture system audio output")
+            .help(currentOutputClassification == .speaker ? String(localized: "Unavailable on speaker output") : String(localized: "Capture system audio output"))
         }
         .padding(6)
     }
